@@ -19,8 +19,6 @@ export const createSupabaseServerClient = async () => {
         setAll: (cookiesToSet: Parameters<SetAllCookies>[0]) => {
           try {
             for (const { name, value, options } of cookiesToSet) {
-              // Supabase CookieOptions vs Next.js ResponseCookie types differ; cast is required
-              // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
               cookieStore.set(name, value, options);
             }
           } catch {
