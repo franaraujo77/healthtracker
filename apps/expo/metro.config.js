@@ -2,9 +2,11 @@
 const path = require("node:path");
 const { getDefaultConfig } = require("expo/metro-config");
 const { FileStore } = require("metro-cache");
-const { withNativewind } = require("nativewind/metro");
 
 const config = getDefaultConfig(__dirname);
+
+// Required for Tamagui package exports resolution (AR2)
+config.resolver.unstable_enablePackageExports = true;
 
 config.cacheStores = [
   new FileStore({
@@ -13,4 +15,4 @@ config.cacheStores = [
 ];
 
 /** @type {import('expo/metro-config').MetroConfig} */
-module.exports = withNativewind(config);
+module.exports = config;

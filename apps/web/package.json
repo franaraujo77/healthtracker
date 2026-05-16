@@ -21,6 +21,8 @@
     "@supabase/ssr": "catalog:",
     "@supabase/supabase-js": "catalog:",
     "@t3-oss/env-nextjs": "^0.13.8",
+    "@tamagui/core": "catalog:",
+    "@tamagui/next-plugin": "catalog:",
     "@tanstack/react-form": "catalog:",
     "@tanstack/react-query": "catalog:",
     "@trpc/client": "catalog:",
@@ -30,6 +32,7 @@
     "react": "catalog:react19",
     "react-dom": "catalog:react19",
     "superjson": "2.2.3",
+    "tamagui": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
