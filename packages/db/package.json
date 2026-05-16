@@ -30,7 +30,7 @@
   },
   "dependencies": {
     "@vercel/postgres": "^0.10.0",
-    "drizzle-orm": "^0.44.7",
+    "drizzle-orm": "^0.45.2",
     "drizzle-zod": "^0.8.3",
     "zod": "catalog:"
   },
@@ -38,7 +38,7 @@
     "@healthtracker/eslint-config": "workspace:*",
     "@healthtracker/prettier-config": "workspace:*",
     "@healthtracker/tsconfig": "workspace:*",
-    "drizzle-kit": "^0.31.5",
+    "drizzle-kit": "^0.31.10",
     "eslint": "catalog:",
     "prettier": "catalog:",
     "typescript": "catalog:"
