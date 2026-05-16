@@ -1,27 +1,27 @@
-"use client";
+// Toast functionality will be implemented in a later story using @tamagui/toast.
+// Exported as a no-op stub to satisfy existing import contracts.
 
-import type { ToasterProps } from "sonner";
-import { Toaster as Sonner, toast } from "sonner";
+export function Toast({ children }: { children?: React.ReactNode }) {
+  return <>{children}</>;
+}
 
-import { useTheme } from "./theme";
+export function ToastProvider({ children }: { children?: React.ReactNode }) {
+  return <>{children}</>;
+}
 
-export const Toaster = ({ ...props }: ToasterProps) => {
-  const { themeMode } = useTheme();
+export function ToastViewport() {
+  return null;
+}
 
-  return (
-    <Sonner
-      theme={themeMode === "auto" ? "system" : themeMode}
-      className="toaster group"
-      style={
-        {
-          "--normal-bg": "var(--popover)",
-          "--normal-text": "var(--popover-foreground)",
-          "--normal-border": "var(--border)",
-        } as React.CSSProperties
-      }
-      {...props}
-    />
-  );
-};
+const noop = () => undefined;
 
-export { toast };
+export function useToastController() {
+  return {
+    show: (_title: string, _options?: Record<string, unknown>) => noop(),
+    hide: () => noop(),
+  };
+}
+
+export function useToastState() {
+  return null;
+}

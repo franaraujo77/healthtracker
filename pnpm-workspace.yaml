@@ -7,6 +7,13 @@ catalog:
   "@supabase/supabase-js": ^2.49.8
   "@supabase/ssr": ^0.6.1
   "@eslint/js": ^9.38.0
+  "@tamagui/animations-css": ^1.144.4
+  "@tamagui/animations-react-native": ^1.144.4
+  "@tamagui/babel-plugin": ^1.144.4
+  "@tamagui/core": ^1.144.4
+  "@tamagui/next-plugin": ^1.144.4
+  "@tamagui/web": ^1.144.4
+  tamagui: ^1.144.4
   "@tailwindcss/postcss": ^4.1.16
   "@tailwindcss/vite": ^4.1.16
   "@tanstack/react-form": ^1.23.8
@@ -35,6 +42,7 @@ linkWorkspacePackages: true
 onlyBuiltDependencies:
   - "@tailwindcss/oxide"
   - esbuild
+  - tamagui
 
 overrides:
   "@types/minimatch": 5.1.2

@@ -1,5 +1,6 @@
 import "server-only";
 
+import type { SetAllCookies } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 
@@ -15,11 +16,9 @@ export const createSupabaseServerClient = async () => {
     {
       cookies: {
         getAll: () => cookieStore.getAll(),
-        setAll: (cookiesToSet) => {
+        setAll: (cookiesToSet: Parameters<SetAllCookies>[0]) => {
           try {
             for (const { name, value, options } of cookiesToSet) {
-              // Supabase CookieOptions vs Next.js ResponseCookie types differ; cast is required
-              // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
               cookieStore.set(name, value, options);
             }
           } catch {

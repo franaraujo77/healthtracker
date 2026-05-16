@@ -1,25 +1,9 @@
 "use client";
 
-import { Separator as SeparatorPrimitive } from "radix-ui";
+import { styled, Separator as TamaguiSeparator } from "tamagui";
 
-import { cn } from "@healthtracker/ui";
-
-export function Separator({
-  className,
-  orientation = "horizontal",
-  decorative = true,
-  ...props
-}: React.ComponentProps<typeof SeparatorPrimitive.Root>) {
-  return (
-    <SeparatorPrimitive.Root
-      data-slot="separator"
-      decorative={decorative}
-      orientation={orientation}
-      className={cn(
-        "bg-border shrink-0 data-[orientation=horizontal]:h-px data-[orientation=horizontal]:w-full data-[orientation=vertical]:h-full data-[orientation=vertical]:w-px",
-        className,
-      )}
-      {...props}
-    />
-  );
-}
+export const Separator = styled(TamaguiSeparator, {
+  name: "Separator",
+  borderColor: "$border",
+  borderWidth: 0.5,
+});

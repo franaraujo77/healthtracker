@@ -3,8 +3,8 @@ import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 
 import { appRouter, createTRPCContext } from "@healthtracker/api";
 
-import { env } from "~/env";
 import { getSession } from "~/auth/server";
+import { env } from "~/env";
 
 const corsOrigin = env.CORS_ORIGIN;
 

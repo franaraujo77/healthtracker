@@ -9,4 +9,19 @@ export default defineConfig(
   },
   baseConfig,
   reactConfig,
+  {
+    files: ["src/**/*.tsx", "src/**/*.ts"],
+    ignores: ["src/theme/**"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "Literal[value=/^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/]",
+          message:
+            "Use a Tamagui semantic token (e.g. '$color.primaryTeal') instead of a hardcoded hex value.",
+        },
+      ],
+    },
+  },
 );

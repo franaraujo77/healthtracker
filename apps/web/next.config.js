@@ -18,6 +18,11 @@ const config = {
 
   /** We already do linting and typechecking as separate tasks in CI */
   typescript: { ignoreBuildErrors: true },
+
+  /** Tamagui target environment variable for tree-shaking web-only code paths */
+  env: {
+    TAMAGUI_TARGET: "web",
+  },
 };
 
 export default config;

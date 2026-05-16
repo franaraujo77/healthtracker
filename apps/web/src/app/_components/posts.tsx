@@ -9,17 +9,9 @@ import {
 
 import type { RouterOutputs } from "@healthtracker/api";
 import { CreatePostSchema } from "@healthtracker/db/schema";
-import { cn } from "@healthtracker/ui";
 import { Button } from "@healthtracker/ui/button";
-import {
-  Field,
-  FieldContent,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
-} from "@healthtracker/ui/field";
 import { Input } from "@healthtracker/ui/input";
-import { toast } from "@healthtracker/ui/toast";
+import { Label } from "@healthtracker/ui/label";
 
 import { useTRPC } from "~/trpc/react";
 
@@ -32,13 +24,6 @@ export function CreatePostForm() {
       onSuccess: async () => {
         form.reset();
         await queryClient.invalidateQueries(trpc.post.pathFilter());
-      },
-      onError: (err) => {
-        toast.error(
-          err.data?.code === "UNAUTHORIZED"
-            ? "You must be logged in to post"
-            : "Failed to create post",
-        );
       },
     }),
   );
@@ -56,63 +41,49 @@ export function CreatePostForm() {
 
   return (
     <form
-      className="w-full max-w-2xl"
+      className="w-full max-w-2xl space-y-4"
       onSubmit={(event) => {
         event.preventDefault();
         void form.handleSubmit();
       }}
     >
-      <FieldGroup>
-        <form.Field
-          name="title"
-          children={(field) => {
-            const isInvalid =
-              field.state.meta.isTouched && !field.state.meta.isValid;
-            return (
-              <Field data-invalid={isInvalid}>
-                <FieldContent>
-                  <FieldLabel htmlFor={field.name}>Bug Title</FieldLabel>
-                </FieldContent>
-                <Input
-                  id={field.name}
-                  name={field.name}
-                  value={field.state.value}
-                  onBlur={field.handleBlur}
-                  onChange={(e) => field.handleChange(e.target.value)}
-                  aria-invalid={isInvalid}
-                  placeholder="Title"
-                />
-                {isInvalid && <FieldError errors={field.state.meta.errors} />}
-              </Field>
-            );
-          }}
-        />
-        <form.Field
-          name="content"
-          children={(field) => {
-            const isInvalid =
-              field.state.meta.isTouched && !field.state.meta.isValid;
-            return (
-              <Field data-invalid={isInvalid}>
-                <FieldContent>
-                  <FieldLabel htmlFor={field.name}>Content</FieldLabel>
-                </FieldContent>
-                <Input
-                  id={field.name}
-                  name={field.name}
-                  value={field.state.value}
-                  onBlur={field.handleBlur}
-                  onChange={(e) => field.handleChange(e.target.value)}
-                  aria-invalid={isInvalid}
-                  placeholder="Content"
-                />
-                {isInvalid && <FieldError errors={field.state.meta.errors} />}
-              </Field>
-            );
-          }}
-        />
-      </FieldGroup>
-      <Button type="submit">Create</Button>
+      <form.Field
+        name="title"
+        children={(field) => (
+          <div className="flex flex-col gap-1">
+            <Label htmlFor={field.name}>Title</Label>
+            <Input
+              id={field.name}
+              value={field.state.value}
+              onBlur={field.handleBlur}
+              onChangeText={(v) => field.handleChange(v)}
+              placeholder="Title"
+            />
+          </div>
+        )}
+      />
+      <form.Field
+        name="content"
+        children={(field) => (
+          <div className="flex flex-col gap-1">
+            <Label htmlFor={field.name}>Content</Label>
+            <Input
+              id={field.name}
+              value={field.state.value}
+              onBlur={field.handleBlur}
+              onChangeText={(v) => field.handleChange(v)}
+              placeholder="Content"
+            />
+          </div>
+        )}
+      />
+      <Button
+        onPress={() => {
+          void form.handleSubmit();
+        }}
+      >
+        Create Post
+      </Button>
     </form>
   );
 }
@@ -127,7 +98,6 @@ export function PostList() {
         <PostCardSkeleton pulse={false} />
         <PostCardSkeleton pulse={false} />
         <PostCardSkeleton pulse={false} />
-
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/10">
           <p className="text-2xl font-bold text-white">No posts yet</p>
         </div>
@@ -137,9 +107,9 @@ export function PostList() {
 
   return (
     <div className="flex w-full flex-col gap-4">
-      {posts.map((p) => {
-        return <PostCard key={p.id} post={p} />;
-      })}
+      {posts.map((p) => (
+        <PostCard key={p.id} post={p} />
+      ))}
     </div>
   );
 }
@@ -154,27 +124,19 @@ export function PostCard(props: {
       onSuccess: async () => {
         await queryClient.invalidateQueries(trpc.post.pathFilter());
       },
-      onError: (err) => {
-        toast.error(
-          err.data?.code === "UNAUTHORIZED"
-            ? "You must be logged in to delete a post"
-            : "Failed to delete post",
-        );
-      },
     }),
   );
 
   return (
-    <div className="bg-muted flex flex-row rounded-lg p-4">
+    <div className="flex flex-row rounded-lg bg-stone-100 p-4">
       <div className="grow">
-        <h2 className="text-primary text-2xl font-bold">{props.post.title}</h2>
+        <h2 className="text-2xl font-bold text-teal-700">{props.post.title}</h2>
         <p className="mt-2 text-sm">{props.post.content}</p>
       </div>
       <div>
         <Button
           variant="ghost"
-          className="text-primary cursor-pointer text-sm font-bold uppercase hover:bg-transparent hover:text-white"
-          onClick={() => deletePost.mutate(props.post.id)}
+          onPress={() => deletePost.mutate(props.post.id)}
         >
           Delete
         </Button>
@@ -186,24 +148,14 @@ export function PostCard(props: {
 export function PostCardSkeleton(props: { pulse?: boolean }) {
   const { pulse = true } = props;
   return (
-    <div className="bg-muted flex flex-row rounded-lg p-4">
+    <div className="flex flex-row rounded-lg bg-stone-100 p-4">
       <div className="grow">
-        <h2
-          className={cn(
-            "bg-primary w-1/4 rounded-sm text-2xl font-bold",
-            pulse && "animate-pulse",
-          )}
-        >
-          &nbsp;
-        </h2>
-        <p
-          className={cn(
-            "mt-2 w-1/3 rounded-sm bg-current text-sm",
-            pulse && "animate-pulse",
-          )}
-        >
-          &nbsp;
-        </p>
+        <div
+          className={`h-8 w-1/4 rounded bg-stone-300 ${pulse ? "animate-pulse" : ""}`}
+        />
+        <div
+          className={`mt-2 h-4 w-1/3 rounded bg-stone-200 ${pulse ? "animate-pulse" : ""}`}
+        />
       </div>
     </div>
   );
