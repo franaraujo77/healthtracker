@@ -1,6 +1,6 @@
 # Story 0.1: Initialize Monorepo from create-t3-turbo Starter Template
 
-Status: in-progress
+Status: done
 
 ## Story
 
