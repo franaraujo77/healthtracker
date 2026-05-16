@@ -1,57 +1,51 @@
-import type { VariantProps } from "class-variance-authority";
-import { cva } from "class-variance-authority";
-import { Slot as SlotPrimitive } from "radix-ui";
+"use client";
 
-import { cn } from "@healthtracker/ui";
+import { styled, Button as TamaguiButton } from "tamagui";
 
-export const buttonVariants = cva(
-  "focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive inline-flex shrink-0 items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-all outline-none focus-visible:ring-[3px] disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
-  {
-    variants: {
-      variant: {
-        default:
-          "bg-primary text-primary-foreground hover:bg-primary/90 shadow-xs",
-        destructive:
-          "bg-destructive hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/60 text-white shadow-xs",
-        outline:
-          "bg-background hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50 border shadow-xs",
-        secondary:
-          "bg-secondary text-secondary-foreground hover:bg-secondary/80 shadow-xs",
-        ghost:
-          "hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50",
-        link: "text-primary underline-offset-4 hover:underline",
+export const Button = styled(TamaguiButton, {
+  name: "Button",
+  fontFamily: "$body",
+  borderRadius: "$button",
+  pressStyle: { opacity: 0.85 },
+
+  variants: {
+    variant: {
+      primary: {
+        backgroundColor: "$primaryTeal",
+        color: "$primaryTealText",
+        borderWidth: 0,
       },
-      size: {
-        default: "h-9 px-4 py-2 has-[>svg]:px-3",
-        sm: "h-8 gap-1.5 rounded-md px-3 has-[>svg]:px-2.5",
-        lg: "h-10 rounded-md px-6 has-[>svg]:px-4",
-        icon: "size-9",
+      secondary: {
+        backgroundColor: "$primaryTealLight",
+        color: "$primaryTeal",
+        borderWidth: 0,
+      },
+      outline: {
+        backgroundColor: "transparent",
+        borderWidth: 1,
+        borderColor: "$border",
+        color: "$textPrimary",
+      },
+      ghost: {
+        backgroundColor: "transparent",
+        borderWidth: 0,
+        color: "$textPrimary",
+      },
+      destructive: {
+        backgroundColor: "$error",
+        color: "$primaryTealText",
+        borderWidth: 0,
       },
     },
-    defaultVariants: {
-      variant: "default",
-      size: "default",
+    size: {
+      sm: { height: 32, paddingHorizontal: "$3", fontSize: "$3" },
+      md: { height: 40, paddingHorizontal: "$4", fontSize: "$4" },
+      lg: { height: 48, paddingHorizontal: "$5", fontSize: "$5" },
     },
+  } as const,
+
+  defaultVariants: {
+    variant: "primary",
+    size: "md",
   },
-);
-
-export function Button({
-  className,
-  variant,
-  size,
-  asChild = false,
-  ...props
-}: React.ComponentProps<"button"> &
-  VariantProps<typeof buttonVariants> & {
-    asChild?: boolean;
-  }) {
-  const Comp = asChild ? SlotPrimitive.Slot : "button";
-
-  return (
-    <Comp
-      data-slot="button"
-      className={cn(buttonVariants({ variant, size, className }))}
-      {...props}
-    />
-  );
-}
+});

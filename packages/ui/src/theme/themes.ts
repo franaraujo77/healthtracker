@@ -1,0 +1,54 @@
+import { colorTokens } from "./tokens";
+
+const pick = (key: keyof typeof colorTokens, mode: "light" | "dark") =>
+  colorTokens[key][mode];
+
+export const lightTheme = {
+  backgroundPrimary: pick("backgroundPrimary", "light"),
+  surface: pick("surface", "light"),
+  surfaceElevated: pick("surfaceElevated", "light"),
+  border: pick("border", "light"),
+  primaryTeal: pick("primaryTeal", "light"),
+  primaryTealLight: pick("primaryTealLight", "light"),
+  primaryTealText: pick("primaryTealText", "light"),
+  textPrimary: pick("textPrimary", "light"),
+  textSecondary: pick("textSecondary", "light"),
+  textTertiary: pick("textTertiary", "light"),
+  biomarkerDeviation: pick("biomarkerDeviation", "light"),
+  biomarkerDeviationBg: pick("biomarkerDeviationBg", "light"),
+  trendDown: pick("trendDown", "light"),
+  trendDownBg: pick("trendDownBg", "light"),
+  trendUp: pick("trendUp", "light"),
+  trendUpBg: pick("trendUpBg", "light"),
+  stable: pick("stable", "light"),
+  stableBg: pick("stableBg", "light"),
+  error: pick("error", "light"),
+  errorBg: pick("errorBg", "light"),
+  success: pick("success", "light"),
+  backgroundDark: pick("backgroundDark", "light"),
+} as const;
+
+export const darkTheme = {
+  backgroundPrimary: pick("backgroundPrimary", "dark"),
+  surface: pick("surface", "dark"),
+  surfaceElevated: pick("surfaceElevated", "dark"),
+  border: pick("border", "dark"),
+  primaryTeal: pick("primaryTeal", "dark"),
+  primaryTealLight: pick("primaryTealLight", "dark"),
+  primaryTealText: pick("primaryTealText", "dark"),
+  textPrimary: pick("textPrimary", "dark"),
+  textSecondary: pick("textSecondary", "dark"),
+  textTertiary: pick("textTertiary", "dark"),
+  biomarkerDeviation: pick("biomarkerDeviation", "dark"),
+  biomarkerDeviationBg: pick("biomarkerDeviationBg", "dark"),
+  trendDown: pick("trendDown", "dark"),
+  trendDownBg: pick("trendDownBg", "dark"),
+  trendUp: pick("trendUp", "dark"),
+  trendUpBg: pick("trendUpBg", "dark"),
+  stable: pick("stable", "dark"),
+  stableBg: pick("stableBg", "dark"),
+  error: pick("error", "dark"),
+  errorBg: pick("errorBg", "dark"),
+  success: pick("success", "dark"),
+  backgroundDark: pick("backgroundDark", "dark"),
+} as const;
