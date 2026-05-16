@@ -1,0 +1,7 @@
+{
+  "name": "@healthtracker/tsconfig",
+  "private": true,
+  "files": [
+    "*.json"
+  ]
+}

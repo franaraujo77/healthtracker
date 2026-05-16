@@ -1,0 +1,123 @@
+# generated: 2026-05-15
+# last_updated: 2026-05-16
+# project: healthtracker
+# project_key: NOKEY
+# tracking_system: file-system
+# story_location: _bmad-output/implementation-artifacts
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Epic Status Transitions:
+#   - backlog → in-progress: Automatically when first story is created (via create-story)
+#   - in-progress → done: Manually when all stories reach 'done' status
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created in stories folder
+#   - in-progress: Developer actively working on implementation
+#   - review: Ready for code review (via Dev's code-review workflow)
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when first story is created
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates next story after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+
+generated: 2026-05-15
+last_updated: 2026-05-16
+project: healthtracker
+project_key: NOKEY
+tracking_system: file-system
+story_location: _bmad-output/implementation-artifacts
+
+development_status:
+  # Epic 0: Project Foundation & Development Environment
+  epic-0: in-progress
+  0-1-initialize-monorepo-from-create-t3-turbo-starter-template: in-progress
+  0-2-configure-tamagui-design-system-with-health-tracker-tokens: backlog
+  0-3-configure-supabase-auth-with-magic-link-and-email-providers: backlog
+  0-4-configure-rls-token-principal-model-and-migration-protection: backlog
+  0-5-configure-pg-boss-extraction-job-queue: backlog
+  0-6-set-up-github-actions-ci-cd-pipeline: backlog
+  0-7-configure-sentry-error-tracking-with-pii-scrubbing: backlog
+  epic-0-retrospective: optional
+
+  # Epic 1: Patient Can Create an Account and Their Health Record Begins
+  epic-1: backlog
+  1-1-patient-creates-account-with-email-and-password: backlog
+  1-2-patient-provides-lgpd-compliant-consent-per-data-type-at-onboarding: backlog
+  1-3-patient-enables-biometric-authentication: backlog
+  1-4-patient-views-and-manages-active-consent-agreements: backlog
+  1-5-patient-imports-prior-lab-results-during-onboarding: backlog
+  epic-1-retrospective: optional
+
+  # Epic 2: Patient Can Upload and Review Blood Test Results
+  epic-2: backlog
+  2-1-patient-uploads-a-pdf-blood-test-result: backlog
+  2-2-patient-uploads-a-photo-of-a-blood-test-result-from-camera-roll-or-camera: backlog
+  2-3-system-extracts-and-normalizes-biomarker-values-from-uploaded-documents: backlog
+  2-4-patient-reviews-and-confirms-low-confidence-extracted-values: backlog
+  2-5-patient-views-upload-status-and-receives-push-notifications: backlog
+  2-6-patient-queues-an-upload-while-offline: backlog
+  2-7-patient-manually-enters-bioimpedance-bia-measurements: backlog
+  2-8-patient-manages-push-notification-preferences: backlog
+  epic-2-retrospective: optional
+
+  # Epic 3: Patient Can See Their Health Fingerprint Over Time
+  epic-3: backlog
+  3-1-patient-views-their-complete-longitudinal-biomarker-record: backlog
+  3-2-patient-views-the-fingerprint-at-draw-1-with-baseline-building-context: backlog
+  3-3-patient-views-the-fingerprint-at-draw-2-with-personal-baseline-band: backlog
+  3-4-patient-views-cached-fingerprint-data-while-offline: backlog
+  epic-3-retrospective: optional
+
+  # Epic 4: Patient Receives a Personal Health Narrative
+  epic-4: backlog
+  4-1-patient-receives-a-streamed-letter-narrative-after-a-draw-is-confirmed: backlog
+  4-2-patient-re-reads-a-previously-generated-letter: backlog
+  4-3-patient-taps-a-biomarker-to-receive-an-explain-this-to-my-doctor-suggestion-growth: backlog
+  epic-4-retrospective: optional
+
+  # Epic 5: Patient Controls Who Sees Their Health Data
+  epic-5: backlog
+  5-1-patient-configures-per-biomarker-sharing-with-a-named-doctor: backlog
+  5-2-patient-generates-a-time-limited-sharing-link-with-duration-selection: backlog
+  5-3-patient-views-the-access-log: backlog
+  5-4-patient-revokes-a-doctors-access-to-their-record: backlog
+  5-5-patient-exports-their-complete-health-record-as-json-or-pdf: backlog
+  5-6-patient-permanently-deletes-their-account-and-all-data: backlog
+  epic-5-retrospective: optional
+
+  # Epic 6: Doctor Can View a Patient's Conversation Starter
+  epic-6: backlog
+  6-1-doctor-views-pre-auth-landing-page-showing-patient-name-and-share-context: backlog
+  6-2-doctor-authenticates-via-magic-link-and-views-the-conversation-starter-report: backlog
+  6-3-doctor-activates-a-professional-account-from-the-conversation-starter-view: backlog
+  6-4-doctor-invites-a-patient-to-create-a-health-tracker-account: backlog
+  6-5-doctor-configures-biomarker-staleness-thresholds-for-their-professional-view: backlog
+  epic-6-retrospective: optional
+
+  # Epic 7: Patient Adds Personal Context to Their Record
+  epic-7: backlog
+  7-1-patient-adds-a-life-event-to-their-fingerprint-timeline: backlog
+  7-2-patient-captures-emotional-check-in-before-results-appear-growth: backlog
+  7-3-patient-captures-emotional-check-in-after-reviewing-results-growth: backlog
+  7-4-patient-records-a-voice-memo-at-the-time-of-upload-vision: backlog
+  epic-7-retrospective: optional
+
+  # Epic 8: Operator Can Manage Extraction Quality
+  epic-8: backlog
+  8-1-operator-views-the-anonymised-manual-review-queue: backlog
+  8-2-operator-confirms-or-rejects-individual-extraction-field-values: backlog
+  epic-8-retrospective: optional
