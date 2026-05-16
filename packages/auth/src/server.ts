@@ -1,7 +1,7 @@
 import "server-only";
 
-import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { createServerClient } from "@supabase/ssr";
 
 import { authEnv } from "../env";
 
@@ -18,6 +18,8 @@ export const createSupabaseServerClient = async () => {
         setAll: (cookiesToSet) => {
           try {
             for (const { name, value, options } of cookiesToSet) {
+              // Supabase CookieOptions vs Next.js ResponseCookie types differ; cast is required
+              // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
               cookieStore.set(name, value, options);
             }
           } catch {

@@ -5,6 +5,7 @@ import superjson from "superjson";
 
 import type { AppRouter } from "@healthtracker/api";
 
+import { env } from "../env";
 import { getBaseUrl } from "./base-url";
 
 export const queryClient = new QueryClient({
@@ -20,7 +21,7 @@ export const trpc = createTRPCOptionsProxy<AppRouter>({
     links: [
       loggerLink({
         enabled: (opts) =>
-          process.env.NODE_ENV === "development" ||
+          env.NODE_ENV === "development" ||
           (opts.direction === "down" && opts.result instanceof Error),
         colorMode: "ansi",
       }),

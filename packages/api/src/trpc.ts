@@ -29,7 +29,7 @@ import { db } from "@healthtracker/db/client";
  * @see https://trpc.io/docs/server/context
  */
 
-export const createTRPCContext = async (opts: {
+export const createTRPCContext = (opts: {
   headers: Headers;
   session?: Session | null;
 }) => {
