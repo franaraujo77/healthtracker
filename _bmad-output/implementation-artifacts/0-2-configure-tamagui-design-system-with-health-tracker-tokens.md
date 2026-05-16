@@ -1,6 +1,6 @@
 # Story 0.2: Configure Tamagui Design System with Health Tracker Tokens
 
-Status: review
+Status: done
 
 ## Story
 
@@ -501,6 +501,17 @@ claude-sonnet-4-6
 - `packages/ui/src/theme.tsx` — shadcn ThemeProvider replaced by Tamagui
 - `apps/expo/nativewind-env.d.ts` — NativeWind removed
 - `apps/expo/postcss.config.mjs` — NativeWind/PostCSS removed
+
+### Review Findings
+
+- [x] [Review][Patch] Expo page screens still use NativeWind className — unstyled after NativeWind removal [apps/expo/src/app/index.tsx, apps/expo/src/app/post/[id].tsx]
+- [x] [Review][Patch] Missing animation driver in tamagui.config.ts — runtime crash when Popover opens [packages/ui/tamagui.config.ts]
+- [x] [Review][Patch] Hardcoded hex values in Expo layout screenOptions violate arch invariant [apps/expo/src/app/_layout.tsx:16,19]
+- [x] [Review][Patch] Button type="submit" without onPress — form submission may not work on web [apps/web/src/app/_components/posts.tsx:80]
+- [x] [Review][Patch] Hardcoded hex in web layout viewport themeColor [apps/web/src/app/layout.tsx:22-23]
+- [x] [Review][Patch] @tamagui/next-plugin installed but unused — dead dependency in apps/web [apps/web/package.json]
+- [x] [Review][Patch] fontFamilyTokens exported from tokens.ts but never consumed in tamagui.config.ts [packages/ui/src/theme/tokens.ts]
+- [x] [Review][Defer] TamaguiProvider hardcodes defaultTheme="light" — dark mode not surfaced per MVP scope [packages/ui/src/providers/TamaguiProvider.tsx] — deferred, pre-existing design decision per AC #4
 
 ### Change Log
 

@@ -1,15 +1,17 @@
+import { createAnimations } from "@tamagui/animations-css";
 import { createFont, createTamagui, createTheme, createTokens } from "tamagui";
 
 import { darkTheme, lightTheme } from "./src/theme/themes";
 import {
   colorTokens,
+  fontFamilyTokens,
   fontSizeTokens,
   radiusTokens,
   spaceTokens,
 } from "./src/theme/tokens";
 
 const dmSansFont = createFont({
-  family: "DM Sans, system-ui, sans-serif",
+  family: `${fontFamilyTokens.uiFont}, system-ui, sans-serif`,
   size: {
     1: fontSizeTokens.caption,
     2: fontSizeTokens.label,
@@ -48,7 +50,7 @@ const dmSansFont = createFont({
 });
 
 const loraFont = createFont({
-  family: "Lora, Georgia, serif",
+  family: `${fontFamilyTokens.letterFont}, Georgia, serif`,
   size: {
     1: fontSizeTokens.caption,
     2: fontSizeTokens.body,
@@ -73,7 +75,7 @@ const loraFont = createFont({
 });
 
 const dmMonoFont = createFont({
-  family: "DM Mono, monospace",
+  family: `${fontFamilyTokens.monoFont}, monospace`,
   size: {
     1: fontSizeTokens.caption,
     2: fontSizeTokens.body,
@@ -216,6 +218,12 @@ const appConfig = createTamagui({
     lg: { maxWidth: 1280 },
     xl: { maxWidth: 1650 },
   },
+  animations: createAnimations({
+    quick: "ease-in 150ms",
+    medium: "ease-in-out 300ms",
+    slow: "ease-in-out 450ms",
+    bouncy: "cubic-bezier(0.175, 0.885, 0.32, 1.275) 300ms",
+  }),
   defaultFont: "body",
 });
 

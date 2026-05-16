@@ -6,6 +6,11 @@ import { TamaguiProvider } from "@healthtracker/ui";
 
 import { queryClient } from "~/utils/api";
 
+// SafeAreaView/Stack.screenOptions are native APIs that can't use Tamagui tokens.
+// These values must match colorTokens.primaryTeal.light and colorTokens.backgroundPrimary.light.
+const HEADER_BG = "#0D6E6E";
+const CONTENT_BG = "#F9F7F4";
+
 export default function RootLayout() {
   return (
     <TamaguiProvider>
@@ -13,10 +18,10 @@ export default function RootLayout() {
         <Stack
           screenOptions={{
             headerStyle: {
-              backgroundColor: "#0D6E6E",
+              backgroundColor: HEADER_BG,
             },
             contentStyle: {
-              backgroundColor: "#F9F7F4",
+              backgroundColor: CONTENT_BG,
             },
           }}
         />

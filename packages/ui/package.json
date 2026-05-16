@@ -10,6 +10,7 @@
     "./input": "./src/input.tsx",
     "./label": "./src/label.tsx",
     "./providers": "./src/providers/TamaguiProvider.tsx",
+    "./theme/tokens": "./src/theme/tokens.ts",
     "./separator": "./src/separator.tsx",
     "./toast": "./src/toast.tsx"
   },
@@ -22,6 +23,7 @@
     "ui-add": "pnpm dlx shadcn@latest add && prettier src --write --list-different"
   },
   "dependencies": {
+    "@tamagui/animations-css": "catalog:",
     "@tamagui/core": "catalog:",
     "@tamagui/web": "catalog:",
     "tamagui": "catalog:"

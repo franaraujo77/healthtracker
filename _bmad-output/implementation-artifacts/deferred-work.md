@@ -1,5 +1,9 @@
 # Deferred Work
 
+## Deferred from: code review of 0-2-configure-tamagui-design-system-with-health-tracker-tokens (2026-05-16)
+
+- **D1: TamaguiProvider hardcodes `defaultTheme="light"`** — `packages/ui/src/providers/TamaguiProvider.tsx` — dark mode is defined in tokens and themes but not surfaced to users; per AC #4 this is intentional for MVP; a future story should add `useColorScheme()` detection and pass the active theme to the provider
+
 ## Deferred from: code review of 0-1-initialize-monorepo-from-create-t3-turbo-starter-template (2026-05-15)
 
 - **W1: Auth callback stub returns `{ok:true}`** — `apps/web/src/app/api/auth/[...all]/route.ts` — intentional per story spec; Story 0.3 implements full PKCE token exchange

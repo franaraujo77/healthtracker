@@ -77,7 +77,13 @@ export function CreatePostForm() {
           </div>
         )}
       />
-      <Button type="submit">Create Post</Button>
+      <Button
+        onPress={() => {
+          void form.handleSubmit();
+        }}
+      >
+        Create Post
+      </Button>
     </form>
   );
 }
