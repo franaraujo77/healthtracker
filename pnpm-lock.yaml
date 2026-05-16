@@ -147,6 +147,9 @@ importers:
 
   apps/expo:
     dependencies:
+      "@healthtracker/ui":
+        specifier: workspace:*
+        version: link:../../packages/ui
       "@legendapp/list":
         specifier: ^2.0.14
         version: 2.0.14(react-native@0.81.5(@babel/core@7.28.5)(@types/react@19.1.12)(bufferutil@4.0.8)(react@19.1.4))(react@19.1.4)
