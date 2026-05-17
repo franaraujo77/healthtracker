@@ -1,5 +1,10 @@
 # Deferred Work
 
+## Deferred from: code review of 0-3-configure-supabase-auth-with-magic-link-and-email-providers (2026-05-16)
+
+- **D1: Double Supabase round-trip per request** — `packages/auth/src/server.ts` `getSession()` calls `getUser()` (network) then `getSession()` (cookie) sequentially; pre-existing before story 0.3; `react cache()` deduplicates within a single RSC tree but is a latency concern for high traffic; consider returning a synthetic session from the `getUser()` response to avoid the second call.
+- **D2: Expo tRPC access token from AsyncStorage without server-side re-validation** — `apps/expo/src/utils/api.tsx` uses `getSession()` to retrieve the bearer token; this is the standard Supabase mobile pattern (calling `getUser()` per request would be too expensive); the server-side `protectedProcedure` validates the JWT anyway; acceptable trade-off but should be documented.
+
 ## Deferred from: code review of 0-2-configure-tamagui-design-system-with-health-tracker-tokens (2026-05-16)
 
 - **D1: TamaguiProvider hardcodes `defaultTheme="light"`** — `packages/ui/src/providers/TamaguiProvider.tsx` — dark mode is defined in tokens and themes but not surfaced to users; per AC #4 this is intentional for MVP; a future story should add `useColorScheme()` detection and pass the active theme to the provider

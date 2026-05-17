@@ -6,6 +6,7 @@ import superjson from "superjson";
 import type { AppRouter } from "@healthtracker/api";
 
 import { env } from "../env";
+import { supabase } from "../lib/supabase";
 import { getBaseUrl } from "./base-url";
 
 export const queryClient = new QueryClient({
@@ -28,11 +29,16 @@ export const trpc = createTRPCOptionsProxy<AppRouter>({
       httpBatchLink({
         transformer: superjson,
         url: `${getBaseUrl()}/api/trpc`,
-        headers() {
+        headers: async () => {
           const headers = new Map<string, string>();
           headers.set("x-trpc-source", "expo-react");
-          // Supabase session headers handled via auth interceptor in Story 0.3
-          return headers;
+          const {
+            data: { session },
+          } = await supabase.auth.getSession();
+          if (session?.access_token) {
+            headers.set("Authorization", `Bearer ${session.access_token}`);
+          }
+          return Object.fromEntries(headers);
         },
       }),
     ],
