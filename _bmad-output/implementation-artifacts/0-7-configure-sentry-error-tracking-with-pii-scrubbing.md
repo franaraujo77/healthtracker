@@ -553,6 +553,15 @@ None — implementation completed without issues.
 - [x] [Review][Defer] Circular object references would overflow call stack — deferred, Sentry events are serialized snapshots; circular refs are extremely rare
 - [x] [Review][Defer] Sensitive header key presence retained in scrubbed output — deferred, design decision; key name visibility is acceptable, value scrubbing satisfies AR13
 
+### Review Findings (Round 3 — patch review)
+
+- [x] [Review][Patch] Nested arrays-of-arrays (`[[{patient_id}]]`) silently skipped — `!Array.isArray(item)` guard in `.map()` falls through without recursing into inner arrays; fixed using named recursive `scrubItem` function in `.map()` callback [packages/config/src/sentry.ts, packages/config/src/sentry.test.ts]
+- [x] [Review][Dismiss] `"type": "module"` CJS breakage concern — no CJS consumers in `packages/config`; ESM-only package is safe
+- [x] [Review][Dismiss] Depth asymmetry causes leaks concern — Edge Case Hunter verified no PII leaks at default `depth=3`; depth tick on array wrapper is correct and safe
+- [x] [Review][Dismiss] `value_numeric` should be a context key not a PII key concern — `value_numeric` IS a PII key by design (AR13 explicit); false positive
+- [x] [Review][Defer] Event mutation aliasing hazard — already captured as D3; Sentry SDK does not reuse event references
+- [x] [Review][Defer] No test for nested-array-of-array edge case — minor; will be added if patch above is applied
+
 ### Change Log
 
 - 2026-05-17: Story 0-7 implementation — Sentry PII-scrubbed error tracking across web and expo apps

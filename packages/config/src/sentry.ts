@@ -43,11 +43,13 @@ function scrubObject(
       typeof result[k] === "object"
     ) {
       if (Array.isArray(result[k])) {
-        result[k] = (result[k] as unknown[]).map((item) =>
-          item !== null && typeof item === "object" && !Array.isArray(item)
-            ? scrubObject(item as Record<string, unknown>, keys, depth - 1)
-            : item,
-        );
+        result[k] = (result[k] as unknown[]).map(function scrubItem(
+          item: unknown,
+        ): unknown {
+          if (item === null || typeof item !== "object") return item;
+          if (Array.isArray(item)) return item.map(scrubItem);
+          return scrubObject(item as Record<string, unknown>, keys, depth - 1);
+        });
       } else {
         result[k] = scrubObject(
           result[k] as Record<string, unknown>,

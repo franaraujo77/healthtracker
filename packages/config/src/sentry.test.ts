@@ -157,4 +157,21 @@ describe("sentryBeforeSend", () => {
     expect(readings[0]).not.toHaveProperty("value_numeric");
     expect(readings[0]).toHaveProperty("label", "glucose");
   });
+
+  it("scrubs PII from nested arrays-of-arrays inside extra", () => {
+    const event = {
+      extra: {
+        readings: [
+          [{ patient_id: "uuid-123", value_numeric: 5.2, label: "glucose" }],
+        ],
+      },
+    };
+    const result = sentryBeforeSend(event as any);
+    const readings = result?.extra?.readings as Record<string, unknown>[][];
+    const [firstGroup = []] = readings;
+    const [inner = {}] = firstGroup;
+    expect(inner).not.toHaveProperty("patient_id");
+    expect(inner).not.toHaveProperty("value_numeric");
+    expect(inner).toHaveProperty("label", "glucose");
+  });
 });
