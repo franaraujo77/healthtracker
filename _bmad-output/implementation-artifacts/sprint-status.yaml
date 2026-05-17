@@ -51,7 +51,7 @@ development_status:
   0-5-configure-pg-boss-extraction-job-queue: done
   0-6-set-up-github-actions-ci-cd-pipeline: done
   0-7-configure-sentry-error-tracking-with-pii-scrubbing: done
-  epic-0-retrospective: optional
+  epic-0-retrospective: done
 
   # Epic 1: Patient Can Create an Account and Their Health Record Begins
   epic-1: backlog
