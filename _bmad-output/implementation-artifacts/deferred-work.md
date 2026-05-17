@@ -1,5 +1,10 @@
 # Deferred Work
 
+## Deferred from: code review of 0-7-configure-sentry-error-tracking-with-pii-scrubbing round 4 (2026-05-17)
+
+- **D10: Array traversal does not consume depth budget** — `packages/config/src/sentry.ts` — `scrubItem` recurses into nested arrays via `item.map(scrubItem)` without decrementing depth; only the final `scrubObject` call decrements; a structure `extra → obj → obj → [[obj → {patient_id}]]` at depth=3 scrubs correctly, but `extra → obj → obj → [[obj → { sub: {patient_id} }]]` leaks at the `sub` level (depth exhausted); fix requires explicit depth parameter through `scrubArr`; benign for typical flat Sentry payloads; revisit when data model is finalized in Epic 2
+- **D11: `Date`/`RegExp` objects inside arrays silently spread to `{}`** — `packages/config/src/sentry.ts` — `scrubObject` shallow-spreads all objects via `{ ...obj }`; spreading a `Date` or `RegExp` produces `{}`; pre-existing behavior, not introduced by round-4; Sentry serializes events before `beforeSend` so raw JS objects rarely appear; harmless in production but degrades extra context if hit
+
 ## Deferred from: code review of 0-7-configure-sentry-error-tracking-with-pii-scrubbing round 2 (2026-05-17)
 
 - **D7: `scrubObject` depth limit undocumented** — `packages/config/src/sentry.ts` — depth=3 gives 4 levels of actual traversal; sufficient for real Sentry payloads; document when data model is finalised in Epic 2

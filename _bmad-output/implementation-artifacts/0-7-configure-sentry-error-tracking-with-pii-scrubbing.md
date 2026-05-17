@@ -562,6 +562,15 @@ None — implementation completed without issues.
 - [x] [Review][Defer] Event mutation aliasing hazard — already captured as D3; Sentry SDK does not reuse event references
 - [x] [Review][Defer] No test for nested-array-of-array edge case — minor; will be added if patch above is applied
 
+### Review Findings (Round 4 — patch review)
+
+- [x] [Review][Defer] Array traversal does not consume depth budget — `scrubItem` recurses via `item.map(scrubItem)` without decrementing depth; reachable leak at `extra → 2 obj levels → [[obj → sub-obj with PII]]` when depth=3; not a regression over pre-round-4 (old code also leaked); deferred as D10
+- [x] [Review][Defer] `Date`/`RegExp` objects spread to `{}` inside arrays — pre-existing; Sentry serializes events before `beforeSend`; deferred as D11
+- [x] [Review][Dismiss] Named function expression scope misconception — `scrubItem` correctly self-references for recursion; no bug
+- [x] [Review][Dismiss] Depth=1 PII leak example — unreachable via `sentryBeforeSend` without 2 prior object traversals; default depth=3 is safe for this scenario
+- [x] [Review][Dismiss] `value_numeric` PII key classification concern — present in `PII_KEYS` by design (AR13 explicit)
+- [x] [Review][AC] All 4 ACs PASS — AC1, AC2, AC3, NFR-S5 verified clean
+
 ### Change Log
 
 - 2026-05-17: Story 0-7 implementation — Sentry PII-scrubbed error tracking across web and expo apps
