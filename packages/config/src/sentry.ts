@@ -40,14 +40,21 @@ function scrubObject(
     } else if (
       depth > 0 &&
       result[k] !== null &&
-      typeof result[k] === "object" &&
-      !Array.isArray(result[k])
+      typeof result[k] === "object"
     ) {
-      result[k] = scrubObject(
-        result[k] as Record<string, unknown>,
-        keys,
-        depth - 1,
-      );
+      if (Array.isArray(result[k])) {
+        result[k] = (result[k] as unknown[]).map((item) =>
+          item !== null && typeof item === "object" && !Array.isArray(item)
+            ? scrubObject(item as Record<string, unknown>, keys, depth - 1)
+            : item,
+        );
+      } else {
+        result[k] = scrubObject(
+          result[k] as Record<string, unknown>,
+          keys,
+          depth - 1,
+        );
+      }
     }
   }
   return result;

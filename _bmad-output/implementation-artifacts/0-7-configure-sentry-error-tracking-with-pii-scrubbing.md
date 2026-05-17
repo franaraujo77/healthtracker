@@ -543,6 +543,16 @@ None — implementation completed without issues.
 - [x] [Review][Defer] `tracesSampleRate: 0.1` not environment-aware — traces sent from dev/staging [apps/web/sentry.*.config.ts] — deferred, acceptable for now
 - [x] [Review][Defer] Metro `unstable_enablePackageExports` override fragile — future Sentry wrapper change may silently break [apps/expo/metro.config.js] — deferred, documented and current impl works
 
+### Review Findings (Round 2 — patch review)
+
+- [x] [Review][Patch] Arrays of objects with PII not scrubbed — `scrubObject` skipped arrays; fixed to recurse into array elements [packages/config/src/sentry.ts]
+- [x] [Review][Patch] `phone` and `full_name` untested — added unit tests for both fields (AR13 mandatory coverage) [packages/config/src/sentry.test.ts]
+- [x] [Review][Patch] `set-cookie` and `x-api-key` header scrubbing untested — added to header test [packages/config/src/sentry.test.ts]
+- [x] [Review][Patch] `packages/config/package.json` missing `"type": "module"` — added; eliminates Node.js ESM detection warning on lint [packages/config/package.json]
+- [x] [Review][Defer] Depth limit of 3 (4 actual levels) undocumented — deferred, sufficient for real-world Sentry payloads; depth comment added inline
+- [x] [Review][Defer] Circular object references would overflow call stack — deferred, Sentry events are serialized snapshots; circular refs are extremely rare
+- [x] [Review][Defer] Sensitive header key presence retained in scrubbed output — deferred, design decision; key name visibility is acceptable, value scrubbing satisfies AR13
+
 ### Change Log
 
 - 2026-05-17: Story 0-7 implementation — Sentry PII-scrubbed error tracking across web and expo apps

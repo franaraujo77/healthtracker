@@ -116,12 +116,45 @@ describe("sentryBeforeSend", () => {
           authorization: "Bearer token123",
           "content-type": "application/json",
           cookie: "session=abc",
+          "set-cookie": "id=abc; Path=/",
+          "x-api-key": "sk-secret",
         },
       },
     };
     const result = sentryBeforeSend(event as any);
     expect(result?.request?.headers?.authorization).toBe("[Scrubbed]");
     expect(result?.request?.headers?.cookie).toBe("[Scrubbed]");
+    expect(result?.request?.headers?.["set-cookie"]).toBe("[Scrubbed]");
+    expect(result?.request?.headers?.["x-api-key"]).toBe("[Scrubbed]");
     expect(result?.request?.headers?.["content-type"]).toBe("application/json");
+  });
+
+  it("scrubs phone from extra", () => {
+    const event = { extra: { phone: "+5511999999999", ref: "call-123" } };
+    const result = sentryBeforeSend(event as any);
+    expect(result?.extra).not.toHaveProperty("phone");
+    expect(result?.extra).toHaveProperty("ref", "call-123");
+  });
+
+  it("scrubs full_name from extra", () => {
+    const event = { extra: { full_name: "João Silva", region: "sp" } };
+    const result = sentryBeforeSend(event as any);
+    expect(result?.extra).not.toHaveProperty("full_name");
+    expect(result?.extra).toHaveProperty("region", "sp");
+  });
+
+  it("scrubs PII from arrays of objects inside extra", () => {
+    const event = {
+      extra: {
+        readings: [
+          { patient_id: "uuid-123", value_numeric: 5.2, label: "glucose" },
+        ],
+      },
+    };
+    const result = sentryBeforeSend(event as any);
+    const readings = result?.extra?.readings as Record<string, unknown>[];
+    expect(readings[0]).not.toHaveProperty("patient_id");
+    expect(readings[0]).not.toHaveProperty("value_numeric");
+    expect(readings[0]).toHaveProperty("label", "glucose");
   });
 });

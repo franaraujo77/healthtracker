@@ -1,5 +1,11 @@
 # Deferred Work
 
+## Deferred from: code review of 0-7-configure-sentry-error-tracking-with-pii-scrubbing round 2 (2026-05-17)
+
+- **D7: `scrubObject` depth limit undocumented** — `packages/config/src/sentry.ts` — depth=3 gives 4 levels of actual traversal; sufficient for real Sentry payloads; document when data model is finalised in Epic 2
+- **D8: Circular references not handled in `scrubObject`** — `packages/config/src/sentry.ts` — Sentry events are serialized snapshots and rarely contain cycles; add WeakSet guard if ever hitting issues in production
+- **D9: Sensitive header key presence visible in Sentry UI** — `packages/config/src/sentry.ts` — only header value is replaced with "[Scrubbed]"; key name (e.g., "authorization") remains; design decision that key presence is acceptable
+
 ## Deferred from: code review of 0-7-configure-sentry-error-tracking-with-pii-scrubbing (2026-05-17)
 
 - **D1: Breadcrumb `message` string not scanned for PII** — `packages/config/src/sentry.ts` — freeform breadcrumb messages (e.g., "User patient@x.com signed in") are not redacted; requires regex/NLP approach; out of scope for this story
