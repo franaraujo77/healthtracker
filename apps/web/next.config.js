@@ -1,3 +1,4 @@
+import { withSentryConfig } from "@sentry/nextjs";
 import { createJiti } from "jiti";
 
 const jiti = createJiti(import.meta.url);
@@ -11,6 +12,7 @@ const config = {
   transpilePackages: [
     "@healthtracker/api",
     "@healthtracker/auth",
+    "@healthtracker/config",
     "@healthtracker/db",
     "@healthtracker/ui",
     "@healthtracker/validators",
@@ -25,4 +27,11 @@ const config = {
   },
 };
 
-export default config;
+export default withSentryConfig(config, {
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+  tunnelRoute: "/monitoring",
+  silent: !process.env.CI,
+  sourcemaps: { disable: !process.env.SENTRY_AUTH_TOKEN },
+});

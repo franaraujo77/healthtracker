@@ -10,6 +10,7 @@ const get = (key: string): string => {
 export const env = {
   EXPO_PUBLIC_SUPABASE_URL: get("EXPO_PUBLIC_SUPABASE_URL"),
   EXPO_PUBLIC_SUPABASE_ANON_KEY: get("EXPO_PUBLIC_SUPABASE_ANON_KEY"),
+  EXPO_PUBLIC_SENTRY_DSN: process.env.EXPO_PUBLIC_SENTRY_DSN, // undefined = Sentry no-ops
   NODE_ENV: (process.env.NODE_ENV ?? "development") as
     | "development"
     | "production"

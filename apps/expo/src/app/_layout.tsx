@@ -3,12 +3,26 @@ import { useEffect } from "react";
 import * as Linking from "expo-linking";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import * as Sentry from "@sentry/react-native";
 import { QueryClientProvider } from "@tanstack/react-query";
 
+import { sentryBeforeSend } from "@healthtracker/config";
 import { TamaguiProvider } from "@healthtracker/ui";
 
 import { supabase } from "~/lib/supabase";
 import { queryClient } from "~/utils/api";
+
+Sentry.init({
+  dsn: process.env.EXPO_PUBLIC_SENTRY_DSN,
+  tracesSampleRate: 0.1,
+  enableNativeCrashHandling: true,
+  debug: __DEV__,
+  // Cast required: sentryBeforeSend uses duck-typed interfaces to avoid SDK version coupling
+  beforeSend: sentryBeforeSend as Parameters<
+    typeof Sentry.init
+  >[0]["beforeSend"],
+  // Session replay omitted — health data on screen risk (NFR-S5)
+});
 
 // SafeAreaView/Stack.screenOptions are native APIs that can't use Tamagui tokens.
 // These values must match colorTokens.primaryTeal.light and colorTokens.backgroundPrimary.light.
@@ -21,7 +35,7 @@ const AUTH_INVALIDATING_EVENTS: AuthChangeEvent[] = [
   "USER_UPDATED",
 ];
 
-export default function RootLayout() {
+function RootLayout() {
   useEffect(() => {
     const {
       data: { subscription },
@@ -89,3 +103,5 @@ export default function RootLayout() {
     </TamaguiProvider>
   );
 }
+
+export default Sentry.wrap(RootLayout);

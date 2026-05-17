@@ -2,6 +2,7 @@
 const path = require("node:path");
 const { getDefaultConfig } = require("expo/metro-config");
 const { FileStore } = require("metro-cache");
+const { withSentryConfig } = require("@sentry/react-native/metro");
 
 const config = getDefaultConfig(__dirname);
 
@@ -15,4 +16,9 @@ config.cacheStores = [
 ];
 
 /** @type {import('expo/metro-config').MetroConfig} */
-module.exports = config;
+let finalConfig = withSentryConfig(config);
+
+// Restore Tamagui requirement if Sentry wrapper reset it
+finalConfig.resolver.unstable_enablePackageExports = true;
+
+module.exports = finalConfig;

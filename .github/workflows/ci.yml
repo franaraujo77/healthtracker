@@ -133,6 +133,10 @@ jobs:
         run: pnpm build -F @healthtracker/web
         env:
           SKIP_ENV_VALIDATION: "1"
+          # Optional: enables Sentry source map upload when token is configured
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium

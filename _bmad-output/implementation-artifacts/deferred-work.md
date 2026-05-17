@@ -1,5 +1,14 @@
 # Deferred Work
 
+## Deferred from: code review of 0-7-configure-sentry-error-tracking-with-pii-scrubbing (2026-05-17)
+
+- **D1: Breadcrumb `message` string not scanned for PII** — `packages/config/src/sentry.ts` — freeform breadcrumb messages (e.g., "User patient@x.com signed in") are not redacted; requires regex/NLP approach; out of scope for this story
+- **D2: Exception message/value strings not scanned for PII** — `packages/config/src/sentry.ts` — error messages like `"validation failed for patient_id=uuid"` pass through unredacted; requires structured approach; out of scope
+- **D3: `sentryBeforeSend` mutates incoming event object** — `packages/config/src/sentry.ts` — modifies properties on the argument directly; Sentry SDK doesn't reuse event references in practice so this is benign; revisit if Sentry SDK behavior changes
+- **D4: PII key list has no governance path** — `packages/config/src/sentry.ts` — new biomarker fields won't be auto-detected; no linting rule or schema cross-check; address when data model stabilises in Epic 2
+- **D5: `tracesSampleRate: 0.1` not environment-aware** — `apps/web/sentry.*.config.ts`, `apps/expo/src/app/_layout.tsx` — 10% of traces sent from dev/staging; acceptable for now; add env guard before high-traffic production launch
+- **D6: Metro `unstable_enablePackageExports` override fragile** — `apps/expo/metro.config.js` — manual re-set after `withSentryConfig` wrap may silently fail if future Sentry version changes Metro wrapper behavior; current impl works and is documented
+
 ## Deferred from: code review of 0-3-configure-supabase-auth-with-magic-link-and-email-providers (round 2, 2026-05-17)
 
 - **D1: `auth/callback` route uses `new URL(request.url).origin`** — safe on Vercel (Next.js resolves the external URL), but may return an internal origin on reverse-proxy deployments (Railway, custom ingress); revisit if the app moves off Vercel

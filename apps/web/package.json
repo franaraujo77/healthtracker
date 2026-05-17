@@ -16,9 +16,11 @@
   "dependencies": {
     "@healthtracker/api": "workspace:*",
     "@healthtracker/auth": "workspace:*",
+    "@healthtracker/config": "workspace:*",
     "@healthtracker/db": "workspace:*",
     "@healthtracker/ui": "workspace:*",
     "@healthtracker/validators": "workspace:*",
+    "@sentry/nextjs": "catalog:",
     "@supabase/ssr": "catalog:",
     "@supabase/supabase-js": "catalog:",
     "@t3-oss/env-nextjs": "^0.13.8",
