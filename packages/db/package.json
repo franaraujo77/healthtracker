@@ -19,16 +19,18 @@
   "license": "MIT",
   "scripts": {
     "build": "tsc",
+    "check": "pnpm with-env drizzle-kit check",
+    "check-safe": "pnpm with-env drizzle-kit check && bash ../../scripts/check-migration.sh",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
     "dev": "tsc",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint --flag unstable_native_nodejs_ts_config",
     "push": "pnpm with-env drizzle-kit push",
     "studio": "pnpm with-env drizzle-kit studio",
+    "test:rls": "pnpm with-env vitest run --config vitest.rls.config.ts",
+    "test:unit": "vitest run",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false",
-    "with-env": "dotenv -e ../../.env --",
-    "check-safe": "pnpm with-env drizzle-kit check && bash ../../scripts/check-migration.sh",
-    "test:rls": "pnpm with-env vitest run __tests__/rls"
+    "with-env": "dotenv -e ../../.env --"
   },
   "dependencies": {
     "@vercel/postgres": "^0.10.0",
@@ -41,12 +43,13 @@
     "@healthtracker/prettier-config": "workspace:*",
     "@healthtracker/tsconfig": "workspace:*",
     "@supabase/supabase-js": "catalog:",
+    "@vitest/coverage-v8": "catalog:",
     "drizzle-kit": "^0.31.10",
     "eslint": "catalog:",
     "postgres": "catalog:",
     "prettier": "catalog:",
     "typescript": "catalog:",
-    "vitest": "^3.2.0"
+    "vitest": "catalog:"
   },
   "prettier": "@healthtracker/prettier-config"
 }
