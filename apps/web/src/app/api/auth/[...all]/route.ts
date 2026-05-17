@@ -1,6 +1,8 @@
-// Supabase Auth callback handler
-// Full implementation (magic link exchange, PKCE) is configured in Story 0.3.
+import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
-export const GET = () => NextResponse.json({ ok: true });
-export const POST = () => NextResponse.json({ ok: true });
+// Auth is handled by /auth/callback (PKCE exchange). This legacy path redirects
+// to the error page so stale integrations don't silently appear to succeed.
+export const GET = (request: NextRequest) =>
+  NextResponse.redirect(new URL("/auth/error", request.url));
+export const POST = () => NextResponse.json({ ok: false }, { status: 404 });

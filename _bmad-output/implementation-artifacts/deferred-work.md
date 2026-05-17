@@ -1,5 +1,19 @@
 # Deferred Work
 
+## Deferred from: code review of 0-3-configure-supabase-auth-with-magic-link-and-email-providers (round 2, 2026-05-17)
+
+- **D1: `auth/callback` route uses `new URL(request.url).origin`** — safe on Vercel (Next.js resolves the external URL), but may return an internal origin on reverse-proxy deployments (Railway, custom ingress); revisit if the app moves off Vercel
+- **D2: `cancelled` flag doesn't abort in-flight `exchangeCodeForSession`** — the exchange completes after component unmount; harmless (Supabase client state is updated), cosmetic async leak; fix when RootLayout is refactored
+- **D3: `bundleIdentifier: "your.bundle.identifier"` placeholder in `app.config.ts`** — required for iOS Universal Links / Android App Links; set to real identifiers before app store submission
+- **D4: Double Supabase round-trip in `packages/auth/src/server.ts`** — see original D1 in deferred-work.md from Story 0.3 round-1 review
+
+## Deferred from: code review of 0-6-set-up-github-actions-ci-cd-pipeline (2026-05-17)
+
+- **D1: `actions/setup-node@v6` in composite action** — `tooling/github/setup/action.yml` — pre-existing; v6 may not exist as of review; verify and pin to `v4` if broken
+- **D2: `getDbUrl()` single-occurrence port replace** — `packages/db/__tests__/rls/helpers.ts` — same pattern as `drizzle.config.ts`; port string in password would corrupt the URL; use `new URL()` parser when first adversarial test is written
+- **D3: `supabase/migrations/` directory absent** — `supabase/config.toml` exists but no migrations; `supabase start` starts with blank schema; create migrations directory and seed in Epic 1 when patient-data RLS policies are needed
+- **D4: `rls-adversarial` DATABASE_URL points to remote Supabase placeholder** — harmless while all tests are `it.todo()`; the job must override DATABASE_URL to the local Supabase URL (`postgresql://postgres:postgres@127.0.0.1:54322/postgres`) before any real test is written
+
 ## Deferred from: code review of 0-5-configure-pg-boss-extraction-job-queue (2026-05-17)
 
 - **W1: `createQueue` idempotency on restart** — `services/extraction/src/index.ts` — pg-boss v12 handles schema idempotently; minor concern about retry option drift if queue options change between deploys; revisit when first real extraction queue is added in story 2.1

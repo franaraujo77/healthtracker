@@ -37,9 +37,9 @@ export default function RootLayout() {
     let cancelled = false;
 
     const handleUrl = async ({ url }: { url: string }) => {
-      if (!url.includes("auth/callback")) return;
-
       const parsed = Linking.parse(url);
+      if (parsed.path !== "/auth/callback") return;
+
       // queryParams.code can be string[] for repeated params — take first element
       const raw = parsed.queryParams?.code;
       const code = Array.isArray(raw) ? raw[0] : raw;
@@ -57,9 +57,13 @@ export default function RootLayout() {
       void handleUrl({ url });
     });
 
-    void Linking.getInitialURL().then((url) => {
-      if (!cancelled && url) void handleUrl({ url });
-    });
+    void Linking.getInitialURL()
+      .then((url) => {
+        if (!cancelled && url) void handleUrl({ url });
+      })
+      .catch((err: unknown) => {
+        console.error("[auth] getInitialURL failed:", err);
+      });
 
     return () => {
       cancelled = true;

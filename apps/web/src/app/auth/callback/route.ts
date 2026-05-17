@@ -23,6 +23,7 @@ export async function GET(request: NextRequest) {
     if (!error) {
       return NextResponse.redirect(`${origin}${next}`);
     }
+    console.error("[auth] exchangeCodeForSession failed:", error.message);
   }
 
   return NextResponse.redirect(`${origin}/auth/error`);

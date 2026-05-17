@@ -1,6 +1,6 @@
 # Story 0.3: Configure Supabase Auth with magic link and email providers
 
-Status: review
+Status: done
 
 ## Story
 
@@ -83,6 +83,17 @@ so that both patient and doctor authentication flows can be built against a stab
 - [x] [Review][Defer] Double Supabase round-trip per request in `packages/auth/src/server.ts` — `getSession()` calls `getUser()` (network) then `getSession()` (cookie) sequentially. Pre-existing in `packages/auth`; not introduced by this story. `react` `cache()` deduplicates within a single RSC render tree but this is a latency concern for high-traffic paths. — deferred, pre-existing
 
 - [x] [Review][Defer] Expo tRPC sends access token from `getSession()` (AsyncStorage) without server-side JWT re-validation — inherent trade-off of mobile auth: calling `getUser()` on every tRPC batch request would make a network call per request, which is prohibitively expensive. The server-side `protectedProcedure` validates the JWT via Supabase on every request anyway. — deferred, acceptable mobile trade-off
+
+### Review Findings (Round 2)
+
+- [x] [Review][Patch] Stale `/api/auth/[...all]/route.ts` stub still live returning `{ok:true}` — replaced with a redirect to `/auth/error` for GET and 404 for POST so stale integrations don't silently appear to succeed [`apps/web/src/app/api/auth/[...all]/route.ts`]
+- [x] [Review][Patch] No server-side error logging on failed PKCE exchange in web callback route — added `console.error` before the error redirect [`apps/web/src/app/auth/callback/route.ts`]
+- [x] [Review][Patch] Deep link URL check uses substring match `url.includes("auth/callback")` instead of parsed path comparison — changed to `Linking.parse(url).path !== "/auth/callback"` early return [`apps/expo/src/app/_layout.tsx`]
+- [x] [Review][Patch] `Linking.getInitialURL()` has no `.catch` handler — added `.catch` with `console.error` [`apps/expo/src/app/_layout.tsx`]
+- [x] [Review][Defer] `auth/callback` route constructs redirect using `new URL(request.url).origin` — on reverse-proxy deployments (Railway, custom ingress) `request.url` may reflect the internal origin; safe on Vercel (Next.js resolves the external URL); revisit if app is deployed behind a non-Vercel proxy — deferred, deployment concern
+- [x] [Review][Defer] `cancelled` flag in `getInitialURL` handler doesn't abort an in-flight `exchangeCodeForSession` — the session exchange completes after unmount; harmless (Supabase client updates its state) but async work leaks out of the component — deferred, cosmetic
+- [x] [Review][Defer] `bundleIdentifier: "your.bundle.identifier"` placeholder in `app.config.ts` — required for iOS Universal Links / Android App Links in production builds; starter template default, set before app store submission — deferred, pre-production config
+- [x] [Review][Defer] Double Supabase round-trip in `packages/auth/src/server.ts` (`getUser()` then `getSession()`) — already captured in D1 of deferred-work.md from prior review — deferred, pre-existing
 
 ## Dev Notes
 

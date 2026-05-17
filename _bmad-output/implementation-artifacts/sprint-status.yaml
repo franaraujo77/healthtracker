@@ -46,10 +46,10 @@ development_status:
   epic-0: in-progress
   0-1-initialize-monorepo-from-create-t3-turbo-starter-template: done
   0-2-configure-tamagui-design-system-with-health-tracker-tokens: done
-  0-3-configure-supabase-auth-with-magic-link-and-email-providers: review
+  0-3-configure-supabase-auth-with-magic-link-and-email-providers: done
   0-4-configure-rls-token-principal-model-and-migration-protection: done
   0-5-configure-pg-boss-extraction-job-queue: done
-  0-6-set-up-github-actions-ci-cd-pipeline: backlog
+  0-6-set-up-github-actions-ci-cd-pipeline: done
   0-7-configure-sentry-error-tracking-with-pii-scrubbing: backlog
   epic-0-retrospective: optional
 
