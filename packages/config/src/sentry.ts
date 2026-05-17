@@ -16,28 +16,46 @@ interface SentryEvent {
   user?: Record<string, unknown>;
   extra?: Record<string, unknown>;
   contexts?: Record<string, Record<string, unknown>>;
-  breadcrumbs?: { values?: Array<{ data?: Record<string, unknown> }> };
+  breadcrumbs?: { values?: { data?: Record<string, unknown> }[] };
   request?: { data?: unknown; headers?: Record<string, string> };
   tags?: Record<string, string>;
 }
 
+const SENSITIVE_HEADERS = new Set([
+  "authorization",
+  "cookie",
+  "set-cookie",
+  "x-api-key",
+]);
+
 function scrubObject(
   obj: Record<string, unknown>,
   keys: Set<string> = PII_KEYS,
+  depth = 3,
 ): Record<string, unknown> {
   const result = { ...obj };
-  for (const key of keys) {
-    if (key in result) delete result[key];
+  for (const k of Object.keys(result)) {
+    if (keys.has(k)) {
+      delete result[k];
+    } else if (
+      depth > 0 &&
+      result[k] !== null &&
+      typeof result[k] === "object" &&
+      !Array.isArray(result[k])
+    ) {
+      result[k] = scrubObject(
+        result[k] as Record<string, unknown>,
+        keys,
+        depth - 1,
+      );
+    }
   }
   return result;
 }
 
 export function sentryBeforeSend(event: SentryEvent): SentryEvent | null {
   if (event.user) {
-    event.user = scrubObject(
-      event.user as Record<string, unknown>,
-      USER_PII_KEYS,
-    );
+    event.user = scrubObject(event.user, USER_PII_KEYS);
   }
   if (event.extra) {
     event.extra = scrubObject(event.extra);
@@ -46,7 +64,7 @@ export function sentryBeforeSend(event: SentryEvent): SentryEvent | null {
     for (const ctxKey of Object.keys(event.contexts)) {
       const ctx = event.contexts[ctxKey];
       if (ctx && typeof ctx === "object") {
-        event.contexts[ctxKey] = scrubObject(ctx as Record<string, unknown>);
+        event.contexts[ctxKey] = scrubObject(ctx);
       }
     }
   }
@@ -59,6 +77,18 @@ export function sentryBeforeSend(event: SentryEvent): SentryEvent | null {
   // Redact entire request body — may contain biomarker values posted via form/API
   if (event.request?.data !== undefined) {
     event.request.data = "[Scrubbed]";
+  }
+  // Strip sensitive request headers (auth tokens, session cookies)
+  if (event.request?.headers) {
+    const scrubbed: Record<string, string> = {};
+    for (const [k, v] of Object.entries(event.request.headers)) {
+      scrubbed[k] = SENSITIVE_HEADERS.has(k.toLowerCase()) ? "[Scrubbed]" : v;
+    }
+    event.request.headers = scrubbed;
+  }
+  // Scrub PII from tags (tags are user-defined key/value pairs)
+  if (event.tags) {
+    event.tags = scrubObject(event.tags) as Record<string, string>;
   }
   return event;
 }

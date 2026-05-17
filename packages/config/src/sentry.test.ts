@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-argument */
 import { describe, expect, it } from "vitest";
 
 import { sentryBeforeSend } from "./sentry";
@@ -79,5 +80,48 @@ describe("sentryBeforeSend", () => {
     expect(result?.contexts?.patient).not.toHaveProperty("patient_id");
     expect(result?.contexts?.patient).toHaveProperty("region", "sp");
     expect(result?.contexts?.runtime).toHaveProperty("name", "node");
+  });
+
+  it("scrubs nested PII inside extra objects", () => {
+    const event = {
+      extra: {
+        biomarker: {
+          patient_id: "uuid-123",
+          value_numeric: 5.2,
+          label: "glucose",
+        },
+      },
+    };
+    const result = sentryBeforeSend(event as any);
+    const nested = result?.extra?.biomarker as Record<string, unknown>;
+    expect(nested).not.toHaveProperty("patient_id");
+    expect(nested).not.toHaveProperty("value_numeric");
+    expect(nested).toHaveProperty("label", "glucose");
+  });
+
+  it("scrubs PII keys from tags", () => {
+    const event = {
+      tags: { env: "production", patient_id: "uuid-123", email: "x@x.com" },
+    };
+    const result = sentryBeforeSend(event as any);
+    expect(result?.tags).not.toHaveProperty("patient_id");
+    expect(result?.tags).not.toHaveProperty("email");
+    expect(result?.tags).toHaveProperty("env", "production");
+  });
+
+  it("scrubs sensitive request headers", () => {
+    const event = {
+      request: {
+        headers: {
+          authorization: "Bearer token123",
+          "content-type": "application/json",
+          cookie: "session=abc",
+        },
+      },
+    };
+    const result = sentryBeforeSend(event as any);
+    expect(result?.request?.headers?.authorization).toBe("[Scrubbed]");
+    expect(result?.request?.headers?.cookie).toBe("[Scrubbed]");
+    expect(result?.request?.headers?.["content-type"]).toBe("application/json");
   });
 });

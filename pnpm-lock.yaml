@@ -493,9 +493,15 @@ importers:
 
   packages/config:
     devDependencies:
+      "@healthtracker/eslint-config":
+        specifier: workspace:*
+        version: link:../../tooling/eslint
       "@healthtracker/tsconfig":
         specifier: workspace:*
         version: link:../../tooling/typescript
+      eslint:
+        specifier: "catalog:"
+        version: 9.38.0(jiti@2.6.1)
       typescript:
         specifier: "catalog:"
         version: 5.9.3

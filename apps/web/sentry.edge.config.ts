@@ -3,7 +3,7 @@ import * as Sentry from "@sentry/nextjs";
 import { sentryBeforeSend } from "@healthtracker/config";
 
 Sentry.init({
-  dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
+  dsn: process.env.SENTRY_DSN, // server-only DSN — edge runs server-side, no NEXT_PUBLIC_ needed
   tracesSampleRate: 0.1,
   // Cast required: sentryBeforeSend uses duck-typed interfaces to avoid SDK version coupling
   beforeSend: sentryBeforeSend as Parameters<

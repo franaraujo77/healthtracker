@@ -6,12 +6,15 @@
     ".": "./src/sentry.ts"
   },
   "scripts": {
+    "lint": "eslint --flag unstable_native_nodejs_ts_config",
     "test": "vitest run",
     "test:unit": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@healthtracker/eslint-config": "workspace:*",
     "@healthtracker/tsconfig": "workspace:*",
+    "eslint": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

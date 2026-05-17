@@ -1,6 +1,6 @@
 # Story 0.7: Configure Sentry Error Tracking with PII Scrubbing
 
-Status: review
+Status: done
 
 ## Story
 
@@ -527,15 +527,15 @@ None — implementation completed without issues.
 
 ### Review Findings
 
-- [ ] [Review][Decision] `name` key not scrubbed outside user context — `name` is in `USER_PII_KEYS` (user bag only) but not in `PII_KEYS` (used for extra, breadcrumbs, contexts). Intentional to protect `runtime.name`/`browser.name`, but `extra.name = "patient John Doe"` would not be scrubbed. Decision: should bare `name` be treated as PII universally or only in user identity objects?
-- [ ] [Review][Patch] `vitest.workspace.ts` not updated — `packages/config` tests won't run via `pnpm test` from repo root [vitest.workspace.ts]
-- [ ] [Review][Patch] `SENTRY_DSN` missing from `turbo.json` globalEnv — cache won't bust when server DSN changes [turbo.json]
-- [ ] [Review][Patch] `packages/config` has no `lint` script — excluded from `pnpm lint` turbo pass [packages/config/package.json]
-- [ ] [Review][Patch] Import ordering in `_layout.tsx` — `import { supabase }` appears after `Sentry.init()` call in source, violating import-first convention and likely ESLint rules [apps/expo/src/app/_layout.tsx]
-- [ ] [Review][Patch] `event.tags` not scrubbed in `sentryBeforeSend` — PII added as Sentry tags bypasses the scrubber entirely [packages/config/src/sentry.ts]
-- [ ] [Review][Patch] `sentry.edge.config.ts` uses `NEXT_PUBLIC_SENTRY_DSN` — spec requires `SENTRY_DSN` (server-only) for server/edge configs [apps/web/sentry.edge.config.ts]
-- [ ] [Review][Patch] Request headers not scrubbed — `Authorization`, `Cookie`, and other sensitive headers in `event.request.headers` transmitted to Sentry unredacted [packages/config/src/sentry.ts]
-- [ ] [Review][Patch] Nested PII not scrubbed — `scrubObject` only deletes top-level keys; `extra: { biomarker: { patient_id: "x" } }` passes through unredacted [packages/config/src/sentry.ts]
+- [x] [Review][Decision] `name` key not scrubbed outside user context — resolved: keep `name` scrubbed only in user identity bag; `runtime.name`/`browser.name` in SDK contexts are not PII
+- [x] [Review][Patch] `vitest.workspace.ts` not updated — resolved: glob `packages/*/vitest.config.ts` already covers `packages/config` (false positive)
+- [x] [Review][Patch] `SENTRY_DSN` missing from `turbo.json` globalEnv — resolved: already present (false positive)
+- [x] [Review][Patch] `packages/config` has no `lint` script — fixed: added `lint` script to `packages/config/package.json`
+- [x] [Review][Patch] Import ordering in `_layout.tsx` — resolved: Prettier commit hook reordered imports before `Sentry.init()` (self-healing)
+- [x] [Review][Patch] `event.tags` not scrubbed in `sentryBeforeSend` — fixed: added tags scrubbing in `sentryBeforeSend` [packages/config/src/sentry.ts]
+- [x] [Review][Patch] `sentry.edge.config.ts` uses `NEXT_PUBLIC_SENTRY_DSN` — fixed: changed to `SENTRY_DSN` [apps/web/sentry.edge.config.ts]
+- [x] [Review][Patch] Request headers not scrubbed — fixed: added `SENSITIVE_HEADERS` set and header scrubbing in `sentryBeforeSend` [packages/config/src/sentry.ts]
+- [x] [Review][Patch] Nested PII not scrubbed — fixed: `scrubObject` now recurses up to depth 3 [packages/config/src/sentry.ts]
 - [x] [Review][Defer] Breadcrumb `message` string not scanned for PII [packages/config/src/sentry.ts] — deferred, freeform strings require regex/NLP approach, out of scope
 - [x] [Review][Defer] Exception message/value strings not scanned for PII [packages/config/src/sentry.ts] — deferred, out of scope
 - [x] [Review][Defer] `sentryBeforeSend` mutates incoming event object [packages/config/src/sentry.ts] — deferred, Sentry doesn't reuse event references in practice
