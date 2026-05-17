@@ -1,22 +1,100 @@
+import type { AuthChangeEvent } from "@supabase/supabase-js";
+import { useEffect } from "react";
+import * as Linking from "expo-linking";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import * as Sentry from "@sentry/react-native";
 import { QueryClientProvider } from "@tanstack/react-query";
 
+import { sentryBeforeSend } from "@healthtracker/config";
 import { TamaguiProvider } from "@healthtracker/ui";
 
+import { supabase } from "~/lib/supabase";
 import { queryClient } from "~/utils/api";
 
-export default function RootLayout() {
+Sentry.init({
+  dsn: process.env.EXPO_PUBLIC_SENTRY_DSN,
+  tracesSampleRate: 0.1,
+  enableNativeCrashHandling: true,
+  debug: __DEV__,
+  // Cast required: sentryBeforeSend uses duck-typed interfaces to avoid SDK version coupling
+  beforeSend: sentryBeforeSend as Parameters<
+    typeof Sentry.init
+  >[0]["beforeSend"],
+  // Session replay omitted — health data on screen risk (NFR-S5)
+});
+
+// SafeAreaView/Stack.screenOptions are native APIs that can't use Tamagui tokens.
+// These values must match colorTokens.primaryTeal.light and colorTokens.backgroundPrimary.light.
+const HEADER_BG = "#0D6E6E";
+const CONTENT_BG = "#F9F7F4";
+
+const AUTH_INVALIDATING_EVENTS: AuthChangeEvent[] = [
+  "SIGNED_IN",
+  "SIGNED_OUT",
+  "USER_UPDATED",
+];
+
+function RootLayout() {
+  useEffect(() => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event) => {
+      if (AUTH_INVALIDATING_EVENTS.includes(event)) {
+        void queryClient.invalidateQueries();
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const handleUrl = async ({ url }: { url: string }) => {
+      const parsed = Linking.parse(url);
+      if (parsed.path !== "/auth/callback") return;
+
+      // queryParams.code can be string[] for repeated params — take first element
+      const raw = parsed.queryParams?.code;
+      const code = Array.isArray(raw) ? raw[0] : raw;
+
+      if (code) {
+        // Requires PKCE flow enabled in Supabase Dashboard (Authentication → Settings → Auth Flow)
+        const { error } = await supabase.auth.exchangeCodeForSession(code);
+        if (error) {
+          console.error("[auth] exchangeCodeForSession failed:", error.message);
+        }
+      }
+    };
+
+    const sub = Linking.addEventListener("url", ({ url }) => {
+      void handleUrl({ url });
+    });
+
+    void Linking.getInitialURL()
+      .then((url) => {
+        if (!cancelled && url) void handleUrl({ url });
+      })
+      .catch((err: unknown) => {
+        console.error("[auth] getInitialURL failed:", err);
+      });
+
+    return () => {
+      cancelled = true;
+      sub.remove();
+    };
+  }, []);
+
   return (
     <TamaguiProvider>
       <QueryClientProvider client={queryClient}>
         <Stack
           screenOptions={{
             headerStyle: {
-              backgroundColor: "#0D6E6E",
+              backgroundColor: HEADER_BG,
             },
             contentStyle: {
-              backgroundColor: "#F9F7F4",
+              backgroundColor: CONTENT_BG,
             },
           }}
         />
@@ -25,3 +103,5 @@ export default function RootLayout() {
     </TamaguiProvider>
   );
 }
+
+export default Sentry.wrap(RootLayout);

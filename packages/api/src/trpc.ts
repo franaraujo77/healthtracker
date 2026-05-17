@@ -1,34 +1,14 @@
-/**
- * YOU PROBABLY DON'T NEED TO EDIT THIS FILE, UNLESS:
- * 1. You want to modify request context (see Part 1)
- * 2. You want to create a new middleware or type of procedure (see Part 3)
- *
- * tl;dr - this is where all the tRPC server stuff is created and plugged in.
- * The pieces you will need to use are documented accordingly near the end
- */
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import { z, ZodError } from "zod/v4";
 
 import type { Session } from "@healthtracker/auth";
+import { sql } from "@healthtracker/db";
 import { db } from "@healthtracker/db/client";
 
 /**
- * 1. CONTEXT
- *
- * This section defines the "contexts" that are available in the backend API.
- *
- * These allow you to access things when processing a request, like the database, the session, etc.
- *
- * This helper generates the "internals" for a tRPC context. The API handler and RSC clients each
- * wrap this and provides the required context.
- *
- * Story 0.3 adds full Supabase Auth session retrieval.
- * Story 0.4 adds SET LOCAL app.current_patient_id for RLS.
- *
  * @see https://trpc.io/docs/server/context
  */
-
 export const createTRPCContext = (opts: {
   headers: Headers;
   session?: Session | null;
@@ -36,14 +16,11 @@ export const createTRPCContext = (opts: {
   return {
     session: opts.session ?? null,
     db,
+    headers: opts.headers,
+    shareTokenId: undefined as string | undefined,
   };
 };
-/**
- * 2. INITIALIZATION
- *
- * This is where the trpc api is initialized, connecting the context and
- * transformer
- */
+
 const t = initTRPC.context<typeof createTRPCContext>().create({
   transformer: superjson,
   errorFormatter: ({ shape, error }) => ({
@@ -58,30 +35,12 @@ const t = initTRPC.context<typeof createTRPCContext>().create({
   }),
 });
 
-/**
- * 3. ROUTER & PROCEDURE (THE IMPORTANT BIT)
- *
- * These are the pieces you use to build your tRPC API. You should import these
- * a lot in the /src/server/api/routers folder
- */
-
-/**
- * This is how you create new routers and subrouters in your tRPC API
- * @see https://trpc.io/docs/router
- */
 export const createTRPCRouter = t.router;
 
-/**
- * Middleware for timing procedure execution and adding an articifial delay in development.
- *
- * You can remove this if you don't like it, but it can help catch unwanted waterfalls by simulating
- * network latency that would occur in production but not in local development.
- */
 const timingMiddleware = t.middleware(async ({ next, path }) => {
   const start = Date.now();
 
   if (t._config.isDev) {
-    // artificial delay in dev 100-500ms
     const waitMs = Math.floor(Math.random() * 400) + 100;
     await new Promise((resolve) => setTimeout(resolve, waitMs));
   }
@@ -94,33 +53,60 @@ const timingMiddleware = t.middleware(async ({ next, path }) => {
   return result;
 });
 
-/**
- * Public (unauthed) procedure
- *
- * This is the base piece you use to build new queries and mutations on your
- * tRPC API. It does not guarantee that a user querying is authorized, but you
- * can still access user session data if they are logged in
- */
 export const publicProcedure = t.procedure.use(timingMiddleware);
 
-/**
- * Protected (authenticated) procedure
- *
- * If you want a query or mutation to ONLY be accessible to logged in users, use this. It verifies
- * the session is valid and guarantees `ctx.session.user` is not null.
- *
- * @see https://trpc.io/docs/procedures
- */
+// SET LOCAL is transaction-scoped — must wrap the entire resolver in a transaction
+// so the RLS context variable persists for all queries the resolver executes.
 export const protectedProcedure = t.procedure
   .use(timingMiddleware)
-  .use(({ ctx, next }) => {
+  .use(async ({ ctx, next }) => {
     if (!ctx.session?.user) {
       throw new TRPCError({ code: "UNAUTHORIZED" });
     }
-    return next({
-      ctx: {
-        // infers the `session` as non-nullable
-        session: { ...ctx.session, user: ctx.session.user },
-      },
+    const session = ctx.session;
+    return ctx.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SET LOCAL app.current_patient_id = ${session.user.id}`,
+      );
+      await tx.execute(sql`SET LOCAL app.current_user_role = ${"patient"}`);
+      if (process.env.NODE_ENV === "development") {
+        console.log(
+          `[RLS] SET LOCAL app.current_patient_id = ${session.user.id}`,
+        );
+      }
+      return next({
+        ctx: {
+          session: { ...session, user: session.user },
+          db: tx,
+        },
+      });
+    });
+  });
+
+// Doctor procedure: authenticated via x-share-token header (no Supabase session).
+// Sets app.current_share_token_id instead of app.current_patient_id.
+export const doctorProcedure = t.procedure
+  .use(timingMiddleware)
+  .use(async ({ ctx, next }) => {
+    const shareTokenId = ctx.headers.get("x-share-token");
+    if (!shareTokenId) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: "SHARE_TOKEN_REQUIRED",
+      });
+    }
+    return ctx.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SET LOCAL app.current_share_token_id = ${shareTokenId}`,
+      );
+      await tx.execute(sql`SET LOCAL app.current_user_role = ${"doctor"}`);
+      return next({
+        ctx: {
+          session: ctx.session,
+          db: tx,
+          headers: ctx.headers,
+          shareTokenId,
+        },
+      });
     });
   });

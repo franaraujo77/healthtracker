@@ -1,0 +1,3 @@
+pnpm install --frozen-lockfile
+pnpm format
+pnpm typecheck

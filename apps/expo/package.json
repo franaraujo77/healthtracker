@@ -14,8 +14,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@healthtracker/config": "workspace:*",
+    "@healthtracker/ui": "workspace:*",
     "@legendapp/list": "^2.0.14",
     "@react-native-async-storage/async-storage": "^2.1.2",
+    "@sentry/react-native": "catalog:",
     "@supabase/supabase-js": "catalog:",
     "@tamagui/animations-react-native": "catalog:",
     "@tamagui/core": "catalog:",

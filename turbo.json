@@ -25,6 +25,17 @@
       "dependsOn": ["^topo", "^build"],
       "outputs": [".cache/tsbuildinfo.json"]
     },
+    "test:unit": {
+      "dependsOn": ["^build"],
+      "outputs": ["coverage/**"]
+    },
+    "test:rls": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "check": {
+      "cache": false
+    },
     "clean": {
       "cache": false
     },
@@ -46,12 +57,23 @@
   },
   "globalEnv": [
     "DATABASE_URL",
+    "SUPABASE_URL",
+    "SUPABASE_ANON_KEY",
+    "SUPABASE_SERVICE_ROLE_KEY",
     "NEXT_PUBLIC_SUPABASE_URL",
     "NEXT_PUBLIC_SUPABASE_ANON_KEY",
     "EXPO_PUBLIC_SUPABASE_URL",
     "EXPO_PUBLIC_SUPABASE_ANON_KEY",
     "CORS_ORIGIN",
-    "PORT"
+    "PORT",
+    "WORKER_DATABASE_URL",
+    "NEXT_PUBLIC_SENTRY_DSN",
+    "SENTRY_DSN",
+    "SENTRY_AUTH_TOKEN",
+    "SENTRY_ORG",
+    "SENTRY_PROJECT",
+    "EXPO_PUBLIC_SENTRY_DSN",
+    "NEXT_RUNTIME"
   ],
   "globalPassThroughEnv": [
     "NODE_ENV",

@@ -2,14 +2,13 @@ import "server-only";
 
 import { cache } from "react";
 
-import { createSupabaseServerClient } from "@healthtracker/auth/server";
+import {
+  createSupabaseServerClient,
+  getSession as getSecureSession,
+} from "@healthtracker/auth/server";
 
 export { createSupabaseServerClient };
 
-export const getSession = cache(async () => {
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  return session;
-});
+// Secure getSession: calls getUser() first to re-validate the JWT server-side,
+// unlike getSession() alone which trusts the cookie without re-validation.
+export const getSession = cache(getSecureSession);

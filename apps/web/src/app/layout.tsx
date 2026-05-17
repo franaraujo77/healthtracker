@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 
 import { TamaguiProvider } from "@healthtracker/ui";
+import { colorTokens } from "@healthtracker/ui/theme/tokens";
 
 import { env } from "~/env";
 import { TRPCReactProvider } from "~/trpc/react";
@@ -19,8 +20,14 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#F9F7F4" },
-    { media: "(prefers-color-scheme: dark)", color: "#1C1917" },
+    {
+      media: "(prefers-color-scheme: light)",
+      color: colorTokens.backgroundPrimary.light,
+    },
+    {
+      media: "(prefers-color-scheme: dark)",
+      color: colorTokens.backgroundPrimary.dark,
+    },
   ],
 };
 
