@@ -1,5 +1,14 @@
 # Deferred Work
 
+## Deferred from: code review of 0-4-configure-rls-token-principal-model-and-migration-protection (2026-05-17)
+
+- **D1: `doctorProcedure` no share token DB validation** — `packages/api/src/trpc.ts` — any non-empty `x-share-token` header sets the doctor role in RLS with no DB lookup; requires sharing token schema (story 5.2) before validation is possible
+- **D2: Applying `custom_rls_post.sql` will break `publicProcedure` read endpoints** — `post.all` / `post.byId` use no RLS transaction wrapper; once the policy is applied to the DB, anon reads will fail silently; must add an anon-safe SELECT policy or review before applying
+- **D3: `cleanupPosts` deletes by content LIKE prefix** — `packages/db/__tests__/rls/setup.ts` — no test-run scoping; low risk in local dev, but add a `beforeEach` truncation or a test-run ID before running against shared environments
+- **D4: GUC leak if pg driver closes connection without ROLLBACK** — `packages/api/src/trpc.ts` — SET LOCAL reverts on ROLLBACK; session-mode pooler handles normal cases; edge case only if connection teardown skips ROLLBACK
+- **D5: `shareTokenId: undefined as string | undefined` in base context** — `packages/api/src/trpc.ts` — minor: downstream code can't distinguish "no token" from "token not yet set"; acceptable for current story scope
+- **D6: AC3 drizzle-kit check CI gate not wired to GitHub Actions** — per dev notes, CI wiring is story 0-6; the script and npm task exist but no workflow file was modified
+
 ## Deferred from: code review of 0-3-configure-supabase-auth-with-magic-link-and-email-providers (2026-05-16)
 
 - **D1: Double Supabase round-trip per request** — `packages/auth/src/server.ts` `getSession()` calls `getUser()` (network) then `getSession()` (cookie) sequentially; pre-existing before story 0.3; `react cache()` deduplicates within a single RSC tree but is a latency concern for high traffic; consider returning a synthetic session from the `getUser()` response to avoid the second call.

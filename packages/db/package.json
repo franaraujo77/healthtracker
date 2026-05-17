@@ -26,7 +26,9 @@
     "push": "pnpm with-env drizzle-kit push",
     "studio": "pnpm with-env drizzle-kit studio",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false",
-    "with-env": "dotenv -e ../../.env --"
+    "with-env": "dotenv -e ../../.env --",
+    "check-safe": "pnpm with-env drizzle-kit check && bash ../../scripts/check-migration.sh",
+    "test:rls": "pnpm with-env vitest run __tests__/rls"
   },
   "dependencies": {
     "@vercel/postgres": "^0.10.0",
@@ -38,10 +40,13 @@
     "@healthtracker/eslint-config": "workspace:*",
     "@healthtracker/prettier-config": "workspace:*",
     "@healthtracker/tsconfig": "workspace:*",
+    "@supabase/supabase-js": "catalog:",
     "drizzle-kit": "^0.31.10",
     "eslint": "catalog:",
+    "postgres": "^3.4.4",
     "prettier": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "^3.2.0"
   },
   "prettier": "@healthtracker/prettier-config"
 }
