@@ -1,5 +1,13 @@
 # Deferred Work
 
+## Deferred from: code review of 0-5-configure-pg-boss-extraction-job-queue (2026-05-17)
+
+- **W1: `createQueue` idempotency on restart** — `services/extraction/src/index.ts` — pg-boss v12 handles schema idempotently; minor concern about retry option drift if queue options change between deploys; revisit when first real extraction queue is added in story 2.1
+- **W2: `db.ts` `sql` client not explicitly torn down** — `services/extraction/src/db.ts` — `process.exit(0)` closes connections; causes cosmetic "connection terminated unexpectedly" in Postgres logs on every restart; add `sql.end()` before `process.exit` in story 2.1 or 0-6
+- **W3: No `SIGINT` handler** — `services/extraction/src/index.ts` — `Ctrl+C` in dev skips graceful shutdown; `--watch` re-spawn may fail if advisory lock not released; add alongside SIGTERM in story 0-6
+- **W4: `JobPayload.createdAt` unvalidated string** — `packages/types/src/jobs.ts` — typed as `string`; no runtime parse guard; consumers that derive dates from this field will silently operate on bad data if a job is manually inserted; add Zod schema in story 2.1 when extraction consumers are implemented
+- **W5: `enqueue-smoke-test.ts` assumes queue exists** — `services/extraction/src/enqueue-smoke-test.ts` — does not call `createQueue` before `boss.send()`; manual tool intended to run after worker has started at least once; acceptable for smoke-test use; document in README in story 0-6
+
 ## Deferred from: code review of 0-4-configure-rls-token-principal-model-and-migration-protection (2026-05-17)
 
 - **D1: `doctorProcedure` no share token DB validation** — `packages/api/src/trpc.ts` — any non-empty `x-share-token` header sets the doctor role in RLS with no DB lookup; requires sharing token schema (story 5.2) before validation is possible

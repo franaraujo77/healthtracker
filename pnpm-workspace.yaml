@@ -2,8 +2,11 @@ packages:
   - apps/*
   - packages/*
   - tooling/*
+  - services/*
 
 catalog:
+  "@healthtracker/types": "workspace:*"
+  postgres: ^3.4.5
   "@supabase/supabase-js": ^2.49.8
   "@supabase/ssr": ^0.6.1
   "@eslint/js": ^9.38.0

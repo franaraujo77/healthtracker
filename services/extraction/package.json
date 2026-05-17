@@ -1,0 +1,26 @@
+{
+  "name": "@healthtracker/extraction-worker",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "node --experimental-strip-types --watch src/index.ts",
+    "start": "node --experimental-strip-types src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "@healthtracker/types": "workspace:*",
+    "pg-boss": "^12.18.2",
+    "postgres": "catalog:"
+  },
+  "devDependencies": {
+    "@healthtracker/eslint-config": "workspace:*",
+    "@types/node": "catalog:",
+    "eslint": "catalog:",
+    "typescript": "catalog:"
+  }
+}

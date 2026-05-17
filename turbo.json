@@ -54,7 +54,8 @@
     "EXPO_PUBLIC_SUPABASE_URL",
     "EXPO_PUBLIC_SUPABASE_ANON_KEY",
     "CORS_ORIGIN",
-    "PORT"
+    "PORT",
+    "WORKER_DATABASE_URL"
   ],
   "globalPassThroughEnv": [
     "NODE_ENV",

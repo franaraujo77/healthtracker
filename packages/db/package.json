@@ -43,7 +43,7 @@
     "@supabase/supabase-js": "catalog:",
     "drizzle-kit": "^0.31.10",
     "eslint": "catalog:",
-    "postgres": "^3.4.4",
+    "postgres": "catalog:",
     "prettier": "catalog:",
     "typescript": "catalog:",
     "vitest": "^3.2.0"

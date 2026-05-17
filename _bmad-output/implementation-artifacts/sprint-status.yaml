@@ -1,5 +1,5 @@
 # generated: 2026-05-15
-# last_updated: 2026-05-16
+# last_updated: 2026-05-17
 # project: healthtracker
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-05-15
-last_updated: 2026-05-16
+last_updated: 2026-05-17
 project: healthtracker
 project_key: NOKEY
 tracking_system: file-system
@@ -48,7 +48,7 @@ development_status:
   0-2-configure-tamagui-design-system-with-health-tracker-tokens: done
   0-3-configure-supabase-auth-with-magic-link-and-email-providers: review
   0-4-configure-rls-token-principal-model-and-migration-protection: done
-  0-5-configure-pg-boss-extraction-job-queue: backlog
+  0-5-configure-pg-boss-extraction-job-queue: done
   0-6-set-up-github-actions-ci-cd-pipeline: backlog
   0-7-configure-sentry-error-tracking-with-pii-scrubbing: backlog
   epic-0-retrospective: optional

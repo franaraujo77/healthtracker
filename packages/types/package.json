@@ -1,0 +1,21 @@
+{
+  "name": "@healthtracker/types",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false",
+    "lint": "eslint --flag unstable_native_nodejs_ts_config"
+  },
+  "devDependencies": {
+    "@healthtracker/eslint-config": "workspace:*",
+    "eslint": "catalog:",
+    "typescript": "catalog:"
+  }
+}
