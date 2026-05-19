@@ -108,6 +108,46 @@ jobs:
       - name: Start local Supabase
         run: supabase start
 
+      # Point the RLS tests at the local Supabase stack. dotenv-cli (used by
+      # `with-env`) does not overwrite variables already in the environment,
+      # so writes to $GITHUB_ENV take precedence over the .env placeholders.
+      # We parse `supabase status -o env` line-by-line rather than `eval`ing
+      # the output to avoid executing arbitrary shell if the CLI changes.
+      - name: Export local Supabase env
+        shell: bash
+        run: |
+          set -euo pipefail
+          found_api_url=0
+          found_db_url=0
+          found_anon=0
+          found_service=0
+          while IFS= read -r line; do
+            [[ "$line" =~ ^[A-Z_]+=.*$ ]] || continue
+            key="${line%%=*}"
+            val="${line#*=}"
+            # strip surrounding double quotes if present
+            val="${val#\"}"
+            val="${val%\"}"
+            case "$key" in
+              API_URL)          echo "SUPABASE_URL=$val"             >> "$GITHUB_ENV"; found_api_url=1 ;;
+              DB_URL)           echo "DATABASE_URL=$val"             >> "$GITHUB_ENV"; found_db_url=1 ;;
+              ANON_KEY)         echo "SUPABASE_ANON_KEY=$val"        >> "$GITHUB_ENV"; found_anon=1 ;;
+              SERVICE_ROLE_KEY) echo "SUPABASE_SERVICE_ROLE_KEY=$val" >> "$GITHUB_ENV"; found_service=1 ;;
+            esac
+          done < <(supabase status -o env)
+          # Fail loudly if the Supabase CLI changes its env output schema —
+          # otherwise the RLS tests would run against placeholder .env values
+          # and report misleading failures deep in the logs.
+          missing=()
+          [[ $found_api_url -eq 1 ]] || missing+=("API_URL")
+          [[ $found_db_url  -eq 1 ]] || missing+=("DB_URL")
+          [[ $found_anon    -eq 1 ]] || missing+=("ANON_KEY")
+          [[ $found_service -eq 1 ]] || missing+=("SERVICE_ROLE_KEY")
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "::error::supabase status -o env did not emit: ${missing[*]}" >&2
+            exit 1
+          fi
+
       - name: Run RLS adversarial tests
         run: pnpm test:rls
         env:

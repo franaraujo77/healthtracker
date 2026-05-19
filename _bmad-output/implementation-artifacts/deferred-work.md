@@ -1,5 +1,29 @@
 # Deferred Work
 
+## Deferred from: code review of story-1-1 round 2 (2026-05-19)
+
+- **F14: Supabase enumeration-prevention obscures duplicates with email-confirm enabled** — `packages/validators/src/index.ts`, `apps/web/src/app/auth/register/register-form.tsx`, `apps/expo/src/app/register.tsx` — when Supabase has email-confirm on, `signUp` for an already-registered email returns success with an obfuscated user payload (no error code). `isDuplicateEmailError` cannot detect this; the user is told "verify your email" but no email arrives. The only client-side fix is a server-side existence check (admin API), itself an enumeration oracle. Revisit as a PRD-level privacy/UX tradeoff.
+- **F15: No "Entrar" affordance on the duplicate-email error message** — `apps/web/src/app/auth/register/register-form.tsx`, `apps/expo/src/app/register.tsx` — AC2's message text is exact but offers no recovery path. UX enhancement.
+- **F16: Web and Expo implement registration twice** — `apps/web/.../register-form.tsx` uses `@tanstack/react-form`; `apps/expo/src/app/register.tsx` uses `useState`. Two validation/error-rendering pipelines, two drift surfaces. Extract a shared submit handler.
+- **F17: `$biomarkerDeviation` Tamagui token mismatched for form errors** — `apps/expo/src/app/register.tsx`, `packages/ui/src/theme/tokens.ts` — the amber token is for biomarker deviation, not form-validation hints. Add a dedicated `$warning` / `$help` semantic token in a design-system pass.
+- **F18: Web form field-error rendering depends on TanStack adapter shape** — `apps/web/src/app/auth/register/register-form.tsx` — `(typeof e === "string" ? e : e?.message)` works today because Zod v4 issues have `.message`, but is fragile. Add a regression test once apps have component-test infra (see F11).
+
+## Deferred from: code review of story-1-1 (2026-05-19)
+
+- **F1: User-enumeration via distinct duplicate-email message** — `apps/web/src/app/auth/register/register-form.tsx`, `apps/expo/src/app/register.tsx` — AC2 explicitly mandates the message "Já existe uma conta com esse e-mail. Tente entrar.", which is a textbook account-enumeration oracle for an LGPD product. Spec-level tradeoff; revisit at PRD level if privacy review flags it.
+- **F2: Password policy strength (8 chars + ≥1 digit only)** — `packages/validators/src/index.ts` — AC1 specifies this rule; below current NIST/OWASP guidance for PHI. Revisit when stronger password policy is on the security roadmap.
+- **F3: No rate-limit / captcha on registration** — `apps/web/src/app/auth/register/register-form.tsx`, `apps/expo/src/app/register.tsx` — Supabase has built-in rate limiting; revisit if abuse appears.
+- **F4: No FK from `users.id` to `auth.users`** — `packages/db/src/schema/users.ts` — cross-schema FK pattern decision; deleting a Supabase auth user leaves orphaned app rows. Architecture-level call.
+- **F5: No FK on `audit_log.actor_id` / `resource_id`** — `packages/db/src/schema/audit.ts` — same pattern as F4.
+- **F6: No DB-level enum/check on `subscription_tier`, `actor_type`** — `packages/db/src/schema/{users,audit}.ts` — TS-only union; defenses-in-depth would add a CHECK constraint or pgEnum.
+- **F7: No indexes on `audit_log(actor_id)` or `audit_log(resource_id, created_at)`** — Story 1.4 is the SELECT consumer; performance concern only once the log grows.
+- **F8: `FORCE ROW LEVEL SECURITY` not enabled on any policy** — `packages/db/policies/custom_rls_*.sql` — table owner bypasses RLS; matches the Story 0.4 placeholder pattern. Cross-cutting; address in a dedicated policy-hardening pass.
+- **F9: `audit_log` INSERT policy does not constrain `resource_id`** — `packages/db/policies/custom_rls_audit_log.sql` — only `actor_id` is checked; future audit writers could log events referencing other patients' resourceIds. Revisit when additional `writeAuditLog` callers ship.
+- **F10: System-actor audit writes blocked by current RLS** — `packages/db/policies/custom_rls_audit_log.sql` — `actorType: 'system'` writes fail the WITH CHECK because no `app.current_patient_id` is set. Revisit when first system event ships.
+- **F11: No component/E2E tests for the registration UI** — `apps/web/.../register-form.tsx`, `apps/expo/src/app/register.tsx` — no test infra in the apps yet; revisit when E2E (Playwright/Maestro) bootstraps.
+- **F12: `account.test.ts` mocks the entire Drizzle chain ("test the mock")** — `packages/api/__tests__/account.test.ts` — provides limited protection against real failure modes (RLS denial, schema drift). The RLS adversarial test gives the integration coverage.
+- **F13: Story Task 4 wording says `publicProcedure`, implementation uses `protectedProcedure`** — `packages/api/src/router/account.ts` — deliberate architecture decision approved by the user (client signUp + protectedProcedure initializeProfile). Recommend updating the story Task 4 text in a follow-up edit so the spec matches the code.
+
 ## Deferred from: code review of 0-7-configure-sentry-error-tracking-with-pii-scrubbing round 4 (2026-05-17)
 
 - **D10: Array traversal does not consume depth budget** — `packages/config/src/sentry.ts` — `scrubItem` recurses into nested arrays via `item.map(scrubItem)` without decrementing depth; only the final `scrubObject` call decrements; a structure `extra → obj → obj → [[obj → {patient_id}]]` at depth=3 scrubs correctly, but `extra → obj → obj → [[obj → { sub: {patient_id} }]]` leaks at the `sub` level (depth exhausted); fix requires explicit depth parameter through `scrubArr`; benign for typical flat Sentry payloads; **→ Epic 2: revisit when biomarker data model is finalized**

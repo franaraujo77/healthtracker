@@ -24,9 +24,13 @@ export interface IdentityOptions {
 }
 
 function getDbUrl(): string {
-  const url = process.env.DATABASE_URL?.replace(":6543", ":5432");
-  if (!url) throw new Error("DATABASE_URL not set");
-  return url;
+  const raw = process.env.DATABASE_URL;
+  if (!raw) throw new Error("DATABASE_URL not set");
+  // Parse the URL so only the connection port is rewritten — a bare string
+  // replace of ":6543" could also corrupt a password or host that contains it.
+  const url = new URL(raw);
+  if (url.port === "6543") url.port = "5432";
+  return url.toString();
 }
 
 /**

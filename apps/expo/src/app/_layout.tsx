@@ -10,7 +10,7 @@ import { sentryBeforeSend } from "@healthtracker/config";
 import { TamaguiProvider } from "@healthtracker/ui";
 
 import { supabase } from "~/lib/supabase";
-import { queryClient } from "~/utils/api";
+import { queryClient, trpcClient } from "~/utils/api";
 
 Sentry.init({
   dsn: process.env.EXPO_PUBLIC_SENTRY_DSN,
@@ -63,6 +63,18 @@ function RootLayout() {
         const { error } = await supabase.auth.exchangeCodeForSession(code);
         if (error) {
           console.error("[auth] exchangeCodeForSession failed:", error.message);
+          return;
+        }
+        // The patient has just verified their email — create the `users` row
+        // and write the `patient.created` audit event (Story 1.1 AC1 / AC4).
+        // initializeProfile is idempotent so a re-fired deep link is safe.
+        try {
+          await trpcClient.account.initializeProfile.mutate();
+        } catch (initError) {
+          console.error(
+            "[auth] initializeProfile failed:",
+            initError instanceof Error ? initError.message : initError,
+          );
         }
       }
     };
