@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-05-15
-last_updated: 2026-05-19
+last_updated: 2026-05-20
 project: healthtracker
 project_key: NOKEY
 tracking_system: file-system
@@ -57,7 +57,7 @@ development_status:
   epic-1: in-progress
   1-1-patient-creates-account-with-email-and-password: done
   1-2-patient-provides-lgpd-compliant-consent-per-data-type-at-onboarding: done
-  1-3-patient-enables-biometric-authentication: backlog
+  1-3-patient-enables-biometric-authentication: done
   1-4-patient-views-and-manages-active-consent-agreements: backlog
   1-5-patient-imports-prior-lab-results-during-onboarding: backlog
   epic-1-retrospective: optional

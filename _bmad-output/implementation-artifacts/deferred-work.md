@@ -124,3 +124,23 @@
 - **W7: `CreatePostSchema` caps `content` at 256 chars** — **→ Won't fix: starter template artifact; post table is not used in production**
 - **W8: `drizzle.config.ts` port-replace logic** — **→ Pre-launch gate: linked to W2 DB adapter replacement**
 - **W9: `POSTGRES_URL` optional in env validation** — **→ Pre-launch gate: make required once DB adapter is settled**
+
+## Deferred from: code review of story-1.3 (2026-05-20)
+
+- **F19** Cold-launch uses `getSession()` without refresh — expired session passes the gate; tRPC will surface the failure on first call. → Acceptable v1.
+- **F20** `disableDeviceFallback: false` lets device passcode count as "biometric result" — Clarification-acknowledged. → Revisit if stricter UX requested.
+- **F21** Double-tap race on Concordo / Enable buttons — `disabled={pending}` covers typical case; ref-guard if telemetry shows duplicates.
+- **F22** `pending` state not in a11y live region on either biometric screen — joins F11 (no app-level a11y test infra).
+- **F23** `capability === 'idle'` spinner with `flex={1}` may push skip CTA offscreen on small devices — verify on simulator.
+- **F24** No timeout on `Promise.all([getSession, SecureStore.getItem])` in `_layout.tsx` — local APIs are reliable; fail-open is acceptable.
+- **F25** `useBiometric().isEnabled` exposed but unused — reserved for the Story 1.4 Settings biometric toggle.
+- **F26** `disable()` swallows `deleteItemAsync` errors — logging would help diagnose stuck-on-relaunch reports.
+- **F27** Lock screen has no manual escape (cancel forever → stuck); Clarification #3-acknowledged. Add "Sair / Usar senha" when a sign-in screen ships.
+- **F28** Onboarding biometric offer screen lacks session-presence guard — only reachable from `/onboarding/consent` (which requires a session). Theoretical gap; joins F11.
+- **F29** Cannot distinguish user-initiated `SIGNED_OUT` from token-refresh-induced `SIGNED_OUT`; the `SecureStore.deleteItemAsync(BIOMETRIC_ENABLED_KEY)` in the auth-change listener may wipe the preference during a transient refresh failure. Requires Supabase to surface intent metadata.
+- **F30** Double-tap race on Unlock button (lock screen) — same family as F21; add ref-guard if telemetry shows duplicates.
+- **F31** Warm-launch deep-link not protected by P3's `/auth/callback` guard — only the cold-launch `getInitialURL()` path is gated. Low real-world likelihood.
+- **F32** `BackHandler` on the lock screen returns `true` unconditionally — future modals would not be dismissable via Android back. Revisit when the first overlay ships.
+- **F33** `'unavailable'` UX over-rotates: signs the patient out and forces re-registration for a recoverable OS-side biometric state change. Soften when `/login` screen lands.
+- **F34** `fallbackToRegistration` runs `disable()` and `signOut()` sequentially with no progress indicator — slow / offline devices freeze the button. Parallelize + show progress.
+- **F35** Lock-screen mount effect deps `[router]` — `useRouter()` identity is conventionally stable but not contractual. Use the imported `router` singleton with empty deps.

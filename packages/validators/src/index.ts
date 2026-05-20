@@ -144,6 +144,13 @@ export type ConsentDeclineInput = z.infer<typeof ConsentDeclineInputSchema>;
 /** Routes the onboarding flow and post-consent flow target. */
 export const ONBOARDING_CONSENT_ROUTE = "/onboarding/consent";
 export const INICIO_ROUTE = "/inicio";
+/**
+ * Registration route. No dedicated sign-in screen exists yet (Clarification
+ * #4) — the lock-screen three-fail fallback signs the user out and routes
+ * here; registration surfaces "already exists" on re-submit. Update to a
+ * `/login` constant when a sign-in screen ships.
+ */
+export const REGISTER_ROUTE = "/register";
 
 /**
  * pt-BR copy for the three onboarding consent screens. Plain language,
@@ -213,3 +220,69 @@ export const GENERIC_CONSENT_ERROR_MESSAGE_PT_BR =
  */
 export const VERIFY_EMAIL_MESSAGE_PT_BR =
   "Enviamos um link de verificação para o seu e-mail. Clique nele para continuar.";
+
+// =============================================================================
+// Story 1.3 — Biometric authentication (mobile-only)
+// =============================================================================
+
+/**
+ * Onboarding offer-screen route. Reached after the LGPD consent flow
+ * (Story 1.2) completes; replaces the previous direct hop to INICIO_ROUTE
+ * so the patient is asked once about biometric before landing on Início.
+ */
+export const BIOMETRIC_ROUTE = "/onboarding/biometric";
+
+/**
+ * Lock / unlock screen route. Lives under the `(auth)` Expo Router group
+ * (architecture.md lines 986–988). The group parentheses do not appear
+ * in the URL; the path the router actually sees is `/biometric`.
+ */
+export const BIOMETRIC_LOCK_ROUTE = "/biometric";
+
+/**
+ * pt-BR copy for the biometric offer screen (Task 3) and lock screen
+ * (Task 5). Plain language, 8th-grade reading level (UX-DR20). The
+ * "Usar biometria" wording matches AC2 exactly — we deliberately do NOT
+ * branch to "Usar Face ID" / "Usar digital" yet (Clarification #2).
+ */
+export const BIOMETRIC_TITLE_PT_BR = "Proteção extra";
+
+export const BIOMETRIC_BODY_PT_BR =
+  "Use Face ID ou sua digital para destravar o app rapidamente. Os seus dados de saúde continuam protegidos — a biometria só serve para abrir o app neste aparelho.";
+
+export const BIOMETRIC_ENABLE_CTA_PT_BR = "Usar biometria";
+
+/**
+ * Unlock-screen CTA. Same wording as the enable CTA today (Clarification
+ * #2), but a dedicated constant so the two surfaces can diverge without
+ * a refactor — e.g., a future "Destravar com biometria" only touches
+ * this constant.
+ */
+export const BIOMETRIC_UNLOCK_CTA_PT_BR = "Usar biometria";
+
+export const BIOMETRIC_SKIP_CTA_PT_BR = "Pular por agora";
+
+export const BIOMETRIC_UNAVAILABLE_MESSAGE_PT_BR =
+  "O seu dispositivo não suporta biometria — você pode ativar mais tarde nas configurações.";
+
+/** Native prompt strings passed to `LocalAuthentication.authenticateAsync`. */
+export const BIOMETRIC_ENROLL_PROMPT_PT_BR =
+  "Confirme com biometria para ativar";
+export const BIOMETRIC_UNLOCK_PROMPT_PT_BR =
+  "Confirme com biometria para entrar";
+export const BIOMETRIC_CANCEL_PT_BR = "Cancelar";
+
+/**
+ * Lock-screen body copy.
+ */
+export const BIOMETRIC_LOCK_TITLE_PT_BR = "Health Tracker";
+export const BIOMETRIC_LOCK_BODY_PT_BR =
+  "Confirme com biometria para acessar a sua conta.";
+
+/**
+ * Generic pt-BR error shown when an `authenticateAsync` call fails for a
+ * reason we don't want to surface verbatim. Distinct from registration /
+ * consent error strings so the three flows can diverge later.
+ */
+export const GENERIC_BIOMETRIC_ERROR_MESSAGE_PT_BR =
+  "Não conseguimos confirmar — tente de novo.";

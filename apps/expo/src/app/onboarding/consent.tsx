@@ -8,12 +8,12 @@ import { Text, XStack, YStack } from "tamagui";
 import type { ConsentScreenType } from "@healthtracker/validators";
 import { Button } from "@healthtracker/ui/button";
 import {
+  BIOMETRIC_ROUTE,
   CONSENT_SCREEN_COPY,
   CONSENT_SCREEN_TYPES,
   CONSENT_TEXT_VERSION,
   CONSENT_VERSION_LABEL_PT_BR,
   GENERIC_CONSENT_ERROR_MESSAGE_PT_BR,
-  INICIO_ROUTE,
 } from "@healthtracker/validators";
 
 import { trpc } from "~/utils/api";
@@ -37,7 +37,10 @@ export default function Consent() {
 
   function advance() {
     if (isLast) {
-      router.replace({ pathname: INICIO_ROUTE });
+      // Story 1.3 — biometric offer is the last onboarding step. It
+      // hands off to /inicio whether the patient enables or skips,
+      // preserving the AC5 contract from Story 1.2.
+      router.replace({ pathname: BIOMETRIC_ROUTE });
       return;
     }
     setStepIndex((i) => i + 1);

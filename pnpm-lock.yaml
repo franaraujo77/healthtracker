@@ -221,6 +221,9 @@ importers:
       expo-linking:
         specifier: ~8.0.8
         version: 8.0.8(expo@54.0.20)(react-native@0.81.5(@babel/core@7.28.5)(@types/react@19.1.12)(bufferutil@4.0.8)(react@19.1.4))(react@19.1.4)
+      expo-local-authentication:
+        specifier: ~17.0.8
+        version: 17.0.8(expo@54.0.20)
       expo-router:
         specifier: ~6.0.13
         version: 6.0.13(d10be77990374ab5c39d67bfbef558ea)
@@ -9041,6 +9044,14 @@ packages:
     peerDependencies:
       react: "*"
       react-native: "*"
+
+  expo-local-authentication@17.0.8:
+    resolution:
+      {
+        integrity: sha512-Q5fXHhu6w3pVPlFCibU72SYIAN+9wX7QpFn9h49IUqs0Equ44QgswtGrxeh7fdnDqJrrYGPet5iBzjnE70uolA==,
+      }
+    peerDependencies:
+      expo: "*"
 
   expo-manifests@1.0.8:
     resolution:
@@ -21096,6 +21107,11 @@ snapshots:
     transitivePeerDependencies:
       - expo
       - supports-color
+
+  expo-local-authentication@17.0.8(expo@54.0.20):
+    dependencies:
+      expo: 54.0.20(@babel/core@7.28.5)(@expo/metro-runtime@6.1.1)(bufferutil@4.0.8)(expo-router@6.0.13)(graphql@15.8.0)(react-native@0.81.5(@babel/core@7.28.5)(@types/react@19.1.12)(bufferutil@4.0.8)(react@19.1.4))(react@19.1.4)
+      invariant: 2.2.4
 
   expo-manifests@1.0.8(expo@54.0.20):
     dependencies:
