@@ -82,3 +82,134 @@ export function isDuplicateEmailError(error: SignUpErrorLike): boolean {
     typeof error.code === "string" && DUPLICATE_EMAIL_CODES.has(error.code)
   );
 }
+
+// =============================================================================
+// Story 1.2 — LGPD consent at onboarding
+// =============================================================================
+
+/**
+ * Full vocabulary of `consent_type_enum` values (mirrors the pgEnum in
+ * `packages/db/src/schema/consent.ts`). Story 1.2 writes the first three;
+ * the rest are reserved for Epic 4 (Letter) and Epic 5 (sharing) so we
+ * don't need a separate enum migration later.
+ */
+export const CONSENT_DATA_TYPES = [
+  "blood_test_results",
+  "bioimpedance",
+  "ai_narrative",
+  "health_data_processing",
+  "ai_extraction",
+  "doctor_sharing",
+  "llm_letter_generation",
+] as const;
+
+export type ConsentDataType = (typeof CONSENT_DATA_TYPES)[number];
+
+/**
+ * The three consent surfaces shown during onboarding (AC1).
+ */
+export const CONSENT_SCREEN_TYPES = [
+  "blood_test_results",
+  "bioimpedance",
+  "ai_narrative",
+] as const satisfies readonly ConsentDataType[];
+
+export type ConsentScreenType = (typeof CONSENT_SCREEN_TYPES)[number];
+
+/**
+ * ISO date format. Bump on every legal-copy change. Sortable and
+ * human-readable. Stored on every `consent_grants` row for FR33 audit.
+ */
+export const CONSENT_TEXT_VERSION = "2026-05-19";
+
+/**
+ * Patient-facing grant/decline procedures accept only the three onboarding
+ * screen types. Broader `consent_type` values (`doctor_sharing`,
+ * `llm_letter_generation`, etc.) belong to later epics with their own
+ * surfaces — narrowing here prevents a client from pre-granting those
+ * categories via the patient UI.
+ */
+export const ConsentGrantInputSchema = z.object({
+  consentType: z.enum(CONSENT_SCREEN_TYPES),
+  version: z.string().min(1),
+});
+export type ConsentGrantInput = z.infer<typeof ConsentGrantInputSchema>;
+
+export const ConsentDeclineInputSchema = z.object({
+  consentType: z.enum(CONSENT_SCREEN_TYPES),
+  version: z.string().min(1),
+});
+export type ConsentDeclineInput = z.infer<typeof ConsentDeclineInputSchema>;
+
+/** Routes the onboarding flow and post-consent flow target. */
+export const ONBOARDING_CONSENT_ROUTE = "/onboarding/consent";
+export const INICIO_ROUTE = "/inicio";
+
+/**
+ * pt-BR copy for the three onboarding consent screens. Plain language,
+ * 8th-grade reading level (UX-DR20). The AI narrative body names
+ * Anthropic explicitly (AC4). Decline-consequence sentences follow the
+ * UX spec's consequence-language pattern (UX spec line 1214).
+ */
+interface ConsentScreenCopy {
+  title: string;
+  body: string;
+  primaryCta: string;
+  secondaryCta: string;
+  declineConsequence: string;
+}
+
+export const CONSENT_SCREEN_COPY: Record<ConsentScreenType, ConsentScreenCopy> =
+  {
+    blood_test_results: {
+      title: "Resultados de exames de sangue",
+      body: "Para acompanhar a sua história de saúde, vamos guardar os resultados dos seus exames de sangue (como ferritina, glicose e colesterol). Os valores ficam protegidos no app e só você decide com quem compartilhar.",
+      primaryCta: "Concordo",
+      secondaryCta: "Pular por agora",
+      declineConsequence:
+        "Sem este consentimento, você não poderá enviar exames de sangue — seu cadastro continua ativo.",
+    },
+    bioimpedance: {
+      title: "Medidas de bioimpedância",
+      body: "Vamos guardar as suas medidas de bioimpedância (como massa magra, gordura corporal e água) para mostrar como elas mudam ao longo do tempo. Os dados ficam protegidos e privados.",
+      primaryCta: "Concordo",
+      secondaryCta: "Pular por agora",
+      declineConsequence:
+        "Sem este consentimento, você não poderá enviar medidas de bioimpedância — seu cadastro continua ativo.",
+    },
+    ai_narrative: {
+      title: "Geração de A Carta com IA",
+      body: "Para criar A Carta — um relato pessoal dos seus resultados — enviamos seus exames de sangue e bioimpedância à Anthropic, nossa provedora de IA, que tem acordo de proteção de dados em vigor. A Anthropic não usa seus dados para treinar modelos.",
+      primaryCta: "Concordo",
+      secondaryCta: "Pular por agora",
+      declineConsequence:
+        "Sem este consentimento, A Carta e as sugestões de conversa com o médico não serão geradas — seus dados continuam protegidos no app.",
+    },
+  };
+
+/** Header shown above the version identifier on each consent screen. */
+export const CONSENT_VERSION_LABEL_PT_BR = "Versão do termo";
+
+/**
+ * Headline and CTA shown on the Início empty state (AC5). The headline is
+ * forward-looking per UX-DR10; the CTA is the exact pt-BR text from AC5.
+ */
+export const INICIO_HEADLINE_PT_BR = "Sua história de saúde começa aqui";
+export const INICIO_CTA_PT_BR = "Enviar resultado";
+
+/**
+ * Generic pt-BR error shown when a consent.grant / consent.decline call
+ * fails for a reason we don't want to surface verbatim. Distinct from the
+ * registration error string so the two flows can diverge later.
+ */
+export const GENERIC_CONSENT_ERROR_MESSAGE_PT_BR =
+  "Não foi possível registrar agora. Tente novamente.";
+
+/**
+ * Message shown on the registration screen when Supabase has email
+ * confirmation enabled and signUp succeeded without issuing a session.
+ * The patient must click the verification link before the consent flow
+ * is reachable; routing to consent here would dead-end on UNAUTHORIZED.
+ */
+export const VERIFY_EMAIL_MESSAGE_PT_BR =
+  "Enviamos um link de verificação para o seu e-mail. Clique nele para continuar.";

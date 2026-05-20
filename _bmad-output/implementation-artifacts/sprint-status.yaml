@@ -56,7 +56,7 @@ development_status:
   # Epic 1: Patient Can Create an Account and Their Health Record Begins
   epic-1: in-progress
   1-1-patient-creates-account-with-email-and-password: done
-  1-2-patient-provides-lgpd-compliant-consent-per-data-type-at-onboarding: backlog
+  1-2-patient-provides-lgpd-compliant-consent-per-data-type-at-onboarding: done
   1-3-patient-enables-biometric-authentication: backlog
   1-4-patient-views-and-manages-active-consent-agreements: backlog
   1-5-patient-imports-prior-lab-results-during-onboarding: backlog

@@ -15,6 +15,7 @@ import {
   normalizeEmail,
   PASSWORD_HELPER_TEXT_PT_BR,
   RegisterSchema,
+  VERIFY_EMAIL_MESSAGE_PT_BR,
 } from "@healthtracker/validators";
 
 import { createSupabaseClient } from "~/auth/client";
@@ -24,6 +25,7 @@ export function RegisterForm() {
   const router = useRouter();
   const trpc = useTRPC();
   const [serverError, setServerError] = useState<string | null>(null);
+  const [serverNotice, setServerNotice] = useState<string | null>(null);
 
   const initializeProfile = useMutation(
     trpc.account.initializeProfile.mutationOptions(),
@@ -34,6 +36,7 @@ export function RegisterForm() {
     validators: { onSubmit: RegisterSchema },
     onSubmit: async ({ value }) => {
       setServerError(null);
+      setServerNotice(null);
       // signUp is performed client-side so the resulting session is held by
       // the Supabase client; the subsequent protectedProcedure call runs under
       // that session (RLS SET LOCAL handled by the tRPC middleware).
@@ -55,10 +58,15 @@ export function RegisterForm() {
         return;
       }
       if (!data.session) {
-        // Email-confirmation enabled in Supabase — patient must verify before
-        // a session exists. The /auth/callback handler will call
-        // initializeProfile once verification completes.
-        router.push("/onboarding/consent");
+        // Email-confirmation enabled in Supabase — signUp returned no
+        // session. Routing to /onboarding/consent here would dead-end on
+        // UNAUTHORIZED because every consent.grant requires a session.
+        // Surface the verification notice in the *notice* slot — it's an
+        // informational success-path message, not an error. Routing the
+        // user into /onboarding/consent now would dead-end on UNAUTHORIZED.
+        // /auth/callback will call initializeProfile and route into
+        // consent after the patient clicks the verification link.
+        setServerNotice(VERIFY_EMAIL_MESSAGE_PT_BR);
         return;
       }
       try {
@@ -130,6 +138,11 @@ export function RegisterForm() {
           </div>
         )}
       />
+      {serverNotice && (
+        <p role="status" className="text-sm text-stone-700">
+          {serverNotice}
+        </p>
+      )}
       {serverError && (
         <p role="alert" className="text-sm text-amber-700">
           {serverError}

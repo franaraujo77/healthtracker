@@ -1,5 +1,10 @@
 export { Button } from "./button";
 export { DropdownMenu, DropdownMenuItem } from "./dropdown-menu";
+export { EmptyStateRecord } from "./empty-state-record";
+export type {
+  EmptyStateRecordProps,
+  EmptyStateRecordVariant,
+} from "./empty-state-record";
 export { Field, FieldGroup, FieldInput, FieldRow } from "./field";
 export { Input } from "./input";
 export { Label } from "./label";

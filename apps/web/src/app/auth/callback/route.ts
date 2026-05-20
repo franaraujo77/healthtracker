@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 
 import { appRouter, createTRPCContext } from "@healthtracker/api";
 import { createSupabaseServerClient } from "@healthtracker/auth/server";
+import { ONBOARDING_CONSENT_ROUTE } from "@healthtracker/validators";
 
 // Validates `next` is a safe relative path to prevent open-redirect attacks.
 // Rejects protocol-relative URLs (//evil.com) and absolute URLs.
@@ -34,16 +35,35 @@ export async function GET(request: NextRequest) {
         headers: request.headers,
         session: exchangeData.session,
       });
+      const caller = appRouter.createCaller(ctx);
+
+      // Default to consent: if `initializeProfile` throws we can't tell
+      // whether the patient is consent-complete, and landing a brand-new
+      // patient on a health-data screen would violate Story 1.2 AC3.
+      let destination: string = ONBOARDING_CONSENT_ROUTE;
       try {
-        await appRouter.createCaller(ctx).account.initializeProfile();
+        await caller.account.initializeProfile();
+        // initializeProfile succeeded → profile exists. From here we
+        // trust `next` as the safe default: a transient `consent.list`
+        // failure would otherwise bounce consent-complete returning
+        // users back through onboarding.
+        try {
+          const grants = await caller.consent.list();
+          destination = grants.length === 0 ? ONBOARDING_CONSENT_ROUTE : next;
+        } catch (listError) {
+          console.error(
+            "[auth/callback] consent.list failed (assuming completed):",
+            listError instanceof Error ? listError.message : listError,
+          );
+          destination = next;
+        }
       } catch (initError) {
-        // Don't block sign-in — the next protected call will retry.
         console.error(
           "[auth/callback] initializeProfile failed:",
           initError instanceof Error ? initError.message : initError,
         );
       }
-      return NextResponse.redirect(`${origin}${next}`);
+      return NextResponse.redirect(`${origin}${destination}`);
     }
     console.error("[auth] exchangeCodeForSession failed:", error.message);
   }

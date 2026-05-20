@@ -13,6 +13,7 @@ import {
   normalizeEmail,
   PASSWORD_HELPER_TEXT_PT_BR,
   RegisterSchema,
+  VERIFY_EMAIL_MESSAGE_PT_BR,
 } from "@healthtracker/validators";
 
 import { supabase } from "~/lib/supabase";
@@ -31,6 +32,7 @@ export default function Register() {
     password?: string;
   }>({});
   const [serverError, setServerError] = useState<string | null>(null);
+  const [serverNotice, setServerNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const initializeProfile = useMutation(
@@ -39,6 +41,7 @@ export default function Register() {
 
   async function onSubmit() {
     setServerError(null);
+    setServerNotice(null);
     setFieldErrors({});
 
     const parsed = RegisterSchema.safeParse({ email, password });
@@ -66,13 +69,16 @@ export default function Register() {
         return;
       }
       if (!data.session) {
-        // Email-confirmation enabled — no session yet. The deep-link handler
-        // in app/_layout.tsx will call initializeProfile after verification.
-        router.replace("/onboarding/consent");
+        // Email-confirmation enabled — signUp returned no session. Use
+        // the *notice* slot (this is success-path information, not an
+        // error). Routing into consent now would dead-end on UNAUTHORIZED.
+        // The deep-link handler in app/_layout.tsx will call
+        // initializeProfile and route into consent after verification.
+        setServerNotice(VERIFY_EMAIL_MESSAGE_PT_BR);
         return;
       }
       await initializeProfile.mutateAsync();
-      router.replace("/onboarding/consent");
+      router.replace({ pathname: "/onboarding/consent" });
     } catch {
       setServerError(GENERIC_REGISTRATION_ERROR_MESSAGE_PT_BR);
     } finally {
@@ -140,8 +146,25 @@ export default function Register() {
           )}
         </YStack>
 
+        {serverNotice && (
+          <Text
+            fontFamily="$body"
+            fontSize="$3"
+            color="$textSecondary"
+            accessibilityRole={undefined}
+            accessibilityLiveRegion="polite"
+          >
+            {serverNotice}
+          </Text>
+        )}
         {serverError && (
-          <Text fontFamily="$body" fontSize="$3" color="$biomarkerDeviation">
+          <Text
+            fontFamily="$body"
+            fontSize="$3"
+            color="$biomarkerDeviation"
+            accessibilityRole="alert"
+            accessibilityLiveRegion="polite"
+          >
             {serverError}
           </Text>
         )}

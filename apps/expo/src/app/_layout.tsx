@@ -1,13 +1,14 @@
 import type { AuthChangeEvent } from "@supabase/supabase-js";
 import { useEffect } from "react";
 import * as Linking from "expo-linking";
-import { Stack } from "expo-router";
+import { router, Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import * as Sentry from "@sentry/react-native";
 import { QueryClientProvider } from "@tanstack/react-query";
 
 import { sentryBeforeSend } from "@healthtracker/config";
 import { TamaguiProvider } from "@healthtracker/ui";
+import { ONBOARDING_CONSENT_ROUTE } from "@healthtracker/validators";
 
 import { supabase } from "~/lib/supabase";
 import { queryClient, trpcClient } from "~/utils/api";
@@ -70,11 +71,30 @@ function RootLayout() {
         // initializeProfile is idempotent so a re-fired deep link is safe.
         try {
           await trpcClient.account.initializeProfile.mutate();
+          // initializeProfile succeeded → profile exists. A failing
+          // consent.list now is treated as "assume completed" so a
+          // transient blip doesn't bounce returning users back through
+          // onboarding.
+          try {
+            const grants = await trpcClient.consent.list.query();
+            if (grants.length === 0) {
+              router.replace({ pathname: ONBOARDING_CONSENT_ROUTE });
+            }
+          } catch (listError) {
+            console.error(
+              "[auth] consent.list failed (assuming completed):",
+              listError instanceof Error ? listError.message : listError,
+            );
+          }
         } catch (initError) {
+          // Safe fallback: if we can't tell whether the patient has been
+          // initialized, send them through consent rather than land them
+          // on a health-data screen.
           console.error(
             "[auth] initializeProfile failed:",
             initError instanceof Error ? initError.message : initError,
           );
+          router.replace({ pathname: ONBOARDING_CONSENT_ROUTE });
         }
       }
     };

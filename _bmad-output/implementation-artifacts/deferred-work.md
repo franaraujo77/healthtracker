@@ -1,5 +1,34 @@
 # Deferred Work
 
+## Deferred from: code review of story-1-2 round 2 (2026-05-19)
+
+- **F32: Task 8 DRY mandate not satisfied** — `apps/web/src/app/onboarding/consent/consent-flow.tsx`, `apps/expo/src/app/onboarding/consent.tsx` — submit-handler logic duplicated. Shared schemas/copy/routes mitigate ~80% of drift; React state machine still duplicated. Extracting a `useConsentFlow` hook requires adding React as a `packages/validators` peer dep. Revisit when Story 1.4 settings panel makes the case for a third consumer.
+- **F33: Web `/auth/callback` latency on hot path** — `apps/web/src/app/auth/callback/route.ts` — every email-verification redirect now does 2 sync DB calls. Acceptable for v1; revisit if login p95 regresses.
+- **F34: `consentRequiredProcedure` ignores `version`** — `packages/api/src/middleware/consent.ts` — stale grants satisfy the gate when `CONSENT_TEXT_VERSION` bumps. Tied to F22.
+- **F35: `decline` doesn't check for an active grant** — `packages/api/src/router/consent.ts` — patient who granted then declined logs only the decline; grant stays active. **→ Story 1.4**.
+- **F36: Partial unique index `WHERE revoked_at IS NULL` drizzle-kit push correctness** — `packages/db/src/schema/consent.ts` — no real-DB integration test proves drizzle emits the WHERE clause in the CREATE UNIQUE INDEX. Verify on first `pnpm db:push` by inspecting the generated DDL.
+- **F37: Append-only + partial unique revocation model gap** — `packages/db/src/schema/consent.ts`, `packages/db/policies/custom_rls_consent_grants.sql` — without an UPDATE policy, a revocation insert can't move the original active row out from under the partial unique index. **→ Story 1.4** must reconcile.
+- **F38: `consent.list` dedup is application-side** — `packages/api/src/router/consent.ts` — could push to SQL via `DISTINCT ON (consent_type) ... ORDER BY consent_type, granted_at DESC`. Performance optimization.
+- **F39: Consent flow resume doesn't skip granted screens** — `apps/web/src/app/onboarding/consent/consent-flow.tsx`, `apps/expo/src/app/onboarding/consent.tsx` — on mount, fetch `consent.list` and `setStepIndex` to first ungranted screen. UX polish.
+- **F40: Declining all 3 lands on Início with no valid upload path** — Epic 2 — upload CTA will hit `CONSENT_REQUIRED`. Epic 2 must gate the CTA on the grants set.
+- **F41: Anti-phishing scanners consume single-use verification codes** — `apps/web/src/app/auth/callback/route.ts` — Outlook/Gmail Safelinks preview the link, consuming the code before the patient. Out of scope; requires Supabase auth flow tuning.
+
+## Deferred from: code review of story-1-2 (2026-05-19)
+
+- **F19: Repeated decline writes repeated audit events** — `packages/api/src/router/consent.ts` — rapid "Pular por agora" taps each insert a `consent.declined` audit row. FR33 captures every decision by design; UI `disabled={pending}` covers the in-flight case. Add server-side dedup if telemetry shows noise.
+- **F20: `consent_grants.revoked_at` has no CHECK constraint** — `packages/db/src/schema/consent.ts` — a `CHECK (revoked_at IS NULL OR revoked_at >= granted_at)` would catch backdated revocations. **→ Story 1.4** introduces revocation and is the right place.
+- **F21: RLS `WITH CHECK` does not constrain `revoked_at`** — `packages/db/policies/custom_rls_consent_grants.sql` — a patient could INSERT a row with `revoked_at` pre-set; defenses-in-depth. **→ Story 1.4**.
+- **F22: Per-screen `CONSENT_TEXT_VERSION`** — `packages/validators/src/index.ts` — single global version means bumping legal copy for one screen re-prompts unchanged screens. Revisit when copy changes per-screen.
+- **F23: Single-tab tabs navigator UX wart** — `apps/expo/src/app/(tabs)/_layout.tsx` — one tab renders an ugly tab bar on iOS. Hide tab bar until additional tabs ship in later epics (Fingerprint / Settings).
+- **F24: `SafeAreaView` hex `#F9F7F4` duplicated** — `apps/expo/src/app/(tabs)/_layout.tsx`, `apps/expo/src/app/(tabs)/inicio.tsx`, `apps/expo/src/app/onboarding/consent.tsx` — extract to a shared `SAFE_AREA_BG` constant in `~/lib/colors` or similar. Joins F17.
+- **F25: `next` query parameter lost when consent forces redirect** — `apps/web/src/app/auth/callback/route.ts` — preserve via `/onboarding/consent?next=<encoded>` and resume after consent completes.
+- **F26: Mobile rapid "Concordo" double-tap race** — `apps/expo/src/app/onboarding/consent.tsx` — `disabled={pending}` covers typical case but the React state flip is async. Add an `isInFlight` ref guard if telemetry shows duplicates.
+- **F27: Cold-start deep-link before router mounted** — `apps/expo/src/app/_layout.tsx` — Expo Router v6 generally handles this internally; surface if observed.
+- **F28: TRPCError vs network-error distinction** — `apps/{web,expo}/.../consent*` — single generic error message hides the difference; acceptable for v1.
+- **F29: `version` field accepts any non-empty string** — `packages/validators/src/index.ts` — no ISO format regex. Values are server-controlled today; add `.regex(/^\d{4}-\d{2}-\d{2}$/)` if external callers appear.
+- **F30: No callback-route integration test for the redirect-to-consent branch** — `apps/web/src/app/auth/callback/route.ts`, `apps/expo/src/app/_layout.tsx` — joins F11 (no app-level test infra).
+- **F31: `EmptyStateRecord` per-state visual differentiation** — `packages/ui/src/empty-state-record.tsx` — wire when a consumer differentiates `partial` / `filtered-empty` (P15 removed the unused prop in this story).
+
 ## Deferred from: code review of story-1-1 round 2 (2026-05-19)
 
 - **F14: Supabase enumeration-prevention obscures duplicates with email-confirm enabled** — `packages/validators/src/index.ts`, `apps/web/src/app/auth/register/register-form.tsx`, `apps/expo/src/app/register.tsx` — when Supabase has email-confirm on, `signUp` for an already-registered email returns success with an obfuscated user payload (no error code). `isDuplicateEmailError` cannot detect this; the user is told "verify your email" but no email arrives. The only client-side fix is a server-side existence check (admin API), itself an enumeration oracle. Revisit as a PRD-level privacy/UX tradeoff.
