@@ -7,7 +7,9 @@ const INACTIVE_TINT = "#737373";
 const TAB_BAR_BG = "#F9F7F4";
 
 // Tabs root for the post-onboarding patient experience (Story 1.2 AC5).
-// Only Início ships in Epic 1; Fingerprint / Settings join in later epics.
+// Início ships in Epic 1; Configurações lands here in Story 1.4
+// (resolves the "single-tab navigator UX wart" deferred from 1.2).
+// Fingerprint joins in Epic 3.
 export default function TabsLayout() {
   return (
     <Tabs
@@ -19,6 +21,7 @@ export default function TabsLayout() {
       }}
     >
       <Tabs.Screen name="inicio" options={{ title: "Início" }} />
+      <Tabs.Screen name="configuracoes" options={{ title: "Configurações" }} />
     </Tabs>
   );
 }

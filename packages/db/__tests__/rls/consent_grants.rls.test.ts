@@ -123,30 +123,145 @@ describe("consent_grants RLS isolation (append-only)", () => {
     expect(rows.every((r) => r.patient_id === patientId)).toBe(true);
   });
 
-  it("UPDATE on own rows is denied (no UPDATE policy → append-only)", async () => {
+  it("correctPatient can UPDATE revoked_at on their own active row (Story 1.4)", async () => {
     const patientId = crypto.randomUUID();
     await seedConsent(patientId);
     const run = asIdentity("correctPatient", { patientId });
 
-    // Prove the row IS visible to this patient before asserting the no-op.
-    const visible = await run(
+    // Prove the row IS visible and currently active.
+    const before = await run(
       (tx) =>
         tx<
-          { id: string }[]
-        >`SELECT id FROM consent_grants WHERE patient_id = ${patientId}`,
+          { id: string; revoked_at: string | null }[]
+        >`SELECT id, revoked_at FROM consent_grants WHERE patient_id = ${patientId}`,
     );
-    expect(visible).toHaveLength(1);
+    expect(before).toHaveLength(1);
+    expect(before[0]?.revoked_at).toBeNull();
 
     await run(
       (tx) =>
-        tx`UPDATE consent_grants SET version = ${"tampered"} WHERE patient_id = ${patientId}`,
+        tx`UPDATE consent_grants SET revoked_at = NOW() WHERE patient_id = ${patientId}`,
     );
+
+    const { data } = await serviceClient
+      .from("consent_grants")
+      .select("revoked_at")
+      .eq("patient_id", patientId);
+    expect(data?.length).toBe(1);
+    expect(data?.[0]?.revoked_at).not.toBeNull();
+  });
+
+  it("UPDATE on a different column than revoked_at is rejected by the defenses-in-depth trigger (42501)", async () => {
+    const patientId = crypto.randomUUID();
+    await seedConsent(patientId);
+    const run = asIdentity("correctPatient", { patientId });
+
+    // The narrow RLS policy allows the UPDATE on the row, but the
+    // trigger (`consent_grants_revoke_only_revoked_at`) raises 42501
+    // when any column other than revoked_at would change.
+    await expect(
+      run(
+        (tx) =>
+          tx`UPDATE consent_grants SET version = ${"tampered"} WHERE patient_id = ${patientId}`,
+      ),
+    ).rejects.toMatchObject({ code: "42501" });
 
     const { data } = await serviceClient
       .from("consent_grants")
       .select("version")
       .eq("patient_id", patientId);
     expect(data?.every((r) => r.version === "2026-05-19")).toBe(true);
+  });
+
+  it("UPDATE setting revoked_at to a past timestamp is rejected (round-2 P34 — backdating defense)", async () => {
+    const patientId = crypto.randomUUID();
+    await seedConsent(patientId);
+    const run = asIdentity("correctPatient", { patientId });
+
+    await expect(
+      run(
+        (tx) =>
+          tx`UPDATE consent_grants SET revoked_at = ${"1970-01-01T00:00:00Z"} WHERE patient_id = ${patientId}`,
+      ),
+    ).rejects.toMatchObject({ code: "42501" });
+
+    const { data } = await serviceClient
+      .from("consent_grants")
+      .select("revoked_at")
+      .eq("patient_id", patientId);
+    expect(data?.[0]?.revoked_at).toBeNull();
+  });
+
+  it("UPDATE setting revoked_at to a future timestamp is rejected (round-2 P34 — future-dating defense)", async () => {
+    const patientId = crypto.randomUUID();
+    await seedConsent(patientId);
+    const run = asIdentity("correctPatient", { patientId });
+
+    await expect(
+      run(
+        (tx) =>
+          tx`UPDATE consent_grants SET revoked_at = ${"2099-12-31T23:59:59Z"} WHERE patient_id = ${patientId}`,
+      ),
+    ).rejects.toMatchObject({ code: "42501" });
+
+    const { data } = await serviceClient
+      .from("consent_grants")
+      .select("revoked_at")
+      .eq("patient_id", patientId);
+    expect(data?.[0]?.revoked_at).toBeNull();
+  });
+
+  it("UPDATE clearing revoked_at back to NULL on a previously-revoked row is rejected (round-2 P32/P34 — un-revoke defense)", async () => {
+    const patientId = crypto.randomUUID();
+    const id = await seedConsent(patientId);
+    // Revoke via the service client so we can then try to un-revoke
+    // through the patient identity and watch the trigger reject.
+    await serviceClient
+      .from("consent_grants")
+      .update({ revoked_at: new Date().toISOString() })
+      .eq("id", id);
+
+    const run = asIdentity("correctPatient", { patientId });
+    // The USING filter (`revoked_at IS NULL`) blocks the UPDATE before
+    // the trigger sees it — RLS denies via 0-rows. Verify the row is
+    // still revoked. (If a future RLS widening relaxes USING, the
+    // trigger's P32 guard is the defense-in-depth seam.)
+    await run(
+      (tx) =>
+        tx`UPDATE consent_grants SET revoked_at = NULL WHERE patient_id = ${patientId}`,
+    );
+
+    const { data } = await serviceClient
+      .from("consent_grants")
+      .select("revoked_at")
+      .eq("patient_id", patientId);
+    expect(data?.[0]?.revoked_at).not.toBeNull();
+  });
+
+  it("wrongPatient UPDATE rejects (42501) without affecting the row", async () => {
+    const ownerId = crypto.randomUUID();
+    const attackerId = crypto.randomUUID();
+    await seedConsent(ownerId);
+    const run = asIdentity("wrongPatient", {
+      patientId: attackerId,
+      otherPatientId: ownerId,
+    });
+
+    // RLS USING-filter denies the row to the attacker (`patient_id` !=
+    // current_setting). The UPDATE returns 0 affected rows — Postgres
+    // does not raise 42501 for a USING-only mismatch (only WITH CHECK
+    // failures raise). Verify the original row is unchanged.
+    await run(
+      (tx) =>
+        tx`UPDATE consent_grants SET revoked_at = NOW() WHERE patient_id = ${ownerId}`,
+    );
+
+    const { data } = await serviceClient
+      .from("consent_grants")
+      .select("revoked_at")
+      .eq("patient_id", ownerId);
+    expect(data?.length).toBe(1);
+    expect(data?.[0]?.revoked_at).toBeNull();
   });
 
   it("DELETE on own rows is denied (no DELETE policy → append-only)", async () => {

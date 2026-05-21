@@ -6,10 +6,12 @@ import { ConsentGrants } from "@healthtracker/db/schema";
 import {
   ConsentDeclineInputSchema,
   ConsentGrantInputSchema,
+  ConsentListInputSchema,
+  ConsentRevokeInputSchema,
 } from "@healthtracker/validators";
 
 import { writeAuditLog } from "../audit";
-import { writeConsentGrantIfAbsent } from "../consent";
+import { writeConsentGrantIfAbsent, writeConsentRevocation } from "../consent";
 import { protectedProcedure } from "../trpc";
 
 export const consentRouter = {
@@ -108,35 +110,116 @@ export const consentRouter = {
    * Returns the patient's currently-active grants, one per `consentType`
    * (most recent `grantedAt` wins, with `createdAt` and `id` as
    * deterministic tiebreakers so dedup is stable across queries).
-   * Consumed by Story 1.4 (consent management) and by the onboarding
-   * deep-link callbacks to detect a consent-incomplete patient.
+   *
+   * Story 1.4 — accepts an optional `surface` flag. When `surface ===
+   * 'settings'` (i.e. the Meus Consentimentos screen fetched the list),
+   * a single `consent.read` audit event is written (AC4 / FR33). The
+   * default surface is `'callback'`, which matches the existing
+   * onboarding-callback consumers (web `/auth/callback`, Expo
+   * `_layout.tsx`) — those routing probes intentionally do NOT emit an
+   * audit row so the FR33 ledger stays meaningful.
    */
-  list: protectedProcedure.query(async ({ ctx }) => {
-    const rows = await ctx.db
-      .select({
-        id: ConsentGrants.id,
-        consentType: ConsentGrants.consentType,
-        version: ConsentGrants.version,
-        grantedAt: ConsentGrants.grantedAt,
-      })
-      .from(ConsentGrants)
-      .where(
-        and(
-          eq(ConsentGrants.patientId, ctx.session.user.id),
-          isNull(ConsentGrants.revokedAt),
-        ),
-      )
-      .orderBy(
-        desc(ConsentGrants.grantedAt),
-        desc(ConsentGrants.createdAt),
-        desc(ConsentGrants.id),
-      );
+  list: protectedProcedure
+    .input(ConsentListInputSchema)
+    .query(async ({ ctx, input }) => {
+      const patientId = ctx.session.user.id;
+      // `input` is always defined here: the Zod schema `.default({})`
+      // converts `undefined` to `{}` before this resolver runs. The
+      // `surface` field is still optional and defaults to 'callback'.
+      const surface = input.surface ?? "callback";
 
-    const seen = new Set<string>();
-    return rows.filter((row) => {
-      if (seen.has(row.consentType)) return false;
-      seen.add(row.consentType);
-      return true;
-    });
-  }),
+      const rows = await ctx.db
+        .select({
+          id: ConsentGrants.id,
+          consentType: ConsentGrants.consentType,
+          version: ConsentGrants.version,
+          grantedAt: ConsentGrants.grantedAt,
+        })
+        .from(ConsentGrants)
+        .where(
+          and(
+            eq(ConsentGrants.patientId, patientId),
+            isNull(ConsentGrants.revokedAt),
+          ),
+        )
+        .orderBy(
+          desc(ConsentGrants.grantedAt),
+          desc(ConsentGrants.createdAt),
+          desc(ConsentGrants.id),
+        );
+
+      const seen = new Set<string>();
+      const deduped = rows.filter((row) => {
+        if (seen.has(row.consentType)) return false;
+        seen.add(row.consentType);
+        return true;
+      });
+
+      if (surface === "settings") {
+        await writeAuditLog(ctx.db, {
+          actorId: patientId,
+          actorType: "patient",
+          event: "consent.read",
+          resourceId: patientId,
+          resourceType: "consent_grant",
+          metadata: { surface: "settings", actor: "self" },
+        });
+      }
+
+      return deduped;
+    }),
+
+  /**
+   * Story 1.4 — revokes the patient's currently-active grant of
+   * `consentType`. The narrow UPDATE policy in
+   * `custom_rls_consent_grants_revoke.sql` permits only this column
+   * change, only by the row's owner, only on a currently active row.
+   *
+   * Idempotent: re-tapping "Retirar" on a row that was already revoked
+   * returns `{ revoked: false }` with no audit emission — the absence
+   * of a row revocation is not an event.
+   */
+  revoke: protectedProcedure
+    .input(ConsentRevokeInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const patientId = ctx.session.user.id;
+
+      // Atomicity note (review P27 investigation): `protectedProcedure`
+      // already wraps every resolver in `ctx.db.transaction(...)` so it
+      // can `SET LOCAL app.current_patient_id` for RLS — see
+      // `packages/api/src/trpc.ts`. `ctx.db` here IS the tx, and a
+      // throw from `writeAuditLog` below will roll back the UPDATE
+      // performed by `writeConsentRevocation`. FR33 atomicity is
+      // already guaranteed by the outer wrap.
+      const revokedRow = await writeConsentRevocation(ctx.db, {
+        patientId,
+        consentType: input.consentType,
+      });
+
+      if (!revokedRow) {
+        // Idempotent path — no active grant to revoke. Surface as a
+        // success so the client can collapse a double-tap into a single
+        // UX outcome.
+        return { revoked: false as const };
+      }
+
+      await writeAuditLog(ctx.db, {
+        actorId: patientId,
+        actorType: "patient",
+        event: "consent.revoked",
+        resourceId: revokedRow.id,
+        resourceType: "consent_grant",
+        metadata: {
+          consentType: input.consentType,
+          version: revokedRow.version,
+          actor: "self",
+        },
+      });
+
+      return {
+        revoked: true as const,
+        grantId: revokedRow.id,
+        version: revokedRow.version,
+      };
+    }),
 } satisfies TRPCRouterRecord;

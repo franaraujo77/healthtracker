@@ -58,7 +58,7 @@ development_status:
   1-1-patient-creates-account-with-email-and-password: done
   1-2-patient-provides-lgpd-compliant-consent-per-data-type-at-onboarding: done
   1-3-patient-enables-biometric-authentication: done
-  1-4-patient-views-and-manages-active-consent-agreements: backlog
+  1-4-patient-views-and-manages-active-consent-agreements: done
   1-5-patient-imports-prior-lab-results-during-onboarding: backlog
   epic-1-retrospective: optional
 

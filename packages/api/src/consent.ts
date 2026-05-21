@@ -1,5 +1,5 @@
 import type { ConsentDataType } from "@healthtracker/validators";
-import { isNull } from "@healthtracker/db";
+import { and, eq, isNull, sql } from "@healthtracker/db";
 import { ConsentGrants } from "@healthtracker/db/schema";
 
 import type { AuditDb } from "./audit";
@@ -68,5 +68,40 @@ export async function writeConsentGrantIfAbsent(
       where: isNull(ConsentGrants.revokedAt),
     })
     .returning({ id: ConsentGrants.id });
+  return row ?? null;
+}
+
+export interface ConsentRevocationInput {
+  patientId: string;
+  consentType: ConsentDataType;
+}
+
+/**
+ * Story 1.4 — sanctioned write path for revoking the patient's currently
+ * active grant of `consentType`. Issues a narrow UPDATE that sets
+ * `revoked_at = NOW()` on the row where `revoked_at IS NULL`; the
+ * `custom_rls_consent_grants_revoke.sql` policy enforces that only the
+ * row's owner can update, and the accompanying trigger enforces that no
+ * column other than `revoked_at` may be touched.
+ *
+ * Returns the revoked row's `{ id, version }` when an active grant
+ * existed, or `null` when nothing was active (idempotent path for the
+ * caller — re-tapping "Retirar" is not an error).
+ */
+export async function writeConsentRevocation(
+  database: AuditDb,
+  entry: ConsentRevocationInput,
+): Promise<{ id: string; version: string } | null> {
+  const [row] = await database
+    .update(ConsentGrants)
+    .set({ revokedAt: sql`NOW()` })
+    .where(
+      and(
+        eq(ConsentGrants.patientId, entry.patientId),
+        eq(ConsentGrants.consentType, entry.consentType),
+        isNull(ConsentGrants.revokedAt),
+      ),
+    )
+    .returning({ id: ConsentGrants.id, version: ConsentGrants.version });
   return row ?? null;
 }

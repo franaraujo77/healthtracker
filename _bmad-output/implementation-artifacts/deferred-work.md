@@ -144,3 +144,18 @@
 - **F33** `'unavailable'` UX over-rotates: signs the patient out and forces re-registration for a recoverable OS-side biometric state change. Soften when `/login` screen lands.
 - **F34** `fallbackToRegistration` runs `disable()` and `signOut()` sequentially with no progress indicator — slow / offline devices freeze the button. Parallelize + show progress.
 - **F35** Lock-screen mount effect deps `[router]` — `useRouter()` identity is conventionally stable but not contractual. Use the imported `router` singleton with empty deps.
+
+## Deferred from: code review of story-1.4 (2026-05-20)
+
+- **F36** `consent.list` `surface` flag is client-forgeable in both directions (spam or suppress `consent.read` audits). Best-effort audit tradeoff; revisit if audit ledger becomes a compliance artifact.
+- **F37** Web SSR `prefetch` is fire-and-forget — audit emission timing non-deterministic. "At most one audit per visit" because the client refetches on cache miss; the helper convention doesn't support awaiting today.
+- **F38** SQL trigger `consent_grants_revoke_only_revoked_at` enumerates allowed columns explicitly; future schema additions silently bypass tampering protection. Add to column-add checklist.
+- **F39** Tamagui `Dialog.Close asChild` may not forward `onPress` to the custom `Button` on RN — verify on hand-test.
+- **F40** `apps/expo/src/app/privacidade/_layout.tsx` bare `<Stack />` — iOS back-button shows "Back" instead of "Voltar". Minor i18n.
+- **F41** Pull-to-refresh on the Expo Meus Consentimentos list emits a fresh `consent.read` audit row — intentional for explicit refresh; the resolver comment should acknowledge.
+- **F42** Android hardware back during Tamagui `Dialog` open dismisses the entire screen instead of the dialog. F32-family.
+- **F43** Cache invalidation after `consent.revoke` + `router.push` re-triggers the SSR prefetch on web, emitting a second `consent.read` audit. F41-family.
+- **F44** Route-param tampering on `?version=...&grantedAt=...` is display-only (mutation derives state from session). Trust model intentionally lax.
+- **F45** Stale `version`/`grantedAt` if the row mutates between list render and detail open. Reconcile by re-fetching single grant when telemetry shows complaints.
+- **F46** Expo offline `router.replace` could strand on a blank screen for invalid route param. Add a fallback "Voltar" affordance if reported.
+- **F47** `String(row.grantedAt)` non-Date non-string fallback yields `"[object Object]"`. Theoretical.

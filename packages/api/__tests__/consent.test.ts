@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { AuditLog, ConsentGrants } from "@healthtracker/db/schema";
 
 import type { AuditDb } from "../src/audit";
-import { writeConsentGrant } from "../src/consent";
+import { writeConsentGrant, writeConsentRevocation } from "../src/consent";
 import { consentRequiredProcedure } from "../src/middleware/consent";
 import { appRouter } from "../src/root";
 import { createTRPCRouter } from "../src/trpc";
@@ -24,6 +24,11 @@ interface MockOpts {
     version?: string;
     grantedAt?: Date;
   }[];
+  /**
+   * Rows returned by the revoke UPDATE's `.returning()`. Empty = no
+   * active grant (idempotent revoke path).
+   */
+  revokeReturning?: { id: string; version: string }[];
 }
 
 /**
@@ -38,6 +43,7 @@ function makeCaller(opts: MockOpts = {}) {
     { id: "grant-new" },
   ];
   const selectRows = opts.selectRows ?? [];
+  const revokeReturning = opts.revokeReturning ?? [];
 
   const selectChain = {
     from: vi.fn(() => selectChain),
@@ -57,10 +63,20 @@ function makeCaller(opts: MockOpts = {}) {
     table === ConsentGrants ? consentChain : { values: auditValues },
   );
 
+  // The `update` chain mirrors the Drizzle UPDATE shape:
+  //   db.update(ConsentGrants).set(...).where(...).returning(...)
+  const updateChain = {
+    set: vi.fn(() => updateChain),
+    where: vi.fn(() => updateChain),
+    returning: vi.fn(() => Promise.resolve(revokeReturning)),
+  };
+  const update = vi.fn(() => updateChain);
+
   const tx = {
     execute: vi.fn(() => Promise.resolve(undefined)),
     select: vi.fn(() => selectChain),
     insert,
+    update,
   };
   const db = { transaction: (cb: (tx: unknown) => unknown) => cb(tx) };
 
@@ -76,6 +92,8 @@ function makeCaller(opts: MockOpts = {}) {
     insert,
     consentChain,
     auditValues,
+    update,
+    updateChain,
   };
 }
 
@@ -208,7 +226,170 @@ describe("consent.list", () => {
 
     expect(rows.map((r) => r.id)).toEqual(["g-blood-new", "g-bia"]);
   });
+
+  it("emits exactly one consent.read audit event when surface is 'settings'", async () => {
+    const { caller, insert, auditValues } = makeCaller({
+      selectRows: [
+        {
+          id: "g-bia",
+          consentType: "bioimpedance",
+          version: VERSION,
+          grantedAt: new Date("2026-05-19T12:00:00Z"),
+        },
+      ],
+    });
+
+    await caller.consent.list({ surface: "settings" });
+
+    expect(insert).toHaveBeenCalledWith(AuditLog);
+    expect(auditValues).toHaveBeenCalledTimes(1);
+    expect(auditValues).toHaveBeenCalledWith({
+      actorId: PATIENT_ID,
+      actorType: "patient",
+      event: "consent.read",
+      resourceId: PATIENT_ID,
+      resourceType: "consent_grant",
+      metadata: { surface: "settings", actor: "self" },
+    });
+  });
+
+  it("emits no audit event under the default surface (preserves callback consumers)", async () => {
+    const { caller, insert, auditValues } = makeCaller({
+      selectRows: [
+        {
+          id: "g-bia",
+          consentType: "bioimpedance",
+          version: VERSION,
+          grantedAt: new Date("2026-05-19T12:00:00Z"),
+        },
+      ],
+    });
+
+    await caller.consent.list();
+
+    expect(insert).not.toHaveBeenCalledWith(AuditLog);
+    expect(auditValues).not.toHaveBeenCalled();
+  });
 });
+
+describe("consent.revoke", () => {
+  it("UPDATEs revoked_at on the active row and emits a consent.revoked audit", async () => {
+    const { caller, update, updateChain, insert, auditValues } = makeCaller({
+      revokeReturning: [{ id: "grant-1", version: VERSION }],
+    });
+
+    const result = await caller.consent.revoke({
+      consentType: "blood_test_results",
+    });
+
+    expect(result).toEqual({
+      revoked: true,
+      grantId: "grant-1",
+      version: VERSION,
+    });
+    expect(update).toHaveBeenCalledWith(ConsentGrants);
+    expect(updateChain.set).toHaveBeenCalled();
+    expect(insert).toHaveBeenCalledWith(AuditLog);
+    expect(auditValues).toHaveBeenCalledWith({
+      actorId: PATIENT_ID,
+      actorType: "patient",
+      event: "consent.revoked",
+      resourceId: "grant-1",
+      resourceType: "consent_grant",
+      metadata: {
+        consentType: "blood_test_results",
+        version: VERSION,
+        actor: "self",
+      },
+    });
+  });
+
+  it("is idempotent: returns { revoked: false } and emits no audit when no active grant exists", async () => {
+    const { caller, update, insert, auditValues } = makeCaller({
+      revokeReturning: [],
+    });
+
+    const result = await caller.consent.revoke({
+      consentType: "bioimpedance",
+    });
+
+    expect(result).toEqual({ revoked: false });
+    expect(update).toHaveBeenCalledWith(ConsentGrants);
+    expect(insert).not.toHaveBeenCalledWith(AuditLog);
+    expect(auditValues).not.toHaveBeenCalled();
+  });
+
+  it("propagates audit-write failures so the outer protectedProcedure transaction rolls back the UPDATE (round-2 P36)", async () => {
+    // The audit insert rejects; the resolver must reject. tRPC wraps
+    // the underlying error in a TRPCError whose `cause` is the original
+    // — verify both layers. The surrounding `ctx.db.transaction(...)`
+    // wrap (set up by protectedProcedure in `packages/api/src/trpc.ts`)
+    // is what makes the rejection roll back the prior UPDATE on
+    // `consent_grants`; the client retry then sees the still-active
+    // grant and re-revokes — no audit gap, no silent state.
+    const auditError: Error & { code: string } = Object.assign(
+      new Error("audit insert failed"),
+      { code: "23514" },
+    );
+    const { caller } = makeCallerWithAuditReject(auditError);
+
+    await expect(
+      caller.consent.revoke({ consentType: "blood_test_results" }),
+    ).rejects.toMatchObject({
+      cause: { code: "23514", message: "audit insert failed" },
+    });
+  });
+});
+
+/**
+ * Builds a caller where the audit insert's `.values(...)` rejects so we
+ * can exercise the "audit-throws-rolls-back-update" atomicity guarantee.
+ * Separate from `makeCaller` because the rejection shape is otherwise
+ * intrusive to thread through `MockOpts`.
+ */
+function makeCallerWithAuditReject(error: Error) {
+  const consentChain = {
+    values: vi.fn(() => consentChain),
+    onConflictDoNothing: vi.fn(() => consentChain),
+    returning: vi.fn(() => Promise.resolve([{ id: "grant-1" }])),
+  };
+  const auditValues = vi.fn(() => Promise.reject(error));
+
+  const insert = vi.fn((table: unknown) =>
+    table === ConsentGrants ? consentChain : { values: auditValues },
+  );
+
+  const updateChain = {
+    set: vi.fn(() => updateChain),
+    where: vi.fn(() => updateChain),
+    returning: vi.fn(() =>
+      Promise.resolve([{ id: "grant-1", version: VERSION }]),
+    ),
+  };
+  const update = vi.fn(() => updateChain);
+
+  const tx = {
+    execute: vi.fn(() => Promise.resolve(undefined)),
+    select: vi.fn(() => ({
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      limit: vi.fn(() => Promise.resolve([])),
+      orderBy: vi.fn(() => Promise.resolve([])),
+    })),
+    insert,
+    update,
+  };
+  const db = { transaction: (cb: (tx: unknown) => unknown) => cb(tx) };
+
+  const ctx = {
+    session: { user: { id: PATIENT_ID } },
+    db,
+    headers: new Headers(),
+    shareTokenId: undefined,
+  } as unknown as CallerCtx;
+
+  return { caller: appRouter.createCaller(ctx) };
+}
 
 describe("writeConsentGrant", () => {
   it("inserts the entry and returns the new row id", async () => {
@@ -245,6 +426,57 @@ describe("writeConsentGrant", () => {
         patientId: PATIENT_ID,
         consentType: "blood_test_results",
         version: VERSION,
+      }),
+    ).rejects.toMatchObject({ code: "42501" });
+  });
+});
+
+describe("writeConsentRevocation", () => {
+  it("returns the revoked row id and version when an active grant exists", async () => {
+    const returning = vi.fn(() =>
+      Promise.resolve([{ id: "grant-x", version: VERSION }]),
+    );
+    const where = vi.fn(() => ({ returning }));
+    const set = vi.fn(() => ({ where }));
+    const db = { update: vi.fn(() => ({ set })) } as unknown as AuditDb;
+
+    const row = await writeConsentRevocation(db, {
+      patientId: PATIENT_ID,
+      consentType: "bioimpedance",
+    });
+
+    expect(row).toEqual({ id: "grant-x", version: VERSION });
+    expect(set).toHaveBeenCalled();
+  });
+
+  it("returns null when no active grant matches (idempotent caller path)", async () => {
+    const returning = vi.fn(() => Promise.resolve([]));
+    const where = vi.fn(() => ({ returning }));
+    const set = vi.fn(() => ({ where }));
+    const db = { update: vi.fn(() => ({ set })) } as unknown as AuditDb;
+
+    const row = await writeConsentRevocation(db, {
+      patientId: PATIENT_ID,
+      consentType: "ai_narrative",
+    });
+
+    expect(row).toBeNull();
+  });
+
+  it("propagates DB errors so the surrounding transaction can roll back", async () => {
+    const rlsError = Object.assign(
+      new Error("new row violates row-level security policy"),
+      { code: "42501" },
+    );
+    const returning = vi.fn(() => Promise.reject(rlsError));
+    const where = vi.fn(() => ({ returning }));
+    const set = vi.fn(() => ({ where }));
+    const db = { update: vi.fn(() => ({ set })) } as unknown as AuditDb;
+
+    await expect(
+      writeConsentRevocation(db, {
+        patientId: PATIENT_ID,
+        consentType: "blood_test_results",
       }),
     ).rejects.toMatchObject({ code: "42501" });
   });

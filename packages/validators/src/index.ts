@@ -117,6 +117,16 @@ export const CONSENT_SCREEN_TYPES = [
 export type ConsentScreenType = (typeof CONSENT_SCREEN_TYPES)[number];
 
 /**
+ * Runtime narrowing for arbitrary strings (route params, JSON payloads)
+ * into the patient-facing `ConsentScreenType` union. Centralized in
+ * validators because the Settings list + detail screens on both Expo
+ * and Web all need it (review P31: previously duplicated 4×).
+ */
+export function isConsentScreenType(value: string): value is ConsentScreenType {
+  return (CONSENT_SCREEN_TYPES as readonly string[]).includes(value);
+}
+
+/**
  * ISO date format. Bump on every legal-copy change. Sortable and
  * human-readable. Stored on every `consent_grants` row for FR33 audit.
  */
@@ -141,6 +151,32 @@ export const ConsentDeclineInputSchema = z.object({
 });
 export type ConsentDeclineInput = z.infer<typeof ConsentDeclineInputSchema>;
 
+/**
+ * Story 1.4 — input for the new `consent.revoke` procedure. Narrow to the
+ * three patient-facing surfaces (broader `doctor_sharing` /
+ * `llm_letter_generation` categories belong to later epics with their own
+ * revocation surfaces).
+ */
+export const ConsentRevokeInputSchema = z.object({
+  consentType: z.enum(CONSENT_SCREEN_TYPES),
+});
+export type ConsentRevokeInput = z.infer<typeof ConsentRevokeInputSchema>;
+
+/**
+ * Story 1.4 — `consent.list` accepts an optional `surface` flag so the
+ * Settings screen can emit a `consent.read` audit event without the
+ * onboarding-callback consumers (web `/auth/callback`, Expo `_layout.tsx`)
+ * accidentally writing the same audit row on every cold launch.
+ *
+ * Default is `'callback'` so existing zero-arg callsites keep working.
+ */
+export const ConsentListInputSchema = z
+  .object({
+    surface: z.enum(["settings", "callback"]).optional(),
+  })
+  .default({});
+export type ConsentListInput = z.infer<typeof ConsentListInputSchema>;
+
 /** Routes the onboarding flow and post-consent flow target. */
 export const ONBOARDING_CONSENT_ROUTE = "/onboarding/consent";
 export const INICIO_ROUTE = "/inicio";
@@ -151,6 +187,18 @@ export const INICIO_ROUTE = "/inicio";
  * `/login` constant when a sign-in screen ships.
  */
 export const REGISTER_ROUTE = "/register";
+
+/**
+ * Story 1.4 — Settings route constants. Two per surface because the web
+ * URL hierarchy uses `/configuracoes/privacidade/...` while Expo's
+ * `(tabs)/configuracoes` is the tab shell (URL path is `/privacidade/...`).
+ */
+export const PRIVACIDADE_ROUTE = "/privacidade";
+export const MEUS_CONSENTIMENTOS_ROUTE = "/privacidade/consentimentos";
+export const WEB_CONFIGURACOES_ROUTE = "/configuracoes";
+export const WEB_CONFIGURACOES_PRIVACIDADE_ROUTE = "/configuracoes/privacidade";
+export const WEB_MEUS_CONSENTIMENTOS_ROUTE =
+  "/configuracoes/privacidade/consentimentos";
 
 /**
  * pt-BR copy for the three onboarding consent screens. Plain language,
@@ -286,3 +334,68 @@ export const BIOMETRIC_LOCK_BODY_PT_BR =
  */
 export const GENERIC_BIOMETRIC_ERROR_MESSAGE_PT_BR =
   "Não conseguimos confirmar — tente de novo.";
+
+// =============================================================================
+// Story 1.4 — Settings → Privacidade → Meus Consentimentos
+// =============================================================================
+
+/** Titles for the Settings tab + Privacidade landing + list screen. */
+export const CONFIGURACOES_TITLE_PT_BR = "Configurações";
+export const PRIVACIDADE_TITLE_PT_BR = "Privacidade";
+export const MEUS_CONSENTIMENTOS_TITLE_PT_BR = "Meus Consentimentos";
+
+/** Row label for the Privacidade row in the Settings index. */
+export const CONFIGURACOES_PRIVACIDADE_ROW_PT_BR = "Privacidade";
+
+/** Affordance for not-yet-functional Settings rows ("Conta", "Notificações"). */
+export const CONFIGURACOES_DISABLED_HINT_PT_BR = "Em breve";
+
+/** Revocation CTA + confirmation copy (UX consequence-language pattern). */
+export const CONSENT_REVOKE_CTA_PT_BR = "Retirar consentimento";
+export const CONSENT_REVOKE_CONFIRM_TITLE_PT_BR = "Retirar este consentimento?";
+export const CONSENT_REVOKE_CONFIRM_PRIMARY_PT_BR = "Sim, retirar";
+export const CONSENT_REVOKE_CONFIRM_SECONDARY_PT_BR = "Cancelar";
+/**
+ * Consequence statement appended to the per-type decline body. The body
+ * already names the specific consequence ("A Carta não será gerada…");
+ * this trailing line clarifies that existing data is not deleted.
+ */
+export const CONSENT_REVOKE_DATA_RETENTION_PT_BR =
+  "Seus dados existentes não serão apagados. Para apagar, vá em Conta > Apagar minha conta.";
+
+/** Empty-state copy for the Meus Consentimentos list. */
+export const MEUS_CONSENTIMENTOS_EMPTY_HEADLINE_PT_BR =
+  "Você ainda não tem consentimentos ativos";
+export const MEUS_CONSENTIMENTOS_EMPTY_CTA_PT_BR = "Revisar consentimentos";
+
+/** Error-state copy for the Meus Consentimentos list. */
+export const MEUS_CONSENTIMENTOS_ERROR_PT_BR =
+  "Não foi possível carregar agora. Tente novamente.";
+export const MEUS_CONSENTIMENTOS_RETRY_PT_BR = "Tentar novamente";
+
+/** Labels for the date column on each row. */
+export const CONSENT_GRANTED_ON_LABEL_PT_BR = "Aceito em";
+
+/**
+ * Placeholder rendered when `formatConsentGrantedDate` is handed a value
+ * it cannot parse. Non-empty so a stranded label ("Aceito em ") never
+ * appears on screen (round-2 P35).
+ */
+export const UNKNOWN_DATE_PT_BR = "—";
+
+/**
+ * Formats a `consent_grants.granted_at` value for display in pt-BR. Uses
+ * `Intl.DateTimeFormat('pt-BR', { dateStyle: 'long' })` — Hermes on SDK 54
+ * ships `Intl` enabled. Falls back to the raw ISO string when the string
+ * input is unparseable, or `UNKNOWN_DATE_PT_BR` when a `Date` itself is
+ * Invalid (round-2 P35 — never return empty).
+ */
+export function formatConsentGrantedDate(date: Date | string): string {
+  const parsed = typeof date === "string" ? new Date(date) : date;
+  if (Number.isNaN(parsed.getTime())) {
+    return typeof date === "string" && date.length > 0
+      ? date
+      : UNKNOWN_DATE_PT_BR;
+  }
+  return new Intl.DateTimeFormat("pt-BR", { dateStyle: "long" }).format(parsed);
+}
