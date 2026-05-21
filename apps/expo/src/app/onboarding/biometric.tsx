@@ -12,7 +12,7 @@ import {
   BIOMETRIC_TITLE_PT_BR,
   BIOMETRIC_UNAVAILABLE_MESSAGE_PT_BR,
   GENERIC_BIOMETRIC_ERROR_MESSAGE_PT_BR,
-  INICIO_ROUTE,
+  IMPORT_ROUTE,
 } from "@healthtracker/validators";
 
 import { useBiometric } from "~/hooks/use-biometric";
@@ -27,8 +27,11 @@ export default function BiometricOffer() {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  function goToInicio() {
-    router.replace({ pathname: INICIO_ROUTE });
+  // Story 1.5 — onboarding now ends at the import screen (biometric →
+  // import → Início). Both the enable-success and skip paths route to
+  // the same next step.
+  function goToImport() {
+    router.replace({ pathname: IMPORT_ROUTE });
   }
 
   async function handleEnable() {
@@ -37,7 +40,7 @@ export default function BiometricOffer() {
     try {
       const result = await enable();
       if (result.ok) {
-        goToInicio();
+        goToImport();
         return;
       }
       if (result.reason === "cancelled") {
@@ -101,7 +104,7 @@ export default function BiometricOffer() {
               {BIOMETRIC_ENABLE_CTA_PT_BR}
             </Button>
           )}
-          <Button onPress={goToInicio} disabled={pending} variant="outline">
+          <Button onPress={goToImport} disabled={pending} variant="outline">
             {BIOMETRIC_SKIP_CTA_PT_BR}
           </Button>
         </YStack>

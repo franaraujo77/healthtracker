@@ -250,7 +250,14 @@ export const CONSENT_VERSION_LABEL_PT_BR = "Versão do termo";
  * forward-looking per UX-DR10; the CTA is the exact pt-BR text from AC5.
  */
 export const INICIO_HEADLINE_PT_BR = "Sua história de saúde começa aqui";
-export const INICIO_CTA_PT_BR = "Enviar resultado";
+/**
+ * Story 1.5 AC3 updates this from Story 1.2's `"Enviar resultado"` to
+ * the longer `"Enviar primeiro resultado"` (per the AC text). Both
+ * surface on the empty-state CTA — Story 1.2's wording is preserved in
+ * git history. Once a third Início state ships (post-upload), this
+ * constant will likely diverge again.
+ */
+export const INICIO_CTA_PT_BR = "Enviar primeiro resultado";
 
 /**
  * Generic pt-BR error shown when a consent.grant / consent.decline call
@@ -399,3 +406,94 @@ export function formatConsentGrantedDate(date: Date | string): string {
   }
   return new Intl.DateTimeFormat("pt-BR", { dateStyle: "long" }).format(parsed);
 }
+
+// =============================================================================
+// Story 1.5 — Prior lab results import during onboarding
+// =============================================================================
+
+/** Bytes — 5 MB per FR1 / NFR-P1. */
+export const UPLOAD_MAX_BYTES = 5 * 1024 * 1024;
+
+/**
+ * Allowed mime types for the onboarding import + Epic 2 upload flows.
+ * PDF (FR1) and image variants (FR2). Validated at the picker AND at
+ * the tRPC procedure boundary.
+ */
+export const UPLOAD_ALLOWED_MIME_TYPES = [
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+  "image/heic",
+] as const;
+export type UploadMimeType = (typeof UPLOAD_ALLOWED_MIME_TYPES)[number];
+
+export function isUploadMimeType(value: string): value is UploadMimeType {
+  return (UPLOAD_ALLOWED_MIME_TYPES as readonly string[]).includes(value);
+}
+
+/**
+ * Strips path separators, control chars, and limits length so a hostile
+ * `originalFilename` cannot escape the patient-prefixed storage path.
+ * Server-side only — applied inside `uploads.requestImport` before the
+ * signed-URL is issued.
+ */
+export function sanitizeFilename(name: string): string {
+  // Drop control chars + path separators; collapse repeated dots.
+  // eslint-disable-next-line no-control-regex
+  const stripped = name.replace(/[\x00-\x1f\x7f/\\]/g, "");
+  const noTraversal = stripped.replace(/\.{2,}/g, ".");
+  const trimmed = noTraversal.trim();
+  const fallback = trimmed.length === 0 ? "upload" : trimmed;
+  return fallback.slice(0, 128);
+}
+
+export const UploadImportRequestSchema = z.object({
+  originalFilename: z.string().min(1).max(256),
+  mimeType: z.enum(UPLOAD_ALLOWED_MIME_TYPES),
+  sizeBytes: z.number().int().positive().max(UPLOAD_MAX_BYTES),
+});
+export type UploadImportRequest = z.infer<typeof UploadImportRequestSchema>;
+
+/**
+ * Story 1.5 review round-1 P38 — `storagePath` is no longer in the
+ * confirm input. The server re-derives it from
+ * `(patientId, idempotencyKey, sanitizeFilename(originalFilename))` so
+ * a hostile client cannot point the DB row at a forged path. `mimeType`
+ * + `sizeBytes` are retained for client-side validation symmetry but
+ * the server re-validates them against the actually-uploaded object
+ * (P39 + P42).
+ */
+export const UploadImportConfirmSchema = z.object({
+  idempotencyKey: z.uuid(),
+  originalFilename: z.string().min(1).max(256),
+  mimeType: z.enum(UPLOAD_ALLOWED_MIME_TYPES),
+  sizeBytes: z.number().int().positive().max(UPLOAD_MAX_BYTES),
+});
+export type UploadImportConfirm = z.infer<typeof UploadImportConfirmSchema>;
+
+/** Onboarding import-screen route. */
+export const IMPORT_ROUTE = "/onboarding/import";
+
+/** pt-BR copy for the onboarding import screen + Início CTA hookup. */
+export const IMPORT_TITLE_PT_BR = "Trazer seus exames anteriores";
+export const IMPORT_BODY_PT_BR =
+  "Se você já tem exames de sangue ou bioimpedância, envie-os agora para a sua história de saúde começar com mais contexto. Você pode enviar quantos quiser — ou pular e fazer isso depois.";
+export const IMPORT_PICK_CTA_PT_BR = "Escolher arquivos";
+export const IMPORT_CONFIRM_CTA_PT_BR = "Enviar resultados";
+export const IMPORT_SKIP_CTA_PT_BR = "Fazer isso depois";
+
+/** Error states for the import flow. */
+export const UPLOAD_FILE_TOO_LARGE_PT_BR =
+  "Este arquivo passa de 5 MB. Tente outro ou divida em partes menores.";
+export const UPLOAD_UNSUPPORTED_MIME_PT_BR =
+  "Tipo de arquivo não suportado. Envie um PDF, JPG, PNG ou HEIC.";
+export const UPLOAD_EMPTY_FILE_PT_BR = "Arquivo vazio. Selecione outro.";
+export const GENERIC_UPLOAD_ERROR_MESSAGE_PT_BR =
+  "Não foi possível enviar este arquivo. Tente novamente.";
+
+/** Status badge shown after a file is queued for extraction. */
+export const UPLOAD_QUEUED_BADGE_PT_BR = "Enviado";
+
+/** iOS Photo Library permission string (used in app.config.ts). */
+export const PHOTO_LIBRARY_PERMISSION_PT_BR =
+  "Permita o acesso à sua biblioteca de fotos para enviar resultados de exames.";

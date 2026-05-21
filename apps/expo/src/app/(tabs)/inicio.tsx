@@ -1,9 +1,10 @@
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Stack } from "expo-router";
+import { Stack, useRouter } from "expo-router";
 import { YStack } from "tamagui";
 
 import { EmptyStateRecord } from "@healthtracker/ui";
 import {
+  IMPORT_ROUTE,
   INICIO_CTA_PT_BR,
   INICIO_HEADLINE_PT_BR,
 } from "@healthtracker/validators";
@@ -13,6 +14,7 @@ import {
 const BACKGROUND_PRIMARY = "#F9F7F4";
 
 export default function Inicio() {
+  const router = useRouter();
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: BACKGROUND_PRIMARY }}>
       <Stack.Screen options={{ title: "Início" }} />
@@ -20,11 +22,9 @@ export default function Inicio() {
         <EmptyStateRecord
           headline={INICIO_HEADLINE_PT_BR}
           ctaLabel={INICIO_CTA_PT_BR}
-          // Upload entry point ships in Epic 2 — this CTA is a placeholder
-          // seam so the route is reachable today.
-          onCtaPress={() => {
-            /* no-op until Epic 2 wires uploads */
-          }}
+          // Story 1.5 — the empty-state CTA now opens the same import
+          // screen the onboarding flow uses (AC3 + AC4 recovery path).
+          onCtaPress={() => router.push({ pathname: IMPORT_ROUTE })}
         />
       </YStack>
     </SafeAreaView>

@@ -94,7 +94,7 @@ async function evaluateBiometricGate(): Promise<void> {
 }
 
 Sentry.init({
-  dsn: process.env.EXPO_PUBLIC_SENTRY_DSN,
+  dsn: process.env.EXPO_PUBLIC_SENTRY_DSN as string | undefined,
   tracesSampleRate: 0.1,
   enableNativeCrashHandling: true,
   debug: __DEV__,

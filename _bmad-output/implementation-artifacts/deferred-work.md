@@ -159,3 +159,25 @@
 - **F45** Stale `version`/`grantedAt` if the row mutates between list render and detail open. Reconcile by re-fetching single grant when telemetry shows complaints.
 - **F46** Expo offline `router.replace` could strand on a blank screen for invalid route param. Add a fallback "Voltar" affordance if reported.
 - **F47** `String(row.grantedAt)` non-Date non-string fallback yields `"[object Object]"`. Theoretical.
+
+## Deferred from: code review of story-1.5 (2026-05-21)
+
+- **F48** `expo-document-picker` + `expo-image-picker` native rebuild required; add to dev README.
+- **F49** Storage-object orphan sweep — `requestImport` can leak objects if the client PUTs but never `confirmImport`s. Epic 5 / 8 ops surface.
+- **F50** `sanitizeFilename` misses unicode RTL, fullwidth solidus, Windows reserved names, leading-dot dotfiles, extension-preserving truncation.
+- **F51** Web `validateClientSide` empty `file.type` → no extension fallback (HEIC drag-drop fails).
+- **F52** `pickImages` dead in onboarding screen — iOS photo-library route only via Files app today.
+- **F53** Double-tap re-entry guard on `handleConfirm` (Expo + Web). F21/F30 family.
+- **F54** `fetch(uri).blob()` round-trips file bytes through JS memory; consider `expo-file-system.uploadAsync` for low-end Android.
+- **F55** `UPLOAD_QUEUED_BADGE_PT_BR` shown for both `queued` and `skipped_duplicate` — patient can't distinguish.
+- **F56** Per-patient rate limit on `requestImport` — currently unlimited.
+- **F57** Post-onboarding Início CTA opens an onboarding-flavored title ("Trazer seus exames anteriores"). Story 2.5 territory.
+- **F58** Returning-patient revisit UX for the import flow — analogous to F45 for `consent_grants` detail.
+- **F59** Supabase Storage `list()` eventual-consistency race; add retry on `statLabUploadObject` if telemetry shows flake.
+- **F60** `pickImages` is exported by `useImportFiles` but not wired into the onboarding screen.
+- **F61** `progressByPath` collides on same-uri picks.
+- **F62** Retry of fully-failed batch generates a new `idempotencyKey` per file — defeats FR8 offline-retry contract.
+- **F63** First-deploy ordering: API → worker dependency on `pgboss.queue('extraction.document')` row + partition existing.
+- **F64** Service-role client cache staleness on `SUPABASE_SERVICE_ROLE_KEY` rotation.
+- **F65** Web `validateClientSide` empty `file.type` extension fallback.
+- **F66** Distinct badge copy for `skipped_duplicate` vs `queued`.

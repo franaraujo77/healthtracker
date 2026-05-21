@@ -28,6 +28,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     infoPlist: {
       NSFaceIDUsageDescription:
         "Use Face ID para destravar o seu Health Tracker rapidamente.",
+      // Story 1.5 FR2 — required when the app opens the photo library
+      // via `expo-image-picker` (image upload of lab results). pt-BR
+      // per UX-DR20.
+      NSPhotoLibraryUsageDescription:
+        "Permita o acesso à sua biblioteca de fotos para enviar resultados de exames.",
     },
   },
   android: {
@@ -63,6 +68,16 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
           "Use Face ID para destravar o seu Health Tracker rapidamente.",
       },
     ],
+    [
+      // Story 1.5 FR2 — config-plugin form duplicates the
+      // `infoPlist.NSPhotoLibraryUsageDescription` string above.
+      "expo-image-picker",
+      {
+        photosPermission:
+          "Permita o acesso à sua biblioteca de fotos para enviar resultados de exames.",
+      },
+    ],
+    "expo-document-picker",
     [
       "expo-splash-screen",
       {

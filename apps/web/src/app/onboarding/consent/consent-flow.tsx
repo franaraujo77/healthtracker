@@ -12,7 +12,7 @@ import {
   CONSENT_TEXT_VERSION,
   CONSENT_VERSION_LABEL_PT_BR,
   GENERIC_CONSENT_ERROR_MESSAGE_PT_BR,
-  INICIO_ROUTE,
+  IMPORT_ROUTE,
 } from "@healthtracker/validators";
 
 import { useTRPC } from "~/trpc/react";
@@ -34,8 +34,10 @@ export function ConsentFlow() {
 
   function advance() {
     if (isLast) {
-      // Replace so back-navigation cannot return to the consent flow.
-      router.replace(INICIO_ROUTE);
+      // Story 1.5 — onboarding now ends at the import screen on web
+      // (consent → import → Início). The import screen's own skip path
+      // routes to /inicio.
+      router.replace(IMPORT_ROUTE);
       return;
     }
     setStepIndex((i) => i + 1);

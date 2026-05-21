@@ -21,6 +21,7 @@
   "dependencies": {
     "@healthtracker/auth": "workspace:*",
     "@healthtracker/db": "workspace:*",
+    "@healthtracker/types": "workspace:*",
     "@healthtracker/validators": "workspace:*",
     "@trpc/server": "catalog:",
     "superjson": "2.2.3",
