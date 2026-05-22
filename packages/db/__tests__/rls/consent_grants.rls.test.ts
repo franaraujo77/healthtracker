@@ -242,9 +242,17 @@ describe("consent_grants RLS isolation (append-only)", () => {
     const ownerId = crypto.randomUUID();
     const attackerId = crypto.randomUUID();
     await seedConsent(ownerId);
+    // The `wrongPatient` helper case uses `opts.otherPatientId` as the
+    // `app.current_patient_id` GUC — that's the value RLS reads to
+    // decide whether the connecting principal owns the row. We want
+    // the attacker connecting AS THEMSELVES (not as the owner), so
+    // `otherPatientId` MUST be `attackerId`. The earlier ordering
+    // (`otherPatientId: ownerId`) inadvertently impersonated the row's
+    // owner — the UPDATE silently succeeded because RLS saw the
+    // connection as the owner.
     const run = asIdentity("wrongPatient", {
-      patientId: attackerId,
-      otherPatientId: ownerId,
+      patientId: ownerId,
+      otherPatientId: attackerId,
     });
 
     // RLS USING-filter denies the row to the attacker (`patient_id` !=
