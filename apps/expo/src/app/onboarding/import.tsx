@@ -35,7 +35,7 @@ const BACKGROUND_PRIMARY = "#F9F7F4";
 export default function ImportScreen() {
   const router = useRouter();
   const { pickDocuments, uploadFiles, isUploading, progressByPath } =
-    useImportFiles();
+    useImportFiles({ source: "onboarding_import" });
   const [picked, setPicked] = useState<PickedFile[]>([]);
   const [rejected, setRejected] = useState<PickedFileWithError[]>([]);
   const [submitted, setSubmitted] = useState(false);

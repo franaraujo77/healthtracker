@@ -447,11 +447,49 @@ export function sanitizeFilename(name: string): string {
   return fallback.slice(0, 128);
 }
 
-export const UploadImportRequestSchema = z.object({
-  originalFilename: z.string().min(1).max(256),
-  mimeType: z.enum(UPLOAD_ALLOWED_MIME_TYPES),
-  sizeBytes: z.number().int().positive().max(UPLOAD_MAX_BYTES),
-});
+/**
+ * Story 2.1 — the upload `source` distinguishes onboarding imports
+ * (Story 1.5 entry surface) from post-onboarding uploads (Story 2.1+
+ * entry surfaces on Início). Audit / analytics use this to tell where
+ * in the funnel a row came from. Story 1.5 P46 removed the DB-column
+ * default to force every writer to be explicit — match that intent at
+ * every layer.
+ */
+export const UPLOAD_SOURCES = ["onboarding_import", "post_onboarding"] as const;
+export type UploadSource = (typeof UPLOAD_SOURCES)[number];
+
+export function isUploadSource(value: string): value is UploadSource {
+  return (UPLOAD_SOURCES as readonly string[]).includes(value);
+}
+
+/** Max PDF pages accepted in the upload flow (Story 2.1 AC4). */
+export const UPLOAD_MAX_PDF_PAGES = 10;
+
+/**
+ * Story 2.1 P52 + P61 — `pageCount` is REQUIRED when `mimeType` is
+ * `application/pdf` (so a hostile client can't bypass the cap by
+ * omitting the field) and uses `.nonnegative()` (so a legal 0-page
+ * PDF trips the friendly pt-BR copy via the page-count gate rather
+ * than a Zod error). For non-PDF mime types, `pageCount` is ignored.
+ */
+const uploadPageCountRefinement = (data: {
+  mimeType: string;
+  pageCount?: number;
+}): boolean =>
+  data.mimeType !== "application/pdf" || data.pageCount !== undefined;
+
+export const UploadImportRequestSchema = z
+  .object({
+    originalFilename: z.string().min(1).max(256),
+    mimeType: z.enum(UPLOAD_ALLOWED_MIME_TYPES),
+    sizeBytes: z.number().int().positive().max(UPLOAD_MAX_BYTES),
+    source: z.enum(UPLOAD_SOURCES),
+    pageCount: z.number().int().nonnegative().optional(),
+  })
+  .refine(uploadPageCountRefinement, {
+    message: "PDF uploads require pageCount",
+    path: ["pageCount"],
+  });
 export type UploadImportRequest = z.infer<typeof UploadImportRequestSchema>;
 
 /**
@@ -463,12 +501,20 @@ export type UploadImportRequest = z.infer<typeof UploadImportRequestSchema>;
  * the server re-validates them against the actually-uploaded object
  * (P39 + P42).
  */
-export const UploadImportConfirmSchema = z.object({
-  idempotencyKey: z.uuid(),
-  originalFilename: z.string().min(1).max(256),
-  mimeType: z.enum(UPLOAD_ALLOWED_MIME_TYPES),
-  sizeBytes: z.number().int().positive().max(UPLOAD_MAX_BYTES),
-});
+export const UploadImportConfirmSchema = z
+  .object({
+    idempotencyKey: z.uuid(),
+    originalFilename: z.string().min(1).max(256),
+    mimeType: z.enum(UPLOAD_ALLOWED_MIME_TYPES),
+    sizeBytes: z.number().int().positive().max(UPLOAD_MAX_BYTES),
+    source: z.enum(UPLOAD_SOURCES),
+    /** Story 2.1 — see UploadImportRequestSchema.pageCount. */
+    pageCount: z.number().int().nonnegative().optional(),
+  })
+  .refine(uploadPageCountRefinement, {
+    message: "PDF uploads require pageCount",
+    path: ["pageCount"],
+  });
 export type UploadImportConfirm = z.infer<typeof UploadImportConfirmSchema>;
 
 /** Onboarding import-screen route. */
@@ -497,3 +543,96 @@ export const UPLOAD_QUEUED_BADGE_PT_BR = "Enviado";
 /** iOS Photo Library permission string (used in app.config.ts). */
 export const PHOTO_LIBRARY_PERMISSION_PT_BR =
   "Permita o acesso à sua biblioteca de fotos para enviar resultados de exames.";
+
+// =============================================================================
+// Story 2.1 — Post-onboarding PDF upload + ExtractionPulse + upload sheet
+// =============================================================================
+
+/** Error message for PDFs that exceed the page cap (AC4). */
+export const UPLOAD_PDF_TOO_MANY_PAGES_PT_BR =
+  "Este PDF tem mais de 10 páginas. Envie um exame por vez.";
+
+/**
+ * Story 2.1 P54 — surfaced when the PDF can't be parsed (encrypted,
+ * corrupt, or a network failure on the fetch+arrayBuffer round-trip).
+ * The previous behaviour was to surface UPLOAD_PDF_TOO_MANY_PAGES even
+ * for unparseable input, which blamed the patient for the wrong cause.
+ */
+export const UPLOAD_PDF_UNREADABLE_PT_BR =
+  "Não conseguimos ler este PDF. Tente outro arquivo.";
+
+/**
+ * pt-BR labels for the upload `source` enum — used by future status
+ * surfaces (Story 2.5) and any debug copy.
+ */
+export const UPLOAD_SOURCE_PT_BR_LABELS: Record<UploadSource, string> = {
+  onboarding_import: "Importar do onboarding",
+  post_onboarding: "Enviado depois do onboarding",
+};
+
+/** Upload-source bottom-sheet copy (Início post-onboarding entry). */
+export const UPLOAD_SHEET_TITLE_PT_BR = "Como deseja enviar?";
+export const UPLOAD_SHEET_PDF_LABEL_PT_BR = "Arquivo PDF";
+export const UPLOAD_SHEET_PHOTO_LABEL_PT_BR = "Foto ou câmera";
+export const UPLOAD_SHEET_PHOTO_DISABLED_LABEL_PT_BR = "Em breve";
+export const UPLOAD_SHEET_CANCEL_PT_BR = "Cancelar";
+
+/**
+ * ExtractionPulse patience-pattern copy (UX-DR4, ux-design-specification.md
+ * L1090–1094). Keyed off elapsed milliseconds since the upload started.
+ */
+export const EXTRACTION_PULSE_COPY_0_10S_PT_BR = "Lendo seu exame…";
+export const EXTRACTION_PULSE_COPY_10_20S_PT_BR =
+  "Este está demorando um pouco — exames complexos pedem mais cuidado";
+export const EXTRACTION_PULSE_COPY_20_30S_PT_BR = "Ainda processando…";
+export const EXTRACTION_PULSE_COPY_30S_PLUS_PT_BR = "Ainda processando…";
+export const EXTRACTION_PULSE_REVIEW_NEEDED_PT_BR =
+  "Um resultado precisa da sua confirmação";
+export const EXTRACTION_PULSE_COMPLETE_PT_BR = "Pronto";
+export const EXTRACTION_PULSE_MANUAL_ENTRY_CTA_PT_BR = "Inserir manualmente";
+
+/**
+ * Pure-function mapping from elapsed-ms to the patience-pattern micro-copy.
+ * Lives in validators so the rendering surface (ExtractionPulse) and the
+ * unit tests share one source of truth.
+ *
+ * Thresholds: [0, 10s) / [10s, 20s) / [20s, 30s) / [30s, ∞). After 30s
+ * the copy stays the same as the 20–30s bucket; the 30s+ marker is
+ * carried separately so the renderer knows when to surface the
+ * "Inserir manualmente" escape hatch.
+ */
+export function extractionPulseCopyForElapsedMs(elapsedMs: number): string {
+  if (elapsedMs < 10_000) return EXTRACTION_PULSE_COPY_0_10S_PT_BR;
+  if (elapsedMs < 20_000) return EXTRACTION_PULSE_COPY_10_20S_PT_BR;
+  if (elapsedMs < 30_000) return EXTRACTION_PULSE_COPY_20_30S_PT_BR;
+  return EXTRACTION_PULSE_COPY_30S_PLUS_PT_BR;
+}
+
+/** Story 2.1 — true once the patience pattern's escape-hatch threshold passes. */
+export function extractionPulseShouldShowManualEntry(
+  elapsedMs: number,
+): boolean {
+  return elapsedMs >= 30_000;
+}
+
+/**
+ * Counts pages in a PDF. Uses `pdf-lib` (pure JS, RN + browser safe).
+ * Story 2.1 AC4: pre-transmission gate at `UPLOAD_MAX_PDF_PAGES = 10`.
+ *
+ * Memory: a 5 MB PDF buffer + pdf-lib's parsed object graph is well
+ * under typical RN/browser heap budgets.
+ */
+export async function countPdfPages(
+  bytes: ArrayBuffer | Uint8Array,
+): Promise<number> {
+  const { PDFDocument } = await import("pdf-lib");
+  const doc = await PDFDocument.load(bytes, {
+    updateMetadata: false,
+    // Story 2.1 P60 — `ignoreEncryption` lets encrypted PDFs report a
+    // page count instead of throwing `EncryptedPDFError`. The previous
+    // option (`throwOnInvalidObject`) is not in pdf-lib's `LoadOptions`
+    // and was silently ignored.
+    ignoreEncryption: true,
+  });
+  return doc.getPageCount();
+}

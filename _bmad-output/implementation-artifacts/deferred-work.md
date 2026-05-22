@@ -1,5 +1,27 @@
 # Deferred Work
 
+## Deferred from: code review of story-2-1 round 2 (2026-05-22)
+
+- **F84: Type-tighten `PickedFile` so `application/pdf` requires `pageCount`** — currently optional at the TS level; the gate ensures it's set in practice, but a future caller could skip the gate and the Zod error message would be confusing. Discriminated-union refactor; do when a third upload caller appears.
+- **F85: Web `inicio-empty-state.tsx` has no unmount safety** — navigation away mid-upload triggers React's "setState on unmounted" warning and orphans the in-flight PUT. Joins F74's AbortController work.
+- **F86: Verify `role="status"` forwards to the rendered DOM via Tamagui on web AND that RN View ignores it cleanly** — hand-test. If RN logs warnings, gate the `role` prop behind `Platform.OS === 'web'`.
+- **F87: `applyDeadLetter` metadata merge uses `JSON.stringify(merged)`** — BigInt or circular structures throw synchronously and the row never transitions to `failed`. Wrap in try/catch and sanitize.
+- **F88: `countPdfPages` dynamic `await import('pdf-lib')` — first pick on a cold page incurs ~200–500 ms** — hot pick is fine. Add a spinner state or use static import.
+- **F89: `usePulseOpacity` `setInterval` triggers a 1.5 s re-render of the entire ExtractionPulse subtree** — wasted renders. Use CSS keyframes on web / `react-native-reanimated` on RN, or memoize children.
+
+## Deferred from: code review of story-2-1 (2026-05-22)
+
+- **F74: No `AbortController` / per-file timeout on web upload** — `apps/web/src/app/inicio/inicio-empty-state.tsx` — a long-hung storage PUT stalls the whole batch with no cancel UI. Revisit when Story 2.5's status surface adds the real upload status feed.
+- **F75: `confirmImport.source` not cross-checked against `requestImport.source`** — `packages/api/src/router/uploads.ts` — a client can mis-attribute funnel by sending different sources at the two calls. Audit-attribution concern, not security. Resolve when the funnel metrics surface lands.
+- **F76: Sequential `gatePdfPageCount` on web blocks UI for multi-PDF batches** — `apps/web/src/app/inicio/inicio-empty-state.tsx`, `apps/web/src/app/onboarding/import/import-flow.tsx` — parallelize with `Promise.all` or surface per-file progress.
+- **F77: Web `lastOutcomes` aria-live list lingers permanently below the empty-state CTA** — `apps/web/src/app/inicio/inicio-empty-state.tsx` — clear after N seconds or on next CTA tap.
+- **F78: `applyPageCountGate` re-fetches file bytes via `fetch(file.uri)`** — `apps/expo/src/hooks/use-import-files.ts` — picker may have cached them; duplicates I/O on large PDFs. Cache the buffer and reuse during PUT.
+- **F79: Verify Tamagui `Button disabled` truly blocks `onPress` on web (not just style)** — `packages/ui/src/upload-source-sheet.tsx` — `pdfDisabled` may be visual-only; rapid taps during active upload could spawn duplicate picker invocations.
+- **F80: Brief animation flash for `prefers-reduced-motion` users on Web's first paint** — `apps/web/src/app/inicio/inicio-empty-state.tsx` — initial `reducedMotion` defaults to `false` before the effect runs. Minor; would need SSR-aware initial state.
+- **F81: `applyDeadLetter` test bundles "already complete" + "already failed" into one "terminal" case** — `packages/api/__tests__/upload-transitions.test.ts` — split into two assertions for clarity.
+- **F82: `upload-transitions.test.ts` "merges metadata via the `||` jsonb concatenation seam" test has a dead assertion** — `packages/api/__tests__/upload-transitions.test.ts` — promises a metadata check, only verifies `status: "processing"`. Add a meaningful metadata assertion when the test seam grows (likely Story 2.3).
+- **F83 (reaffirms F71): Web `inicio-empty-state.tsx` reimplements the request/confirm flow inline** — instead of reusing a shared web hook mirroring `useImportFiles`. Wait for Story 2.5's status surface to crystallize the shape before extracting.
+
 ## Deferred from: code review of story-1-2 round 2 (2026-05-19)
 
 - **F32: Task 8 DRY mandate not satisfied** — `apps/web/src/app/onboarding/consent/consent-flow.tsx`, `apps/expo/src/app/onboarding/consent.tsx` — submit-handler logic duplicated. Shared schemas/copy/routes mitigate ~80% of drift; React state machine still duplicated. Extracting a `useConsentFlow` hook requires adding React as a `packages/validators` peer dep. Revisit when Story 1.4 settings panel makes the case for a third consumer.

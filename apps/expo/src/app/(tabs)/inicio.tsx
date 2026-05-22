@@ -1,30 +1,128 @@
+import { useEffect, useRef, useState } from "react";
+import { AccessibilityInfo } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Stack, useRouter } from "expo-router";
+import { Stack } from "expo-router";
 import { YStack } from "tamagui";
 
-import { EmptyStateRecord } from "@healthtracker/ui";
+import { EmptyStateRecord, ExtractionPulse } from "@healthtracker/ui";
+import { UploadSourceSheet } from "@healthtracker/ui/upload-source-sheet";
 import {
-  IMPORT_ROUTE,
   INICIO_CTA_PT_BR,
   INICIO_HEADLINE_PT_BR,
+  UPLOAD_ALLOWED_MIME_TYPES,
 } from "@healthtracker/validators";
+
+import { useImportFiles } from "~/hooks/use-import-files";
 
 // SafeAreaView is native and can't read Tamagui tokens — mirror
 // colorTokens.backgroundPrimary.light.
 const BACKGROUND_PRIMARY = "#F9F7F4";
 
+const PDF_ONLY_ACCEPT = [UPLOAD_ALLOWED_MIME_TYPES[0]] as const;
+const ELAPSED_TICK_MS = 1000;
+
 export default function Inicio() {
-  const router = useRouter();
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [reducedMotion, setReducedMotion] = useState(false);
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  const {
+    pickDocuments,
+    uploadFiles,
+    isUploading,
+    progressByPath,
+    startedAtByPath,
+  } = useImportFiles({
+    source: "post_onboarding",
+    pickDocumentsAccept: PDF_ONLY_ACCEPT,
+  });
+
+  useEffect(() => {
+    let mounted = true;
+    void AccessibilityInfo.isReduceMotionEnabled().then((reduced) => {
+      if (mounted) setReducedMotion(reduced);
+    });
+    const sub = AccessibilityInfo.addEventListener(
+      "reduceMotionChanged",
+      setReducedMotion,
+    );
+    return () => {
+      mounted = false;
+      sub.remove();
+    };
+  }, []);
+
+  // Story 2.1 — drive the ExtractionPulse patience-pattern copy from a
+  // 1 s tick. Only run the interval while we have an active upload —
+  // the 10 s buckets don't need sub-second precision.
+  const activeUris = Object.keys(progressByPath).filter((uri) => {
+    const status = progressByPath[uri]?.status;
+    return status === "uploading" || status === "queued";
+  });
+  const hasActive = activeUris.length > 0;
+  useEffect(() => {
+    if (!hasActive) return;
+    const id = setInterval(() => setNowTick(Date.now()), ELAPSED_TICK_MS);
+    return () => clearInterval(id);
+  }, [hasActive]);
+
+  // Story 2.1 P59 — re-entry guard so a double-tap on the sheet's
+  // "Arquivo PDF" CTA doesn't spawn two concurrent
+  // `DocumentPicker.getDocumentAsync` calls (iOS may throw on the
+  // second; either platform would otherwise queue duplicate batches).
+  const isPickingRef = useRef(false);
+  async function handlePickPdf() {
+    if (isPickingRef.current) return;
+    isPickingRef.current = true;
+    try {
+      const result = await pickDocuments();
+      if (result.files.length === 0) return;
+      await uploadFiles(result.files);
+    } finally {
+      // Round-2 R2-P69 — close the sheet AFTER the picker resolves,
+      // regardless of success/cancel/error. The previous version
+      // only closed on the success branch, so iOS picker errors left
+      // the sheet open with no user feedback.
+      setSheetOpen(false);
+      isPickingRef.current = false;
+    }
+  }
+
+  // Compute ExtractionPulse render inputs from the active uploads.
+  const filenames = activeUris.map((uri) => progressByPath[uri]?.name ?? uri);
+  const earliestStart = activeUris.reduce<number | undefined>((min, uri) => {
+    const started = startedAtByPath[uri];
+    if (started === undefined) return min;
+    return min === undefined || started < min ? started : min;
+  }, undefined);
+  const elapsedMs =
+    earliestStart !== undefined ? Math.max(0, nowTick - earliestStart) : 0;
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: BACKGROUND_PRIMARY }}>
       <Stack.Screen options={{ title: "Início" }} />
       <YStack flex={1} backgroundColor="$backgroundPrimary">
+        {hasActive ? (
+          <ExtractionPulse
+            state="processing"
+            filenames={filenames}
+            elapsedMs={elapsedMs}
+            reducedMotion={reducedMotion}
+          />
+        ) : null}
         <EmptyStateRecord
           headline={INICIO_HEADLINE_PT_BR}
           ctaLabel={INICIO_CTA_PT_BR}
-          // Story 1.5 — the empty-state CTA now opens the same import
-          // screen the onboarding flow uses (AC3 + AC4 recovery path).
-          onCtaPress={() => router.push({ pathname: IMPORT_ROUTE })}
+          // Story 2.1 — the empty-state CTA opens the post-onboarding
+          // upload-source sheet. Story 1.5's recovery path
+          // (`/onboarding/import` URL) is still reachable directly; the
+          // CTA no longer routes to it.
+          onCtaPress={() => setSheetOpen(true)}
+        />
+        <UploadSourceSheet
+          open={sheetOpen}
+          onOpenChange={setSheetOpen}
+          onPickPdf={() => void handlePickPdf()}
+          pdfDisabled={isUploading}
         />
       </YStack>
     </SafeAreaView>

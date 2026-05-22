@@ -5,9 +5,10 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
 
-import type { UploadMimeType } from "@healthtracker/validators";
+import type { UploadMimeType, UploadSource } from "@healthtracker/validators";
 import { Button } from "@healthtracker/ui/button";
 import {
+  countPdfPages,
   GENERIC_UPLOAD_ERROR_MESSAGE_PT_BR,
   IMPORT_BODY_PT_BR,
   IMPORT_CONFIRM_CTA_PT_BR,
@@ -20,6 +21,9 @@ import {
   UPLOAD_EMPTY_FILE_PT_BR,
   UPLOAD_FILE_TOO_LARGE_PT_BR,
   UPLOAD_MAX_BYTES,
+  UPLOAD_MAX_PDF_PAGES,
+  UPLOAD_PDF_TOO_MANY_PAGES_PT_BR,
+  UPLOAD_PDF_UNREADABLE_PT_BR,
   UPLOAD_QUEUED_BADGE_PT_BR,
   UPLOAD_UNSUPPORTED_MIME_PT_BR,
 } from "@healthtracker/validators";
@@ -37,6 +41,8 @@ interface PickedFile {
   file: File;
   status: PickedFileStatus;
   errorMessage?: string;
+  /** Story 2.1 — populated for PDFs by `validateClientSide`. */
+  pageCount?: number;
 }
 
 function validateClientSide(file: File): string | null {
@@ -46,7 +52,48 @@ function validateClientSide(file: File): string | null {
   return null;
 }
 
-export function ImportFlow() {
+/**
+ * Story 2.1 AC4 — PDF page-count gate. Runs after `validateClientSide`
+ * for `application/pdf` files. Returns either the page count (passes)
+ * or the pt-BR error string (rejects). Failure to parse is treated as
+ * a hard reject. Non-PDF mime types return `null` (no gate applies).
+ */
+async function gatePdfPageCount(
+  file: File,
+): Promise<{ pageCount: number } | { error: string } | null> {
+  if (file.type !== "application/pdf") return null;
+  let pageCount: number;
+  try {
+    const bytes = await file.arrayBuffer();
+    pageCount = await countPdfPages(bytes);
+  } catch {
+    // Story 2.1 P54 — fetch / parse / encrypted PDF failures surface
+    // as "unreadable" instead of being blamed on the page cap.
+    return { error: UPLOAD_PDF_UNREADABLE_PT_BR };
+  }
+  // Round-2 R2-P67 — `ignoreEncryption: true` (P60) lets encrypted
+  // PDFs report a page count, and `pdf-lib` can return 0 for some
+  // malformed structures. A 0-page PDF is "unreadable" from the
+  // extraction worker's perspective.
+  if (pageCount <= 0) {
+    return { error: UPLOAD_PDF_UNREADABLE_PT_BR };
+  }
+  if (pageCount > UPLOAD_MAX_PDF_PAGES) {
+    return { error: UPLOAD_PDF_TOO_MANY_PAGES_PT_BR };
+  }
+  return { pageCount };
+}
+
+/**
+ * Story 2.1 — `source` is required, no default. The onboarding page
+ * passes `'onboarding_import'`; future post-onboarding consumers pass
+ * `'post_onboarding'`.
+ */
+export interface ImportFlowProps {
+  source: UploadSource;
+}
+
+export function ImportFlow({ source }: ImportFlowProps) {
   const router = useRouter();
   const trpc = useTRPC();
   const requestImport = useMutation(
@@ -66,14 +113,28 @@ export function ImportFlow() {
     router.replace(INICIO_ROUTE);
   }
 
-  function handleFileInput(ev: ChangeEvent<HTMLInputElement>) {
+  async function handleFileInput(ev: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(ev.target.files ?? []);
     const valid: PickedFile[] = [];
     const bad: { name: string; reason: string }[] = [];
     for (const file of files) {
       const err = validateClientSide(file);
-      if (err) bad.push({ name: file.name, reason: err });
-      else valid.push({ file, status: "pending" });
+      if (err) {
+        bad.push({ name: file.name, reason: err });
+        continue;
+      }
+      // Story 2.1 AC4 — PDF page-count gate runs pre-transmission so
+      // oversize PDFs never reach `requestImport`.
+      const gate = await gatePdfPageCount(file);
+      if (gate && "error" in gate) {
+        bad.push({ name: file.name, reason: gate.error });
+        continue;
+      }
+      const picked: PickedFile = { file, status: "pending" };
+      if (gate && "pageCount" in gate) {
+        picked.pageCount = gate.pageCount;
+      }
+      valid.push(picked);
     }
     setPicked((prev) => [...prev, ...valid]);
     // Review P44 — accumulate rejections across picks (matches the
@@ -96,6 +157,8 @@ export function ImportFlow() {
         originalFilename: item.file.name,
         mimeType: item.file.type as UploadMimeType,
         sizeBytes: item.file.size,
+        source,
+        ...(item.pageCount !== undefined ? { pageCount: item.pageCount } : {}),
       });
       const putResponse = await fetch(req.uploadUrl, {
         method: "PUT",
@@ -112,6 +175,8 @@ export function ImportFlow() {
         originalFilename: item.file.name,
         mimeType: item.file.type as UploadMimeType,
         sizeBytes: item.file.size,
+        source,
+        ...(item.pageCount !== undefined ? { pageCount: item.pageCount } : {}),
       });
       const next: PickedFileStatus = confirm.created
         ? "queued"

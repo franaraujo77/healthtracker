@@ -5,6 +5,7 @@ import {
   isUploadMimeType,
   sanitizeFilename,
   UPLOAD_MAX_BYTES,
+  UPLOAD_MAX_PDF_PAGES,
   UploadImportConfirmSchema,
   UploadImportRequestSchema,
 } from "@healthtracker/validators";
@@ -34,6 +35,19 @@ export const uploadsRouter = {
   requestImport: protectedProcedure
     .input(UploadImportRequestSchema)
     .mutation(async ({ ctx, input }) => {
+      // Story 2.1 AC4 + Round-2 R2-P72 — server-side defense-in-depth
+      // for PDF page count. The Zod refinement (P52) now guarantees
+      // `pageCount` is defined whenever `mimeType === 'application/pdf'`,
+      // so this is purely belt-and-suspenders against schema drift.
+      if (
+        input.mimeType === "application/pdf" &&
+        (input.pageCount ?? 0) > UPLOAD_MAX_PDF_PAGES
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "UPLOAD_PDF_TOO_MANY_PAGES",
+        });
+      }
       const patientId = ctx.session.user.id;
       const idempotencyKey = crypto.randomUUID();
       const sanitizedFilename = sanitizeFilename(input.originalFilename);
@@ -118,6 +132,39 @@ export const uploadsRouter = {
       }
       const storedContentType = stored.contentType;
 
+      // Round-2 R2-P70 — close the mime-mismatch bypass: a hostile
+      // client could `requestImport({mimeType: 'image/jpeg'})` (so
+      // `pageCount` was never required by the request schema), PUT
+      // PDF bytes to the signed URL, and `confirmImport` would see
+      // `storedContentType === 'application/pdf'` but
+      // `input.pageCount === undefined` — defeating the page-cap
+      // gate. We reject this asymmetry up front; the client must
+      // re-request with the correct mime.
+      if (
+        storedContentType === "application/pdf" &&
+        input.mimeType !== "application/pdf"
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "UPLOAD_MIME_MISMATCH",
+        });
+      }
+
+      // Story 2.1 AC4 + Round-2 R2-P72 — server-side defense-in-depth
+      // for PDF page count at confirm time (belt-and-suspenders; the
+      // Zod refinement makes `pageCount` required for PDFs and the
+      // request-time gate catches over-cap submissions before signed
+      // URL minting).
+      if (
+        storedContentType === "application/pdf" &&
+        (input.pageCount ?? 0) > UPLOAD_MAX_PDF_PAGES
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "UPLOAD_PDF_TOO_MANY_PAGES",
+        });
+      }
+
       const insertedRow = await writeUpload(ctx.db, {
         patientId,
         idempotencyKey: input.idempotencyKey,
@@ -125,7 +172,11 @@ export const uploadsRouter = {
         mimeType: storedContentType,
         sizeBytes: stored.sizeBytes,
         originalFilename: input.originalFilename,
-        source: "onboarding_import",
+        // Story 2.1 — source flows through from the client (Story 1.5
+        // hard-coded "onboarding_import"). The Início post-onboarding
+        // entry sends "post_onboarding"; the onboarding `/onboarding/import`
+        // screen sends "onboarding_import".
+        source: input.source,
       });
 
       if (!insertedRow) {
@@ -151,7 +202,8 @@ export const uploadsRouter = {
         resourceId: insertedRow.id,
         resourceType: "upload",
         metadata: {
-          source: "onboarding_import",
+          // Story 2.1 — source flows through from the client.
+          source: input.source,
           mimeType: storedContentType,
           sizeBytes: stored.sizeBytes,
           actor: "self",

@@ -33,6 +33,7 @@
     "@healthtracker/tsconfig": "workspace:*",
     "@vitest/coverage-v8": "catalog:",
     "eslint": "catalog:",
+    "pdf-lib": "^1.17.1",
     "prettier": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

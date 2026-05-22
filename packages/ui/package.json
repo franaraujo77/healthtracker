@@ -12,7 +12,9 @@
     "./providers": "./src/providers/TamaguiProvider.tsx",
     "./theme/tokens": "./src/theme/tokens.ts",
     "./separator": "./src/separator.tsx",
-    "./toast": "./src/toast.tsx"
+    "./toast": "./src/toast.tsx",
+    "./extraction-pulse": "./src/extraction-pulse.tsx",
+    "./upload-source-sheet": "./src/upload-source-sheet.tsx"
   },
   "license": "MIT",
   "scripts": {
@@ -23,6 +25,7 @@
     "ui-add": "pnpm dlx shadcn@latest add && prettier src --write --list-different"
   },
   "dependencies": {
+    "@healthtracker/validators": "workspace:*",
     "@tamagui/animations-css": "catalog:",
     "@tamagui/core": "catalog:",
     "@tamagui/web": "catalog:",

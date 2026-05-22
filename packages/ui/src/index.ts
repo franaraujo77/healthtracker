@@ -5,6 +5,13 @@ export type {
   EmptyStateRecordProps,
   EmptyStateRecordVariant,
 } from "./empty-state-record";
+export { ExtractionPulse } from "./extraction-pulse";
+export type {
+  ExtractionPulseProps,
+  ExtractionPulseState,
+} from "./extraction-pulse";
+export { UploadSourceSheet } from "./upload-source-sheet";
+export type { UploadSourceSheetProps } from "./upload-source-sheet";
 export { Field, FieldGroup, FieldInput, FieldRow } from "./field";
 export { Input } from "./input";
 export { Label } from "./label";
