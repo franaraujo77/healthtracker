@@ -55,8 +55,24 @@ const timingMiddleware = t.middleware(async ({ next, path }) => {
 
 export const publicProcedure = t.procedure.use(timingMiddleware);
 
-// SET LOCAL is transaction-scoped — must wrap the entire resolver in a transaction
-// so the RLS context variable persists for all queries the resolver executes.
+// RLS context is transaction-scoped — wrap the entire resolver in a
+// transaction so the GUC persists for all queries the resolver executes.
+//
+// **Why `set_config(...)` and not `SET LOCAL = ${value}`**
+//
+// Drizzle's `sql\`\`` template tag parameterizes scalar interpolations
+// into `$N` bind parameters (`drizzle-orm/sql/sql.js`, escapeParam path).
+// PostgreSQL **rejects parameter placeholders in `SET` commands** — the
+// value must be a literal — so `sql\`SET LOCAL app.x = ${val}\`` issues
+// `SET LOCAL app.x = $1` which Postgres errors with
+// `syntax error at or near "$1"`.
+//
+// `set_config(name text, value text, is_local boolean) returns text` is
+// the function form, accepts parameters, and `is_local = true` makes it
+// equivalent to `SET LOCAL`. This was caught at Epic 1 PR open against
+// real Supabase in CI; the mocked-execute unit tests never exercised
+// the SQL surface. Same pattern applies to the RLS test helper at
+// `packages/db/__tests__/rls/helpers.ts`.
 export const protectedProcedure = t.procedure
   .use(timingMiddleware)
   .use(async ({ ctx, next }) => {
@@ -66,12 +82,14 @@ export const protectedProcedure = t.procedure
     const session = ctx.session;
     return ctx.db.transaction(async (tx) => {
       await tx.execute(
-        sql`SET LOCAL app.current_patient_id = ${session.user.id}`,
+        sql`SELECT set_config('app.current_patient_id', ${session.user.id}, true)`,
       );
-      await tx.execute(sql`SET LOCAL app.current_user_role = ${"patient"}`);
+      await tx.execute(
+        sql`SELECT set_config('app.current_user_role', ${"patient"}, true)`,
+      );
       if (process.env.NODE_ENV === "development") {
         console.log(
-          `[RLS] SET LOCAL app.current_patient_id = ${session.user.id}`,
+          `[RLS] set_config('app.current_patient_id', '${session.user.id}', true)`,
         );
       }
       return next({
@@ -96,10 +114,14 @@ export const doctorProcedure = t.procedure
       });
     }
     return ctx.db.transaction(async (tx) => {
+      // See protectedProcedure above for why `set_config` is used here
+      // instead of `SET LOCAL = ${value}`.
       await tx.execute(
-        sql`SET LOCAL app.current_share_token_id = ${shareTokenId}`,
+        sql`SELECT set_config('app.current_share_token_id', ${shareTokenId}, true)`,
       );
-      await tx.execute(sql`SET LOCAL app.current_user_role = ${"doctor"}`);
+      await tx.execute(
+        sql`SELECT set_config('app.current_user_role', ${"doctor"}, true)`,
+      );
       return next({
         ctx: {
           session: ctx.session,

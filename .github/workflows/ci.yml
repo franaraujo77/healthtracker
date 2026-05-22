@@ -86,7 +86,14 @@ jobs:
       - name: Drizzle schema check
         run: pnpm db:check
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # `drizzle-kit check` validates snapshot files against each
+          # other for breaking migrations — it does NOT connect to a DB.
+          # But `drizzle.config.ts` reads `DATABASE_URL` eagerly and
+          # throws on missing, so we pass a syntactically valid
+          # placeholder. The `secrets.DATABASE_URL` is intentionally
+          # not consumed: production credentials don't belong in this
+          # static check.
+          DATABASE_URL: "postgres://placeholder:placeholder@localhost:5432/placeholder"
 
   rls-adversarial:
     runs-on: ubuntu-latest
@@ -148,6 +155,37 @@ jobs:
             exit 1
           fi
 
+      # Push the application schema (users, audit_log, consent_grants,
+      # uploads, posts) into the local Supabase. Without this step the
+      # RLS tests would seed against tables that don't exist and the
+      # Supabase REST client emits `Could not find the table
+      # 'public.<X>' in the schema cache`. `db:push` is idempotent and
+      # safe to run against the vanilla Supabase start.
+      - name: Push schema to local Supabase
+        # Fresh CI Supabase has no prior schema, so `drizzle-kit push`
+        # only creates tables — no destructive operations, no prompts.
+        # `db:push` itself runs via `dotenv -e ../../.env --` and inherits
+        # the DATABASE_URL written to $GITHUB_ENV in the prior step.
+        run: pnpm db:push
+        env:
+          SKIP_ENV_VALIDATION: "1"
+
+      # Apply the `custom_*.sql` RLS / Storage policies that
+      # drizzle-kit doesn't manage. The `custom_` prefix is the team
+      # convention from Story 0.4 to keep `drizzle-kit check` from
+      # dropping them. Two schemas are touched: `public` (table
+      # policies) and `storage` (object policies for `lab-uploads`).
+      - name: Apply custom RLS + Storage policies
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Strip query/userinfo for psql; postgres:// URI works directly.
+          for f in packages/db/policies/custom_*.sql; do
+            echo "::group::psql -f $f"
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"
+            echo "::endgroup::"
+          done
+
       - name: Run RLS adversarial tests
         run: pnpm test:rls
         env:
@@ -157,39 +195,15 @@ jobs:
         if: always()
         run: supabase stop
 
-  a11y:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Setup
-        uses: ./tooling/github/setup
-
-      - name: Copy env
-        shell: bash
-        run: cp .env.example .env
-
-      - name: Build web app
-        run: pnpm build -F @healthtracker/web
-        env:
-          SKIP_ENV_VALIDATION: "1"
-          # Optional: enables Sentry source map upload when token is configured
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
-          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
-
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
-
-      - name: Run accessibility tests
-        run: pnpm test:a11y -F @healthtracker/web
-        env:
-          SKIP_ENV_VALIDATION: "1"
-
-      - name: Upload Playwright report
-        uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: playwright-report
-          path: apps/web/playwright-report/
-          retention-days: 7
+  # The `a11y` job was removed as part of the Epic 1 PR (#5) fix-pass.
+  # Reason: no a11y E2E tests exist in the repository — `playwright` is
+  # not a project dep, `pnpm test:a11y -F @healthtracker/web` points at
+  # non-existent test files, and the job has been a phantom (passing or
+  # failing depending on cache state) since Epic 0. The F11-family of
+  # deferred items consistently flagged "Expo / Web app has no E2E test
+  # setup yet". Restore this job when the first a11y / E2E story lands:
+  #
+  # 1. Add `@playwright/test` + `axe-core` as devDeps in apps/web.
+  # 2. Write at least one passing a11y test under apps/web/__tests__/e2e/.
+  # 3. Re-add the job here with the existing build → install → test
+  #    shape (see git history for ci.yml around 2026-05-21).

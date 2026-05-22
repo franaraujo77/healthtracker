@@ -56,6 +56,26 @@ export function asIdentity(identity: IdentityType, options: IdentityOptions) {
   };
 }
 
+/**
+ * Sets a transaction-scoped GUC via `set_config(name, value, is_local=true)`.
+ *
+ * PostgreSQL rejects parameter placeholders in `SET` commands; postgres.js
+ * (and Drizzle) parameterize template-literal interpolations by default,
+ * so `tx\`SET LOCAL app.x = ${value}\`` issues `SET LOCAL app.x = $1`
+ * which Postgres errors with `syntax error at or near "$1"`. The
+ * `set_config()` function form accepts parameters and `is_local=true`
+ * makes it equivalent to `SET LOCAL`. Caught at Epic 1 PR open in CI
+ * — see `packages/api/src/trpc.ts` for the same fix on the production
+ * `protectedProcedure` / `doctorProcedure` middleware.
+ */
+async function setLocal(
+  tx: postgres.TransactionSql,
+  name: string,
+  value: string,
+): Promise<void> {
+  await tx`SELECT set_config(${name}, ${value}, true)`;
+}
+
 async function applyClaims(
   tx: postgres.TransactionSql,
   identity: IdentityType,
@@ -63,40 +83,52 @@ async function applyClaims(
 ): Promise<void> {
   switch (identity) {
     case "correctPatient":
-      await tx`SET LOCAL app.current_patient_id = ${opts.patientId}`;
-      await tx`SET LOCAL app.current_user_role = ${"patient"}`;
+      await setLocal(tx, "app.current_patient_id", opts.patientId);
+      await setLocal(tx, "app.current_user_role", "patient");
       break;
 
     case "wrongPatient":
-      await tx`SET LOCAL app.current_patient_id = ${opts.otherPatientId ?? crypto.randomUUID()}`;
-      await tx`SET LOCAL app.current_user_role = ${"patient"}`;
+      await setLocal(
+        tx,
+        "app.current_patient_id",
+        opts.otherPatientId ?? crypto.randomUUID(),
+      );
+      await setLocal(tx, "app.current_user_role", "patient");
       break;
 
     case "doctorWithAccess":
-      await tx`SET LOCAL app.current_patient_id = ${opts.patientId}`;
-      await tx`SET LOCAL app.current_user_role = ${"doctor"}`;
-      await tx`SET LOCAL app.share_token = ${opts.shareToken ?? crypto.randomUUID()}`;
+      await setLocal(tx, "app.current_patient_id", opts.patientId);
+      await setLocal(tx, "app.current_user_role", "doctor");
+      await setLocal(
+        tx,
+        "app.share_token",
+        opts.shareToken ?? crypto.randomUUID(),
+      );
       break;
 
     case "doctorWithoutAccess":
-      await tx`SET LOCAL app.current_patient_id = ${opts.patientId}`;
-      await tx`SET LOCAL app.current_user_role = ${"doctor"}`;
+      await setLocal(tx, "app.current_patient_id", opts.patientId);
+      await setLocal(tx, "app.current_user_role", "doctor");
       // No share token set — doctor has no access grant
       break;
 
     case "expiredToken":
       // Simulate an expired JWT by setting an invalid/expired token marker.
       // Actual enforcement happens via RLS policy checking token expiry.
-      await tx`SET LOCAL app.current_patient_id = ${opts.patientId}`;
-      await tx`SET LOCAL app.current_user_role = ${"patient"}`;
-      await tx`SET LOCAL app.token_expires_at = ${"1970-01-01T00:00:00Z"}`;
+      await setLocal(tx, "app.current_patient_id", opts.patientId);
+      await setLocal(tx, "app.current_user_role", "patient");
+      await setLocal(tx, "app.token_expires_at", "1970-01-01T00:00:00Z");
       break;
 
     case "revokedToken":
-      await tx`SET LOCAL app.current_patient_id = ${opts.patientId}`;
-      await tx`SET LOCAL app.current_user_role = ${"doctor"}`;
-      await tx`SET LOCAL app.share_token = ${opts.shareToken ?? "revoked-share-token"}`;
-      await tx`SET LOCAL app.token_revoked = ${"true"}`;
+      await setLocal(tx, "app.current_patient_id", opts.patientId);
+      await setLocal(tx, "app.current_user_role", "doctor");
+      await setLocal(
+        tx,
+        "app.share_token",
+        opts.shareToken ?? "revoked-share-token",
+      );
+      await setLocal(tx, "app.token_revoked", "true");
       break;
   }
 }
