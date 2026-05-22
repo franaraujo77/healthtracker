@@ -73,7 +73,8 @@
     "SENTRY_ORG",
     "SENTRY_PROJECT",
     "EXPO_PUBLIC_SENTRY_DSN",
-    "NEXT_RUNTIME"
+    "NEXT_RUNTIME",
+    "EXTRACTION_ADAPTER"
   ],
   "globalPassThroughEnv": [
     "NODE_ENV",

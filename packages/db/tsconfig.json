@@ -1,5 +1,5 @@
 {
   "extends": "@healthtracker/tsconfig/compiled-package.json",
-  "include": ["src", "__tests__"],
+  "include": ["src", "__tests__", "seed"],
   "exclude": ["node_modules"]
 }
