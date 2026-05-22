@@ -86,7 +86,14 @@ jobs:
       - name: Drizzle schema check
         run: pnpm db:check
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # `drizzle-kit check` validates snapshot files against each
+          # other for breaking migrations — it does NOT connect to a DB.
+          # But `drizzle.config.ts` reads `DATABASE_URL` eagerly and
+          # throws on missing, so we pass a syntactically valid
+          # placeholder. The `secrets.DATABASE_URL` is intentionally
+          # not consumed: production credentials don't belong in this
+          # static check.
+          DATABASE_URL: "postgres://placeholder:placeholder@localhost:5432/placeholder"
 
   rls-adversarial:
     runs-on: ubuntu-latest
@@ -108,6 +115,88 @@ jobs:
       - name: Start local Supabase
         run: supabase start
 
+      # Point the RLS tests at the local Supabase stack. dotenv-cli (used by
+      # `with-env`) does not overwrite variables already in the environment,
+      # so writes to $GITHUB_ENV take precedence over the .env placeholders.
+      # We parse `supabase status -o env` line-by-line rather than `eval`ing
+      # the output to avoid executing arbitrary shell if the CLI changes.
+      - name: Export local Supabase env
+        shell: bash
+        run: |
+          set -euo pipefail
+          found_api_url=0
+          found_db_url=0
+          found_anon=0
+          found_service=0
+          while IFS= read -r line; do
+            [[ "$line" =~ ^[A-Z_]+=.*$ ]] || continue
+            key="${line%%=*}"
+            val="${line#*=}"
+            # strip surrounding double quotes if present
+            val="${val#\"}"
+            val="${val%\"}"
+            case "$key" in
+              API_URL)          echo "SUPABASE_URL=$val"             >> "$GITHUB_ENV"; found_api_url=1 ;;
+              DB_URL)           echo "DATABASE_URL=$val"             >> "$GITHUB_ENV"; found_db_url=1 ;;
+              ANON_KEY)         echo "SUPABASE_ANON_KEY=$val"        >> "$GITHUB_ENV"; found_anon=1 ;;
+              SERVICE_ROLE_KEY) echo "SUPABASE_SERVICE_ROLE_KEY=$val" >> "$GITHUB_ENV"; found_service=1 ;;
+            esac
+          done < <(supabase status -o env)
+          # Fail loudly if the Supabase CLI changes its env output schema —
+          # otherwise the RLS tests would run against placeholder .env values
+          # and report misleading failures deep in the logs.
+          missing=()
+          [[ $found_api_url -eq 1 ]] || missing+=("API_URL")
+          [[ $found_db_url  -eq 1 ]] || missing+=("DB_URL")
+          [[ $found_anon    -eq 1 ]] || missing+=("ANON_KEY")
+          [[ $found_service -eq 1 ]] || missing+=("SERVICE_ROLE_KEY")
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "::error::supabase status -o env did not emit: ${missing[*]}" >&2
+            exit 1
+          fi
+
+      # Push the application schema (users, audit_log, consent_grants,
+      # uploads, posts) into the local Supabase. Without this step the
+      # RLS tests would seed against tables that don't exist and the
+      # Supabase REST client emits `Could not find the table
+      # 'public.<X>' in the schema cache`. `db:push` is idempotent and
+      # safe to run against the vanilla Supabase start.
+      - name: Push schema to local Supabase
+        # Call `drizzle-kit push --force` directly rather than going
+        # through `pnpm db:push`:
+        #   1. The `push` task is marked `"interactive": true` in
+        #      `packages/db/turbo.json` (because the local-dev usage
+        #      prompts on destructive ops). Turbo refuses to run
+        #      interactive tasks in CI without a TTY.
+        #   2. `--force` skips drizzle-kit's confirmation prompts for
+        #      any operation drizzle-kit considers destructive. A
+        #      fresh CI Supabase has no prior schema so all ops are
+        #      `CREATE TABLE` / `CREATE INDEX`, but `drizzle-kit
+        #      push` still emits a "press Enter to continue" prompt
+        #      in non-TTY environments without `--force`.
+        # `DATABASE_URL` is in the GitHub env from the
+        # `Export local Supabase env` step above; no `.env` load needed.
+        working-directory: packages/db
+        run: pnpm exec drizzle-kit push --force
+        env:
+          SKIP_ENV_VALIDATION: "1"
+
+      # Apply the `custom_*.sql` RLS / Storage policies that
+      # drizzle-kit doesn't manage. The `custom_` prefix is the team
+      # convention from Story 0.4 to keep `drizzle-kit check` from
+      # dropping them. Two schemas are touched: `public` (table
+      # policies) and `storage` (object policies for `lab-uploads`).
+      - name: Apply custom RLS + Storage policies
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Strip query/userinfo for psql; postgres:// URI works directly.
+          for f in packages/db/policies/custom_*.sql; do
+            echo "::group::psql -f $f"
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"
+            echo "::endgroup::"
+          done
+
       - name: Run RLS adversarial tests
         run: pnpm test:rls
         env:
@@ -117,39 +206,15 @@ jobs:
         if: always()
         run: supabase stop
 
-  a11y:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Setup
-        uses: ./tooling/github/setup
-
-      - name: Copy env
-        shell: bash
-        run: cp .env.example .env
-
-      - name: Build web app
-        run: pnpm build -F @healthtracker/web
-        env:
-          SKIP_ENV_VALIDATION: "1"
-          # Optional: enables Sentry source map upload when token is configured
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
-          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
-
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
-
-      - name: Run accessibility tests
-        run: pnpm test:a11y -F @healthtracker/web
-        env:
-          SKIP_ENV_VALIDATION: "1"
-
-      - name: Upload Playwright report
-        uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: playwright-report
-          path: apps/web/playwright-report/
-          retention-days: 7
+  # The `a11y` job was removed as part of the Epic 1 PR (#5) fix-pass.
+  # Reason: no a11y E2E tests exist in the repository — `playwright` is
+  # not a project dep, `pnpm test:a11y -F @healthtracker/web` points at
+  # non-existent test files, and the job has been a phantom (passing or
+  # failing depending on cache state) since Epic 0. The F11-family of
+  # deferred items consistently flagged "Expo / Web app has no E2E test
+  # setup yet". Restore this job when the first a11y / E2E story lands:
+  #
+  # 1. Add `@playwright/test` + `axe-core` as devDeps in apps/web.
+  # 2. Write at least one passing a11y test under apps/web/__tests__/e2e/.
+  # 3. Re-add the job here with the existing build → install → test
+  #    shape (see git history for ci.yml around 2026-05-21).
