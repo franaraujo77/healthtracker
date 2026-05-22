@@ -11,6 +11,7 @@ import {
   HISTORICO_EMPTY_HEADLINE_PT_BR,
   HISTORICO_ERROR_PT_BR,
   HISTORICO_LOADING_PT_BR,
+  HISTORICO_OFFLINE_QUEUED_HINT_PT_BR,
   HISTORICO_RECOVERY_PHOTO_PT_BR,
   HISTORICO_RECOVERY_RESEND_PT_BR,
   HISTORICO_RECOVERY_SKIP_PT_BR,
@@ -21,6 +22,7 @@ import {
   UPLOAD_STATUS_LABELS_PT_BR,
 } from "@healthtracker/validators";
 
+import { useOfflineQueue } from "~/hooks/use-offline-queue";
 import { trpc } from "~/utils/api";
 
 const BACKGROUND_PRIMARY = "#F9F7F4";
@@ -114,6 +116,12 @@ export default function HistoricoScreen() {
   const allDismissed =
     query.isSuccess && rawRows.length > 0 && rows.length === 0;
 
+  // Story 2.6 — local-only rows from the offline queue render at the
+  // top of the list with the `offline_queued` virtual status. They
+  // are NOT in the server's `uploads` table yet; the drain hook
+  // submits them as soon as connectivity returns.
+  const offlineRows = useOfflineQueue();
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: BACKGROUND_PRIMARY }}>
       <ScrollView
@@ -133,7 +141,12 @@ export default function HistoricoScreen() {
           {query.isError ? (
             <Text accessibilityRole="alert">{HISTORICO_ERROR_PT_BR}</Text>
           ) : null}
-          {query.isSuccess && rawRows.length === 0 ? (
+          {/* Story 2.6 — offline rows count toward "has uploads"
+              so the empty state doesn't compete with a queue of
+              pending offline picks. */}
+          {query.isSuccess &&
+          rawRows.length === 0 &&
+          offlineRows.length === 0 ? (
             <YStack gap="$2">
               <Text fontSize="$4">{HISTORICO_EMPTY_HEADLINE_PT_BR}</Text>
               <Button onPress={() => router.push(INICIO_ROUTE)}>
@@ -149,6 +162,34 @@ export default function HistoricoScreen() {
               </Button>
             </YStack>
           ) : null}
+          {/* Story 2.6 — local-only offline-queue rows render at the
+              top with the "Aguardando conexão" virtual status. The
+              drain hook submits them on the next online tick. */}
+          {offlineRows.map((item) => (
+            <YStack
+              key={item.clientIdempotencyKey}
+              gap="$2"
+              padding="$3"
+              borderRadius="$card"
+              borderWidth={1}
+              borderColor="$warningAmber"
+              backgroundColor="$warningAmberSurface"
+              accessibilityRole="text"
+            >
+              <Text fontWeight="600" color="$textPrimary">
+                {item.originalFilename}
+              </Text>
+              <Text fontSize="$2" color="$textSecondary">
+                {new Date(item.enqueuedAt).toLocaleDateString("pt-BR")}
+              </Text>
+              <Text fontSize="$2">
+                {UPLOAD_STATUS_LABELS_PT_BR.offline_queued}
+              </Text>
+              <Text fontSize="$2" color="$textSecondary">
+                {HISTORICO_OFFLINE_QUEUED_HINT_PT_BR}
+              </Text>
+            </YStack>
+          ))}
           {/* R1-P165 — drop the dead `onTouchEnd` block; the dismiss
               is handled by the Button below the Card. */}
           {rows.map((row) => (

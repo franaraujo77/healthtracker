@@ -19,6 +19,7 @@
     "@healthtracker/validators": "workspace:*",
     "@legendapp/list": "^2.0.14",
     "@react-native-async-storage/async-storage": "^2.1.2",
+    "@react-native-community/netinfo": "^11.4.1",
     "@sentry/react-native": "catalog:",
     "@supabase/supabase-js": "catalog:",
     "@tamagui/animations-react-native": "catalog:",

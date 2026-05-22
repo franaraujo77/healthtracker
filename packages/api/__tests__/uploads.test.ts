@@ -140,6 +140,52 @@ describe("uploads.requestImport", () => {
     expect(result.uploadUrl).toContain("/storage/v1/object/upload/sign/");
   });
 
+  it("Story 2.6 — uses the client-provided idempotencyKey when present", async () => {
+    const { caller } = makeCaller();
+    // Valid v4 UUID — Zod's `.uuid()` enforces the version + variant bits.
+    const clientKey = "11111111-2222-4333-8444-555555555555";
+
+    const result = await caller.uploads.requestImport({
+      originalFilename: "offline.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 1024,
+      source: "post_onboarding",
+      pageCount: 2,
+      clientIdempotencyKey: clientKey,
+    });
+
+    // The server must echo the client key verbatim so the offline
+    // queue's `idempotency_key UNIQUE` dedup works across kill +
+    // relaunch retries.
+    expect(result.idempotencyKey).toBe(clientKey);
+    // The storage path is keyed on the client UUID — that's the
+    // dedup seam for repeated PUTs of the same file.
+    expect(result.storagePath).toContain(clientKey);
+  });
+
+  it("Story 2.6 — generates a server-side UUID when clientIdempotencyKey is omitted", async () => {
+    const { caller } = makeCaller();
+    const r1 = await caller.uploads.requestImport({
+      originalFilename: "online-1.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 1024,
+      source: "onboarding_import",
+      pageCount: 1,
+    });
+    const r2 = await caller.uploads.requestImport({
+      originalFilename: "online-2.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 1024,
+      source: "onboarding_import",
+      pageCount: 1,
+    });
+    // Two server-generated keys must differ.
+    expect(r1.idempotencyKey).not.toBe(r2.idempotencyKey);
+    expect(r1.idempotencyKey).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    );
+  });
+
   it("sanitizes the filename — strips path separators before signing", async () => {
     const { caller } = makeCaller();
 

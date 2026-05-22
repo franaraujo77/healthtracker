@@ -185,6 +185,9 @@ importers:
       "@react-native-async-storage/async-storage":
         specifier: ^2.1.2
         version: 2.2.0(react-native@0.81.5(@babel/core@7.28.5)(@types/react@19.1.12)(bufferutil@4.0.8)(react@19.1.4))
+      "@react-native-community/netinfo":
+        specifier: ^11.4.1
+        version: 11.5.2(react-native@0.81.5(@babel/core@7.28.5)(@types/react@19.1.12)(bufferutil@4.0.8)(react@19.1.4))(react@19.1.4)
       "@sentry/react-native":
         specifier: "catalog:"
         version: 8.11.1(@expo/env@2.0.7)(dotenv@17.2.2)(expo@54.0.20)(react-native@0.81.5(@babel/core@7.28.5)(@types/react@19.1.12)(bufferutil@4.0.8)(react@19.1.4))(react@19.1.4)
@@ -4128,6 +4131,15 @@ packages:
       }
     peerDependencies:
       react-native: ^0.0.0-0 || >=0.65 <1.0
+
+  "@react-native-community/netinfo@11.5.2":
+    resolution:
+      {
+        integrity: sha512-/g0m65BtX9HU+bPiCH2517bOHpEIUsGrWFXDzi1a5nNKn5KujQgm04WhL7/OSXWKHyrT8VVtUoJA0XKRxueBpQ==,
+      }
+    peerDependencies:
+      react: "*"
+      react-native: ">=0.59"
 
   "@react-native/assets-registry@0.81.5":
     resolution:
@@ -17038,6 +17050,11 @@ snapshots:
   "@react-native-async-storage/async-storage@2.2.0(react-native@0.81.5(@babel/core@7.28.5)(@types/react@19.1.12)(bufferutil@4.0.8)(react@19.1.4))":
     dependencies:
       merge-options: 3.0.4
+      react-native: 0.81.5(@babel/core@7.28.5)(@types/react@19.1.12)(bufferutil@4.0.8)(react@19.1.4)
+
+  "@react-native-community/netinfo@11.5.2(react-native@0.81.5(@babel/core@7.28.5)(@types/react@19.1.12)(bufferutil@4.0.8)(react@19.1.4))(react@19.1.4)":
+    dependencies:
+      react: 19.1.4
       react-native: 0.81.5(@babel/core@7.28.5)(@types/react@19.1.12)(bufferutil@4.0.8)(react@19.1.4)
 
   "@react-native/assets-registry@0.81.5": {}

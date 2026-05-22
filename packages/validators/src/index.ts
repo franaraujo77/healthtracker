@@ -28,7 +28,12 @@ export const UPLOAD_DETAIL_VALUE_LABEL_PT_BR = "Valor";
 export const UPLOAD_DETAIL_EXTRACTED_VALUE_PT_BR = "Valor extraído";
 
 export const UPLOAD_STATUS_LABELS_PT_BR: Record<
-  "queued" | "processing" | "pending_review" | "complete" | "failed",
+  | "queued"
+  | "processing"
+  | "pending_review"
+  | "complete"
+  | "failed"
+  | "offline_queued",
   string
 > = {
   queued: "Na fila",
@@ -36,7 +41,14 @@ export const UPLOAD_STATUS_LABELS_PT_BR: Record<
   pending_review: "Aguardando confirmação",
   complete: "Publicado",
   failed: "Falhou",
+  // Story 2.6 — virtual status; rows in this state are local-only
+  // (haven't been submitted to the server yet) and will drain as
+  // soon as connectivity is restored.
+  offline_queued: "Aguardando conexão",
 };
+
+export const HISTORICO_OFFLINE_QUEUED_HINT_PT_BR =
+  "Vamos enviar assim que sua conexão voltar.";
 
 // Story 2.5 — Histórico tab + push-notification copy.
 export const HISTORICO_ROUTE = "/inicio/historico";
@@ -567,6 +579,15 @@ export const UploadImportRequestSchema = z
     sizeBytes: z.number().int().positive().max(UPLOAD_MAX_BYTES),
     source: z.enum(UPLOAD_SOURCES),
     pageCount: z.number().int().nonnegative().optional(),
+    /**
+     * Story 2.6 — offline-queue flow generates the `idempotency_key`
+     * client-side at pick time so the same key persists across kill +
+     * relaunch. The server echoes it back when provided; the existing
+     * `uploads_patient_idempotency_unique` index on `(patient_id,
+     * idempotency_key)` enforces dedup. When omitted (the regular
+     * online flow), the server generates a UUID.
+     */
+    clientIdempotencyKey: z.uuid().optional(),
   })
   .refine(uploadPageCountRefinement, {
     message: "PDF uploads require pageCount",

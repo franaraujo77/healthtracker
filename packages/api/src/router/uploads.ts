@@ -56,7 +56,12 @@ export const uploadsRouter = {
         });
       }
       const patientId = ctx.session.user.id;
-      const idempotencyKey = crypto.randomUUID();
+      // Story 2.6 — offline-queue flows pre-generate the idempotency
+      // key at pick time so the same value survives kill + relaunch
+      // and the server-side UNIQUE constraint dedups on drain retry.
+      // When the client omits it, the regular online flow gets a
+      // server-generated UUID (preserves Story 1.5 behavior).
+      const idempotencyKey = input.clientIdempotencyKey ?? crypto.randomUUID();
       const sanitizedFilename = sanitizeFilename(input.originalFilename);
       const storagePath = buildLabUploadStoragePath({
         patientId,

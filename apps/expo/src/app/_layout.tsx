@@ -18,6 +18,7 @@ import {
   BIOMETRIC_ENABLED_KEY,
   BIOMETRIC_ENABLED_VALUE,
 } from "~/hooks/use-biometric";
+import { useOfflineUploadFlow } from "~/hooks/use-offline-upload-flow";
 import { supabase } from "~/lib/supabase";
 import { queryClient, trpcClient } from "~/utils/api";
 
@@ -117,6 +118,11 @@ const AUTH_INVALIDATING_EVENTS: AuthChangeEvent[] = [
 ];
 
 function RootLayout() {
+  // Story 2.6 — mount the offline-upload-queue drain at the app root
+  // so it survives navigation. Internally subscribes to NetInfo +
+  // AppState and drains the persisted queue on every reconnect /
+  // foreground.
+  useOfflineUploadFlow();
   useEffect(() => {
     const {
       data: { subscription },

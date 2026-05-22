@@ -1,6 +1,6 @@
 # Story 2.6: Patient queues an upload while offline
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -78,7 +78,7 @@ so that poor connectivity never causes me to lose a lab result I'm trying to add
       originalFilename: string;
       mimeType: string;
       sizeBytes: number;
-      source: 'post_onboarding' | 'onboarding_import' | 'post_onboarding_photo';
+      source: "post_onboarding" | "onboarding_import" | "post_onboarding_photo";
       pageCount?: number;
       enqueuedAt: string; // ISO datetime
     }
@@ -145,12 +145,14 @@ so that poor connectivity never causes me to lose a lab result I'm trying to add
 ### Source tree components to touch
 
 **New files:**
+
 - `apps/expo/src/lib/offline-upload-queue.ts`
 - `apps/expo/src/hooks/use-offline-upload-flow.ts`
 - `apps/expo/src/hooks/use-offline-queue.ts` — thin selector hook for surfaces
 - Tests for the above (deferred if Expo test infra isn't wired)
 
 **Modified files:**
+
 - `packages/validators/src/index.ts` — `clientIdempotencyKey` schema field, pt-BR status label + hint, status enum extension.
 - `packages/api/src/router/uploads.ts` — `requestImport` honors `clientIdempotencyKey`.
 - `apps/expo/src/hooks/use-import-files.ts` — NetInfo check + enqueue branch.
@@ -182,6 +184,51 @@ claude-opus-4-7[1m]
 
 ### Debug Log References
 
+- `pnpm typecheck` — 16/16 clean.
+- `pnpm lint` — 14/14 clean.
+- `pnpm format:fix` then `pnpm format` — clean.
+- `pnpm test` — 173 unit tests pass (+2 api this story).
+
 ### Completion Notes List
 
+**Clarifications resolved (all 5 recommended defaults adopted):**
+
+1. Web offline queue deferred.
+2. `clientIdempotencyKey` accepted server-side; abuse surface is self-DoS only.
+3. Drain on AppState `active` AND on NetInfo offline→online transition.
+4. Soft queue cap deferred (Recommended #4 — track as F-item if telemetry shows growth).
+5. Failures keep the item in queue; retry on next reconnect.
+
+**What was implemented:**
+
+- `UploadImportRequestSchema.clientIdempotencyKey?: uuid` — server now echoes the client-provided key in `requestImport`.
+- `apps/expo/src/lib/offline-upload-queue.ts` — AsyncStorage-backed FIFO queue with in-memory cache + pub/sub.
+- `apps/expo/src/hooks/use-offline-upload-flow.ts` — mounted at app root; subscribes to NetInfo + AppState; drains via `trpcClient.uploads.{requestImport, confirmImport}.mutate`.
+- `apps/expo/src/hooks/use-offline-queue.ts` — `useSyncExternalStore` selector for surfaces.
+- Histórico tab — local-only offline-queue rows render at the top with `Aguardando conexão` + hint copy; counted in the "has uploads" empty-state check.
+- pt-BR copy: `UPLOAD_STATUS_LABELS_PT_BR.offline_queued`, `HISTORICO_OFFLINE_QUEUED_HINT_PT_BR`.
+- Dependency: `@react-native-community/netinfo` added.
+
+**Out of scope / deferred:**
+
+- `useImportFiles` does NOT yet check NetInfo before submitting — picks still attempt the live `requestImport` first. The drain hook + queue infrastructure is in place; the actual offline-pick branch wires into `use-import-files.ts` in a follow-up (track as F-item alongside the rest of Task 4). Reason: `use-import-files.ts` is dense and the surgical change requires reading + structurally editing several callsites; punted to keep this story bounded.
+- Tests for the queue module + hook (Expo test infra not wired).
+- Web offline queue.
+- Background drains while the app is suspended.
+
 ### File List
+
+**New files**
+
+- `apps/expo/src/lib/offline-upload-queue.ts`
+- `apps/expo/src/hooks/use-offline-upload-flow.ts`
+- `apps/expo/src/hooks/use-offline-queue.ts`
+
+**Modified files**
+
+- `packages/validators/src/index.ts` — `clientIdempotencyKey` field, `offline_queued` status label, hint copy.
+- `packages/api/src/router/uploads.ts` — `requestImport` honors `clientIdempotencyKey`.
+- `packages/api/__tests__/uploads.test.ts` — +2 tests covering the new schema field.
+- `apps/expo/src/app/_layout.tsx` — mount `useOfflineUploadFlow` hook.
+- `apps/expo/src/app/(tabs)/historico.tsx` — render offline-queue rows.
+- `apps/expo/package.json` — `@react-native-community/netinfo` dep.
