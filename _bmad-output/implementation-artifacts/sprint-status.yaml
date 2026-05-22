@@ -79,7 +79,7 @@ development_status:
   # returning rowcount (HIGH race), R2-P147 staleTime:0 for focus refetch,
   # R2-P148 ON-CONFLICT + completion-audit test coverage, R2-P149
   # unconditional notification.upload_complete emission.
-  2-5-patient-views-upload-status-and-receives-push-notifications: backlog
+  2-5-patient-views-upload-status-and-receives-push-notifications: ready-for-dev
   2-6-patient-queues-an-upload-while-offline: backlog
   2-7-patient-manually-enters-bioimpedance-bia-measurements: backlog
   2-8-patient-manages-push-notification-preferences: backlog
