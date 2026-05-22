@@ -9,6 +9,7 @@ import {
   EXTRACTION_PULSE_REVIEW_NEEDED_PT_BR,
   extractionPulseCopyForElapsedMs,
   extractionPulseShouldShowManualEntry,
+  UPLOAD_FAILED_GENERIC_RETRY_PT_BR,
   UPLOAD_IMAGE_OCR_FAILED_PT_BR,
   UPLOAD_RECOVERY_MANUAL_PT_BR,
   UPLOAD_RECOVERY_RETAKE_PT_BR,
@@ -216,7 +217,7 @@ export function ExtractionPulse({
                 color="$textSecondary"
                 textAlign="center"
               >
-                Tente novamente em alguns instantes.
+                {UPLOAD_FAILED_GENERIC_RETRY_PT_BR}
               </Text>
             ) : null}
           </YStack>

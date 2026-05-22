@@ -98,16 +98,23 @@ export default function Inicio() {
   // only ExtractionPulse + EmptyStateRecord — no rejection list).
   // We `console.warn` the rejections so they appear in Sentry /
   // dev console; a patient-facing surface is deferred (see F95).
+  // Round-2 R2-P85 — only warn on launch-error rejections; permission
+  // denials are an expected user choice and would otherwise pollute
+  // Sentry / logs on every "I want to think about it" tap.
+  function unexpectedRejections(
+    rejected: { uri: string; validationError: string }[],
+  ) {
+    return rejected.filter((r) => !r.uri.startsWith("permission-"));
+  }
+
   async function handlePickImageLibrary() {
     if (isPickingRef.current) return;
     isPickingRef.current = true;
     try {
       const result = await pickImages({ source: "library" });
-      if (result.rejected.length > 0) {
-        console.warn(
-          "[inicio] image library picker rejections",
-          result.rejected,
-        );
+      const unexpected = unexpectedRejections(result.rejected);
+      if (unexpected.length > 0) {
+        console.warn("[inicio] image library picker rejections", unexpected);
       }
       if (result.files.length === 0) return;
       await uploadFiles(result.files);
@@ -123,8 +130,9 @@ export default function Inicio() {
     isPickingRef.current = true;
     try {
       const result = await pickImages({ source: "camera" });
-      if (result.rejected.length > 0) {
-        console.warn("[inicio] camera picker rejections", result.rejected);
+      const unexpected = unexpectedRejections(result.rejected);
+      if (unexpected.length > 0) {
+        console.warn("[inicio] camera picker rejections", unexpected);
       }
       if (result.files.length === 0) return;
       await uploadFiles(result.files);

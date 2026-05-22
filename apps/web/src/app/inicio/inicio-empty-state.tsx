@@ -281,7 +281,7 @@ export function InicioEmptyState() {
       <input
         ref={libraryInputRef}
         type="file"
-        accept="image/jpeg,image/png,image/heic"
+        accept="image/jpeg,image/png,image/heic,image/heif"
         multiple
         className="sr-only"
         aria-hidden="true"
@@ -293,7 +293,7 @@ export function InicioEmptyState() {
       <input
         ref={cameraInputRef}
         type="file"
-        accept="image/jpeg,image/png,image/heic"
+        accept="image/jpeg,image/png,image/heic,image/heif"
         // `capture="environment"` triggers the device camera on
         // mobile browsers (iOS Safari + Android Chrome). Desktop
         // browsers ignore it and fall back to the file picker —

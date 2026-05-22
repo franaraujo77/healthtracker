@@ -54,11 +54,18 @@ export default function ImportScreen() {
   // tap-while-sibling-pending) don't spawn concurrent
   // DocumentPicker / launchCameraAsync invocations. Mirrors the
   // Início handlers' pattern (Story 2.1 R2-P59 + Story 2.2 P74).
+  //
+  // Round-2 R2-P91 — pair the ref with a state mirror so the sibling
+  // button visually disables while a picker is open. The ref alone
+  // silently drops the second tap (correct safety) but the patient
+  // gets no feedback that their input was ignored.
   const isPickingRef = useRef(false);
+  const [isPicking, setIsPicking] = useState(false);
 
   async function handlePick() {
     if (isPickingRef.current) return;
     isPickingRef.current = true;
+    setIsPicking(true);
     try {
       const result = await pickDocuments();
       setPicked((prev) => [...prev, ...result.files]);
@@ -67,6 +74,7 @@ export default function ImportScreen() {
       setRejected((prev) => [...prev, ...result.rejected]);
     } finally {
       isPickingRef.current = false;
+      setIsPicking(false);
     }
   }
 
@@ -82,12 +90,14 @@ export default function ImportScreen() {
   async function handlePickCamera() {
     if (isPickingRef.current) return;
     isPickingRef.current = true;
+    setIsPicking(true);
     try {
       const result = await pickImages({ source: "camera" });
       setPicked((prev) => [...prev, ...result.files]);
       setRejected((prev) => [...prev, ...result.rejected]);
     } finally {
       isPickingRef.current = false;
+      setIsPicking(false);
     }
   }
 
@@ -127,12 +137,16 @@ export default function ImportScreen() {
             {IMPORT_BODY_PT_BR}
           </Text>
 
-          <Button onPress={handlePick} disabled={isUploading} variant="outline">
+          <Button
+            onPress={handlePick}
+            disabled={isUploading || isPicking}
+            variant="outline"
+          >
             {IMPORT_PICK_CTA_PT_BR}
           </Button>
           <Button
             onPress={handlePickCamera}
-            disabled={isUploading}
+            disabled={isUploading || isPicking}
             variant="outline"
           >
             {UPLOAD_SHEET_PHOTO_CAMERA_LABEL_PT_BR}

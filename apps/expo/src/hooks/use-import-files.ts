@@ -267,15 +267,40 @@ export function useImportFiles(options: UseImportFilesOptions) {
   const pickImages = useCallback(
     async (args: { source: PickImageSource }): Promise<PickResult> => {
       const isCamera = args.source === "camera";
-      const permission = isCamera
-        ? await ImagePicker.requestCameraPermissionsAsync()
-        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+      // Round-2 R2-P87 — `requestCameraPermissionsAsync` and
+      // `requestMediaLibraryPermissionsAsync` themselves can throw
+      // (hardware unavailable, OS revocation race). Wrap so failures
+      // surface as a rejection entry instead of an unhandled
+      // promise rejection.
+      let permission;
+      try {
+        permission = isCamera
+          ? await ImagePicker.requestCameraPermissionsAsync()
+          : await ImagePicker.requestMediaLibraryPermissionsAsync();
+      } catch (err) {
+        console.warn("[pickImages] permission request error", err);
+        return {
+          files: [],
+          rejected: [
+            {
+              // Round-2 R2-P90 — unique URI per occurrence avoids React
+              // key collision when two rejections fire in one session.
+              uri: `permission-error-${Date.now()}`,
+              name: "",
+              mimeType: "",
+              size: 0,
+              validationError: GENERIC_UPLOAD_ERROR_MESSAGE_PT_BR,
+            },
+          ],
+        };
+      }
       if (!permission.granted) {
         return {
           files: [],
           rejected: [
             {
-              uri: "permission-denied",
+              // Round-2 R2-P90 — unique URI per denial.
+              uri: `permission-denied-${Date.now()}`,
               name: "",
               mimeType: "",
               size: 0,
@@ -289,9 +314,12 @@ export function useImportFiles(options: UseImportFilesOptions) {
       // Round-1 P77 — wrap the launch in try/catch so an iOS picker
       // error, mid-call permission revocation, or hardware-unavailable
       // bubble surfaces as a `rejected` entry instead of an unhandled
-      // promise rejection. Caller-side `finally` still resets the
-      // sheet / re-entry guard via its own try/finally pair, but the
-      // patient also needs to see a row explaining what happened.
+      // promise rejection.
+      //
+      // Round-2 R2-P84 — capture the error via `catch (err)` and
+      // `console.warn` it so production launch failures are visible
+      // in Sentry / dev console (the previous `catch {}` swallowed
+      // the error completely).
       let result;
       try {
         result = isCamera
@@ -306,12 +334,16 @@ export function useImportFiles(options: UseImportFilesOptions) {
               allowsMultipleSelection: true,
               quality: 1,
             });
-      } catch {
+      } catch (err) {
+        console.warn("[pickImages] launch error", { source: args.source, err });
         return {
           files: [],
           rejected: [
             {
-              uri: isCamera ? "camera-launch-error" : "library-launch-error",
+              // Round-2 R2-P90 — unique URI per occurrence.
+              uri: isCamera
+                ? `camera-launch-error-${Date.now()}`
+                : `library-launch-error-${Date.now()}`,
               name: "",
               mimeType: "",
               size: 0,
@@ -349,14 +381,16 @@ export function useImportFiles(options: UseImportFilesOptions) {
           });
           continue;
         }
-        // Round-1 P79 — Android can omit `fileSize` on some OEMs for
-        // camera captures. Without a fallback, the asset is rejected
-        // as `UPLOAD_EMPTY_FILE_PT_BR` (size <= 0). Skip the
-        // empty-file check for camera captures with missing fileSize;
-        // the server-side `confirmImport` re-validates the actual
-        // size against `UPLOAD_MAX_BYTES` via `statLabUploadObject`
-        // (Story 1.5 P51 cap), so the client-side fallback is safe.
-        const inferredSize = asset.fileSize ?? (isCamera ? 1 : 0); // sentinel "non-empty"; server re-checks
+        // Round-1 P79 + Round-2 R2-P88 — Android can omit `fileSize`
+        // on some OEMs for BOTH camera AND library picks (R2-P88
+        // dropped the `isCamera ?` gate — library picks were silently
+        // rejected as `UPLOAD_EMPTY_FILE_PT_BR`). Use a sentinel
+        // "non-empty" size; the server-side `confirmImport`
+        // re-validates the actual size from storage via
+        // `stored.sizeBytes > UPLOAD_MAX_BYTES` (Story 1.5 P51 cap;
+        // verified to run for ALL mime types at `confirmImport:113`,
+        // not PDF-only).
+        const inferredSize = asset.fileSize ?? 1;
         const candidate = {
           uri: asset.uri,
           name: asset.fileName ?? `image-${Date.now()}.jpg`,

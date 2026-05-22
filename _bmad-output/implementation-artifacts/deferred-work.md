@@ -1,5 +1,15 @@
 # Deferred Work
 
+## Deferred from: code review of story-2-2 round 2 (2026-05-22)
+
+- **F96: ExtractionPulse `failed`-state fallback only renders when ALL three recovery callbacks are undefined** — caller with only `onRetake` set sees one button + no fallback. Decide policy: caller-controlled, or always render fallback alongside?
+- **F97: P78 removed `result.assets ?? []` defensive guard for lint cleanliness** — trades runtime safety for lint score. Restore with `eslint-disable-next-line` if a future Expo upgrade returns `undefined` instead of empty array.
+- **F98: Web `validateClientSide` may receive empty `file.type` for HEIC on older Safari** — `isUploadMimeType('')` returns false → user sees "unsupported mime" for a valid HEIC. Pre-existing issue, exposed more after P81 widening.
+- **F99: Filename without extension reaches synthetic-name fallback** — `image-${Date.now()}.jpg` loses the original label; patient can't identify which capture failed.
+- **F100: Web `openPicker` `setTimeout(reset, 250)` could race the `change` handler on slow devices** — releases `isPickingRef` before the upload starts. Stale `cancel` listener can also fire on next picker open.
+- **F101: Two camera captures in one session sharing the same `asset.uri`** (rare on Android cache reuse) collide in `progressByPath[uri]`. Use synthetic per-pick id.
+- **F102: Permission revoked mid-flow surfaces as `GENERIC_UPLOAD_ERROR_MESSAGE_PT_BR`** — no hint to re-grant in Settings. Distinct copy + deep-link to Settings would help.
+
 ## Deferred from: code review of story-2-2 (2026-05-22)
 
 - **F90: Verify `expo-image-picker`'s config plugin registers `android.permission.CAMERA` automatically** — without it, `launchCameraAsync` may silently fail on Android. Hand-test required; otherwise add `CAMERA` to `android.permissions` in `app.config.ts`.

@@ -606,6 +606,15 @@ export const UPLOAD_RECOVERY_UPLOAD_PDF_PT_BR = "Enviar PDF";
 export const UPLOAD_RECOVERY_MANUAL_PT_BR = "Inserir manualmente";
 
 /**
+ * Story 2.2 round-2 R2-P86 — fallback line rendered by ExtractionPulse
+ * when state is `failed` and no recovery callbacks are wired. Every
+ * other pt-BR string in the upload surface lives here per
+ * Story 2.1 / 2.2 Task 8 invariant.
+ */
+export const UPLOAD_FAILED_GENERIC_RETRY_PT_BR =
+  "Tente novamente em alguns instantes.";
+
+/**
  * Story 2.2 — explicit picker source for `pickImages`. Library uses
  * `launchImageLibraryAsync`; camera uses `launchCameraAsync` and
  * requires `NSCameraUsageDescription` on iOS + the camera runtime
