@@ -1,5 +1,11 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+import type { UploadMimeType, UploadSource } from "@healthtracker/validators";
+import {
+  UPLOAD_ALLOWED_MIME_TYPES,
+  UPLOAD_SOURCES,
+} from "@healthtracker/validators";
+
 /**
  * Story 2.6 — persistent offline upload queue.
  *
@@ -10,45 +16,102 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
  * stores the URI + metadata; on drain, the hook reads the bytes
  * via `fetch(localUri)` and POSTs to the signed URL.
  *
- * AsyncStorage is the canonical store; the in-memory `cache` is a
- * write-through mirror so `useSyncExternalStore` subscribers don't
- * need a fresh `AsyncStorage.getItem` on every event.
+ * R1-P180 — namespaced per patient via `setActivePatient(patientId)`.
+ * Switching identities clears the in-memory cache so the new
+ * patient never sees the previous one's queue, and a new
+ * AsyncStorage key isolates persistence. Sign-out clears the key.
+ *
+ * R1-P183 — disk writes come BEFORE cache mutation. Throws roll back
+ * the cache so the in-memory state never diverges from persisted state.
+ *
+ * R1-P185 / R1-P186 — load-time validation drops items whose
+ * `mimeType` / `source` is no longer in the validators' allowed
+ * lists (enum drift between releases).
+ *
+ * R1-P187 — soft cap of 20 items: enqueue past the cap logs a warn
+ * but still appends (no patient-facing rejection).
  */
 
-export const OFFLINE_UPLOAD_QUEUE_KEY = "@healthtracker/offline-upload-queue";
+const STORAGE_PREFIX = "@healthtracker/offline-upload-queue";
+export const QUEUE_SOFT_CAP = 20;
+export const MAX_ATTEMPTS_PER_ITEM = 5;
 
 export interface OfflineUploadItem {
   clientIdempotencyKey: string;
   localUri: string;
   originalFilename: string;
-  mimeType: string;
+  mimeType: UploadMimeType;
   sizeBytes: number;
-  source: "post_onboarding" | "onboarding_import";
+  source: UploadSource;
   pageCount?: number;
   enqueuedAt: string;
+  /** R1-P181 — drain failure counter; items past MAX_ATTEMPTS_PER_ITEM are dropped. */
+  attemptCount?: number;
 }
 
 type Listener = (items: OfflineUploadItem[]) => void;
 
-let cache: OfflineUploadItem[] | null = null;
-const listeners = new Set<Listener>();
-let loadPromise: Promise<OfflineUploadItem[]> | null = null;
+interface State {
+  patientId: string | null;
+  cache: OfflineUploadItem[] | null;
+  loadPromise: Promise<OfflineUploadItem[]> | null;
+}
 
-async function readFromStorage(): Promise<OfflineUploadItem[]> {
+const state: State = {
+  patientId: null,
+  cache: null,
+  loadPromise: null,
+};
+const listeners = new Set<Listener>();
+
+function storageKey(patientId: string): string {
+  return `${STORAGE_PREFIX}/${patientId}`;
+}
+
+function isValidItem(raw: unknown): raw is OfflineUploadItem {
+  if (typeof raw !== "object" || raw === null) return false;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.clientIdempotencyKey !== "string") return false;
+  if (typeof r.localUri !== "string") return false;
+  if (typeof r.originalFilename !== "string") return false;
+  if (typeof r.sizeBytes !== "number" || !Number.isFinite(r.sizeBytes))
+    return false;
+  if (typeof r.enqueuedAt !== "string") return false;
+  if (typeof r.mimeType !== "string") return false;
+  if (!(UPLOAD_ALLOWED_MIME_TYPES as readonly string[]).includes(r.mimeType))
+    return false;
+  if (typeof r.source !== "string") return false;
+  if (!(UPLOAD_SOURCES as readonly string[]).includes(r.source)) return false;
+  return true;
+}
+
+async function readFromStorage(
+  patientId: string,
+): Promise<OfflineUploadItem[]> {
   try {
-    const raw = await AsyncStorage.getItem(OFFLINE_UPLOAD_QUEUE_KEY);
+    const raw = await AsyncStorage.getItem(storageKey(patientId));
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed as OfflineUploadItem[];
+    // R1-P185 / R1-P186 — drop entries that fail current-schema validation.
+    const valid = parsed.filter(isValidItem);
+    if (valid.length !== parsed.length) {
+      console.warn(
+        `[offline-upload-queue] dropped ${parsed.length - valid.length} invalid item(s) on load`,
+      );
+    }
+    return valid;
   } catch (err) {
     console.warn("[offline-upload-queue] read failed; treating as empty", err);
     return [];
   }
 }
 
-async function writeToStorage(items: OfflineUploadItem[]): Promise<void> {
-  await AsyncStorage.setItem(OFFLINE_UPLOAD_QUEUE_KEY, JSON.stringify(items));
+async function writeToStorage(
+  patientId: string,
+  items: OfflineUploadItem[],
+): Promise<void> {
+  await AsyncStorage.setItem(storageKey(patientId), JSON.stringify(items));
 }
 
 function emit(items: OfflineUploadItem[]): void {
@@ -61,62 +124,136 @@ function emit(items: OfflineUploadItem[]): void {
   }
 }
 
-/**
- * Load + cache the queue. Subsequent calls return the cached value
- * without hitting AsyncStorage again. Call this on app boot to
- * populate the cache before any subscriber renders.
- */
-export async function loadQueue(): Promise<OfflineUploadItem[]> {
-  if (cache !== null) return cache;
-  loadPromise ??= readFromStorage().then((items) => {
-    cache = items;
-    return items;
-  });
-  return loadPromise;
+function requirePatientId(): string {
+  if (state.patientId === null) {
+    throw new Error(
+      "[offline-upload-queue] no active patient set — call setActivePatient(patientId) first",
+    );
+  }
+  return state.patientId;
 }
 
 /**
- * Synchronous read of the cached queue. Returns `[]` before the
- * first `loadQueue()` completes — callers that need to render
- * before boot should `await loadQueue()` first OR subscribe and
- * react to the first emission.
+ * R1-P180 — bind the queue to the calling patient. Sign-in flows
+ * call this with the patient's id; sign-out passes `null` to clear
+ * the in-memory cache (the on-disk key per the previous patient
+ * stays so a sign-back-in can resume their queue).
  */
+export function setActivePatient(patientId: string | null): void {
+  if (state.patientId === patientId) return;
+  state.patientId = patientId;
+  // Always reset both cache + loadPromise so the next loadQueue()
+  // reads from the correct namespaced key. R1-P184 — the
+  // loadPromise mustn't outlive the cache it populates.
+  state.cache = null;
+  state.loadPromise = null;
+  emit([]);
+}
+
+export async function loadQueue(): Promise<OfflineUploadItem[]> {
+  if (state.cache !== null) return state.cache;
+  const patientId = requirePatientId();
+  state.loadPromise ??= readFromStorage(patientId).then((items) => {
+    state.cache = items;
+    return items;
+  });
+  return state.loadPromise;
+}
+
 export function getQueueSnapshot(): OfflineUploadItem[] {
-  return cache ?? [];
+  return state.cache ?? [];
 }
 
 export async function enqueue(item: OfflineUploadItem): Promise<void> {
+  const patientId = requirePatientId();
   const current = await loadQueue();
-  // Dedup on `clientIdempotencyKey` — a hostile / buggy caller
-  // adding the same key twice would otherwise let the drain loop
-  // submit two identical requestImports.
-  const next = current.filter(
+  // Dedup on `clientIdempotencyKey`.
+  const filtered = current.filter(
     (i) => i.clientIdempotencyKey !== item.clientIdempotencyKey,
   );
-  next.push(item);
-  cache = next;
-  await writeToStorage(next);
+  const next = [...filtered, item];
+  if (next.length > QUEUE_SOFT_CAP) {
+    console.warn(
+      `[offline-upload-queue] queue size ${next.length} exceeds soft cap ${QUEUE_SOFT_CAP}`,
+    );
+  }
+  // R1-P183 — write first, then update cache + emit. Throws don't
+  // diverge in-memory state from disk.
+  await writeToStorage(patientId, next);
+  state.cache = next;
   emit(next);
 }
 
 export async function dequeue(clientIdempotencyKey: string): Promise<void> {
+  const patientId = requirePatientId();
   const current = await loadQueue();
   const next = current.filter(
     (i) => i.clientIdempotencyKey !== clientIdempotencyKey,
   );
   if (next.length === current.length) return;
-  cache = next;
-  await writeToStorage(next);
+  await writeToStorage(patientId, next);
+  state.cache = next;
   emit(next);
 }
 
 /**
- * Test-only seam: reset the in-memory cache so unit tests get a
- * clean slate without re-importing the module.
+ * R1-P181 — record a drain failure for an item. When attemptCount
+ * exceeds MAX_ATTEMPTS_PER_ITEM, the item is dropped from the queue
+ * (avoids the infinite-retry loop on dead localUri / 4xx).
  */
+export async function recordAttempt(
+  clientIdempotencyKey: string,
+): Promise<{ dropped: boolean }> {
+  const patientId = requirePatientId();
+  const current = await loadQueue();
+  const idx = current.findIndex(
+    (i) => i.clientIdempotencyKey === clientIdempotencyKey,
+  );
+  const target = current[idx];
+  if (!target) return { dropped: false };
+  const nextAttempts = (target.attemptCount ?? 0) + 1;
+  if (nextAttempts >= MAX_ATTEMPTS_PER_ITEM) {
+    console.warn(
+      `[offline-upload-queue] dropping item ${clientIdempotencyKey} after ${nextAttempts} failed attempts`,
+    );
+    const next = current.filter(
+      (i) => i.clientIdempotencyKey !== clientIdempotencyKey,
+    );
+    await writeToStorage(patientId, next);
+    state.cache = next;
+    emit(next);
+    return { dropped: true };
+  }
+  const next: OfflineUploadItem[] = [...current];
+  next[idx] = { ...target, attemptCount: nextAttempts };
+  await writeToStorage(patientId, next);
+  state.cache = next;
+  emit(next);
+  return { dropped: false };
+}
+
+/**
+ * R1-P180 — wipe the queue for the current patient (e.g. on
+ * SIGNED_OUT after a successful drain, or on full sign-out reset).
+ */
+export async function clearQueue(): Promise<void> {
+  const patientId = state.patientId;
+  if (patientId === null) {
+    state.cache = null;
+    state.loadPromise = null;
+    emit([]);
+    return;
+  }
+  await AsyncStorage.removeItem(storageKey(patientId));
+  state.cache = [];
+  state.loadPromise = null;
+  emit([]);
+}
+
 export function __resetQueueForTests(): void {
-  cache = null;
-  loadPromise = null;
+  state.patientId = null;
+  state.cache = null;
+  state.loadPromise = null;
   listeners.clear();
 }
 

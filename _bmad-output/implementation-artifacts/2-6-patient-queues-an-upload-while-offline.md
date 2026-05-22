@@ -1,6 +1,6 @@
 # Story 2.6: Patient queues an upload while offline
 
-Status: review
+Status: done
 
 ## Story
 
@@ -232,3 +232,35 @@ claude-opus-4-7[1m]
 - `apps/expo/src/app/_layout.tsx` — mount `useOfflineUploadFlow` hook.
 - `apps/expo/src/app/(tabs)/historico.tsx` — render offline-queue rows.
 - `apps/expo/package.json` — `@react-native-community/netinfo` dep.
+
+### Review Findings (code review round 1 — 2026-05-22)
+
+3-layer adversarial review. **4 HIGH (AC violation, cross-patient leakage, infinite-retry loop, session-gating) + 5 Med + 2 Low.** 11 patches applied (R1-P179 through R1-P189), 4 deferred (F148–F151).
+
+**`patch` (must fix before done):**
+
+- [x] [Review][Patch] **R1-P179 [HIGH AC1]: `useImportFiles` did NOT check NetInfo before submitting — offline picks attempted the live `requestImport`** [`apps/expo/src/hooks/use-import-files.ts`] — The queue + drain hook + UI were wired but the actual pick→enqueue branch was missing. Fix: at the top of the per-file upload loop, `NetInfo.fetch()`; on `isConnected === false`, generate a `clientIdempotencyKey`, call `enqueueOffline`, return a `queued_offline` outcome, and skip the live flow.
+- [x] [Review][Patch] **R1-P180 [HIGH Privacy]: Queue was stored under a single global key — patient B could submit patient A's queued items** [`apps/expo/src/lib/offline-upload-queue.ts`, `apps/expo/src/hooks/use-offline-upload-flow.ts`] — Fix: `STORAGE_PREFIX/<patientId>` namespacing via new `setActivePatient(patientId | null)`. Sign-in calls it with the patient id; sign-out passes null. The drain hook subscribes to `supabase.auth.onAuthStateChange` and `getSession()` at mount.
+- [x] [Review][Patch] **R1-P181 [HIGH Correctness]: Infinite-retry loop on permanent failures** [`apps/expo/src/lib/offline-upload-queue.ts`, `apps/expo/src/hooks/use-offline-upload-flow.ts`] — Dead `localUri`, 4xx errors, etc. would loop forever with no telemetry. Fix: added `attemptCount` to `OfflineUploadItem` + `recordAttempt(key)` helper; items past `MAX_ATTEMPTS_PER_ITEM` (5) are dropped with a warn log.
+- [x] [Review][Patch] **R1-P182 [HIGH Correctness]: Drain ran without an authenticated session** [`apps/expo/src/hooks/use-offline-upload-flow.ts`] — At app boot before sign-in (or on the register screen), the hook would fire and UNAUTHORIZED-loop. Fix: `hasSessionRef` guarded by the Supabase auth subscription; drain is a no-op until `SIGNED_IN`.
+- [x] [Review][Patch] **R1-P183 [Med Correctness]: Cache/disk desync on AsyncStorage write failure** [`apps/expo/src/lib/offline-upload-queue.ts`] — `enqueue`/`dequeue` set the in-memory cache BEFORE the disk write, so a throw left them divergent. Fix: write first, then update cache + emit.
+- [x] [Review][Patch] **R1-P184 [Med Correctness]: `loadPromise` not reset on patient switch** — Folded into R1-P180's `setActivePatient` (resets both `cache` and `loadPromise`).
+- [x] [Review][Patch] **R1-P185 [Med Type-safety]: `mimeType: string` could deserialize old enum-dropped values** [`apps/expo/src/lib/offline-upload-queue.ts`] — Fix: tightened to `UploadMimeType`; added `isValidItem` load-time filter that drops entries failing current-schema validation.
+- [x] [Review][Patch] **R1-P186 [Med Type-safety]: Same risk for `source` enum drift** — Same fix as R1-P185; `source: UploadSource` + load-time filter on `UPLOAD_SOURCES`.
+- [x] [Review][Patch] **R1-P187 [Med Hygiene]: No soft cap on queue size** [`apps/expo/src/lib/offline-upload-queue.ts`] — Spec's Clarification #4 recommended a cap of 20. Fix: `QUEUE_SOFT_CAP = 20` constant; warn-log on exceed, still allow enqueue.
+- [x] [Review][Patch] **R1-P188 [Low Hygiene]: `Invalid Date` would render for malformed `enqueuedAt`** [`apps/expo/src/app/(tabs)/historico.tsx`] — Fix: `Number.isFinite(d.getTime()) ? ... : "—"` guard inline.
+- [x] [Review][Patch] **R1-P189 [Low Hygiene]: `crypto.randomUUID` polyfill confirmation** — Expo SDK 54 ships it natively; verified in `use-import-files.ts`'s new offline branch. No code change.
+
+**`defer` (added to deferred-work.md):**
+
+- [x] [Review][Defer] **F148** Web offline queue.
+- [x] [Review][Defer] **F149** Background drains while app suspended (iOS BGTask / Android WorkManager).
+- [x] [Review][Defer] **F150** Retry backoff + observability telemetry on drain failures.
+- [x] [Review][Defer] **F151** Expo test infra for the queue module + drain hook.
+
+**Dismissed (~5):** `appStateSub.remove()` API shape; NetInfo firing multiple times for connection-type changes (debounced via `wasConnected !== true`); `drainingRef` race; `confirmImport` `created` field ignored; offline-pick → already-have-server-uploaded race (UNIQUE constraint dedups).
+
+### Change Log
+
+- 2026-05-22 — Code review round 1. **11 patches applied (R1-P179–R1-P189), 4 deferred (F148–F151), 5 dismissed.** Four HIGH fixes closed: **R1-P179** wired the pick→enqueue branch in `useImportFiles` so AC1 finally holds (offline pick → AsyncStorage); **R1-P180** namespaced the queue per patient + plumbed `setActivePatient` through the auth lifecycle; **R1-P181** added a per-item `attemptCount` with `MAX_ATTEMPTS_PER_ITEM=5` drop semantics so dead URIs / permanent 4xx don't loop forever; **R1-P182** session-gated the drain so the register screen / cold boot never UNAUTHORIZED-loops. Med fixes: R1-P183 disk-then-cache write order; R1-P185/R1-P186 enum-drift filter on load; R1-P187 soft cap of 20. Low: R1-P188 invalid-date fallback. **173 unit tests green.** Typecheck, lint, format all green.
+- 2026-05-22 — Story 2.6 implemented (dev-story). 173 unit tests green (+2 this story).

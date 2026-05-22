@@ -289,3 +289,11 @@
 - **F145** Prometheus counter `notification_send_skipped_total{reason="no_tokens"}` for ops visibility — currently a console.log only.
 - **F146** Vocabulary-rename consumer audit — R1-P161 renamed `empty_extraction` → `no_readable_text`. Sweep future analytics consumers + alert filters when they ship.
 - **F147** Persisted dismiss state for the Histórico failed-card 'Pular' button — currently in React local state, evaporates on tab remount.
+
+
+## Story 2.6 — round-1 review deferrals (F148–F151)
+
+- **F148** Web offline queue — spec defers; web localStorage is awkward for binary blobs at the patient-upload sizes.
+- **F149** Background drains while app suspended (iOS BGTask / Android WorkManager).
+- **F150** Retry backoff + observability telemetry on drain failures (Sentry / Datadog metric on attemptCount).
+- **F151** Expo test infra + unit tests for queue module + drain hook.

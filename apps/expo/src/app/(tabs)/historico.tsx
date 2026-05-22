@@ -179,8 +179,15 @@ export default function HistoricoScreen() {
               <Text fontWeight="600" color="$textPrimary">
                 {item.originalFilename}
               </Text>
+              {/* R1-P188 — guard against malformed/legacy enqueuedAt
+                  values so we don't render "Data inválida". */}
               <Text fontSize="$2" color="$textSecondary">
-                {new Date(item.enqueuedAt).toLocaleDateString("pt-BR")}
+                {(() => {
+                  const d = new Date(item.enqueuedAt);
+                  return Number.isFinite(d.getTime())
+                    ? d.toLocaleDateString("pt-BR")
+                    : "—";
+                })()}
               </Text>
               <Text fontSize="$2">
                 {UPLOAD_STATUS_LABELS_PT_BR.offline_queued}

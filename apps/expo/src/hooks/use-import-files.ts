@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
+import NetInfo from "@react-native-community/netinfo";
 
 import type {
   PickImageSource,
@@ -23,6 +24,7 @@ import {
   UPLOAD_UNSUPPORTED_MIME_PT_BR,
 } from "@healthtracker/validators";
 
+import { enqueue as enqueueOffline } from "~/lib/offline-upload-queue";
 import { trpcClient } from "~/utils/api";
 
 /**
@@ -54,6 +56,9 @@ export type FileImportStatus =
   | "pending"
   | "uploading"
   | "queued"
+  // Story 2.6 — picked offline; persisted to AsyncStorage; the
+  // `useOfflineUploadFlow` hook drains on the next online tick.
+  | "queued_offline"
   | "skipped_duplicate"
   | "failed";
 
@@ -432,6 +437,49 @@ export function useImportFiles(options: UseImportFilesOptions) {
               delete next[file.uri];
               return next;
             });
+          // Story 2.6 — offline-pick branch. If the device has no
+          // network, persist the pick to the offline queue and
+          // return a `queued_offline` outcome. The `useOfflineUploadFlow`
+          // hook drains on the next online tick. The pre-generated
+          // `clientIdempotencyKey` lets retries dedup server-side.
+          const netState = await NetInfo.fetch();
+          if (netState.isConnected === false) {
+            const clientIdempotencyKey = crypto.randomUUID();
+            try {
+              await enqueueOffline({
+                clientIdempotencyKey,
+                localUri: file.uri,
+                originalFilename: file.name,
+                mimeType: file.mimeType,
+                sizeBytes: file.size,
+                source,
+                ...(file.pageCount !== undefined
+                  ? { pageCount: file.pageCount }
+                  : {}),
+                enqueuedAt: new Date().toISOString(),
+              });
+              const result: UploadFileResult = {
+                uri: file.uri,
+                name: file.name,
+                status: "queued_offline",
+              };
+              results.push(result);
+              setProgressByPath((prev) => ({ ...prev, [file.uri]: result }));
+            } catch (err) {
+              console.warn("[use-import-files] offline enqueue failed", err);
+              const result: UploadFileResult = {
+                uri: file.uri,
+                name: file.name,
+                status: "failed",
+                errorMessage: GENERIC_UPLOAD_ERROR_MESSAGE_PT_BR,
+              };
+              results.push(result);
+              setProgressByPath((prev) => ({ ...prev, [file.uri]: result }));
+            } finally {
+              cleanupStartedAt();
+            }
+            continue;
+          }
           try {
             const req = await trpcClient.uploads.requestImport.mutate({
               originalFilename: file.name,

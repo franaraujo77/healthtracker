@@ -91,7 +91,12 @@ development_status:
   # chunk-progress in thrown error, R2-P174 tightened ExpoPushToken
   # regex, R2-P175 status-label fallback through Record cast,
   # R2-P176 dropped dead Pular button, R2-P178 handler tests.
-  2-6-patient-queues-an-upload-while-offline: review
+  2-6-patient-queues-an-upload-while-offline: done
+  # round-1 patches applied: R1-P179 pick→enqueue branch in useImportFiles
+  # (HIGH AC), R1-P180 patient-namespaced queue + auth-state binding
+  # (HIGH privacy), R1-P181 per-item attemptCount + drop semantics (HIGH),
+  # R1-P182 session-gated drain (HIGH), R1-P183 disk-then-cache write
+  # order, R1-P185/P186 enum-drift load-time filter, R1-P187 soft cap.
   2-7-patient-manually-enters-bioimpedance-bia-measurements: backlog
   2-8-patient-manages-push-notification-preferences: backlog
   epic-2-retrospective: optional
