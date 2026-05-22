@@ -1,5 +1,6 @@
 import type { TRPCRouterRecord } from "@trpc/server";
 import { TRPCError } from "@trpc/server";
+import { z } from "zod/v4";
 
 import {
   isUploadMimeType,
@@ -18,6 +19,10 @@ import {
 } from "../storage";
 import { protectedProcedure } from "../trpc";
 import { enqueueExtractDocument, writeUpload } from "../uploads";
+import {
+  confirmReviewFieldAsPatient,
+  getUploadDetailForPatient,
+} from "../uploads-review";
 
 export const uploadsRouter = {
   /**
@@ -211,5 +216,39 @@ export const uploadsRouter = {
       });
 
       return { uploadId: insertedRow.id, created: true as const };
+    }),
+
+  /**
+   * Story 2.4 — read the upload detail view used by the patient's
+   * review screen. RLS scopes the response to the calling patient.
+   */
+  getUploadDetail: protectedProcedure
+    .input(z.object({ uploadId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const patientId = ctx.session.user.id;
+      return getUploadDetailForPatient(ctx.db, patientId, input.uploadId);
+    }),
+
+  /**
+   * Story 2.4 — confirm OR correct a single `low_confidence` review
+   * row. When omitted, `patientValueNumeric` triggers a confirm-as-is
+   * (the original `valueText` is parsed). When provided, the patient
+   * has edited the value and the helper records the correction in the
+   * review row's `correction_metadata` jsonb column.
+   *
+   * Returns the new `observationId` (null on idempotent retry that
+   * hit ON CONFLICT), the post-call `uploadStatus`, and the count of
+   * still-pending review rows visible to the patient.
+   */
+  confirmReviewField: protectedProcedure
+    .input(
+      z.object({
+        reviewQueueId: z.string().uuid(),
+        patientValueNumeric: z.number().finite().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const patientId = ctx.session.user.id;
+      return confirmReviewFieldAsPatient(ctx.db, patientId, input);
     }),
 } satisfies TRPCRouterRecord;

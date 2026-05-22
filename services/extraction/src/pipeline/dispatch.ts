@@ -80,8 +80,7 @@ export async function dispatchExtractedFields(
     // Empty biomarkerName violates the NOT NULL column constraint
     // downstream; better to silently skip and log than to roll back
     // the whole batch.
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-    const biomarkerName = (field.biomarkerName ?? "").trim();
+    const biomarkerName = field.biomarkerName.trim();
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (biomarkerName.length === 0 || typeof field.valueText !== "string") {
       console.warn(
@@ -135,11 +134,15 @@ export async function dispatchExtractedFields(
         // safely skip already-written review rows.
         // R2-P119 — preserve the raw confidence on a NULL-safe
         // jsonb metadata column when the value is invalid.
+        // Story 2.4 — carry `collected_at_text` through unparsed so
+        // the patient-confirm path (`uploads.confirmReviewField`)
+        // can publish the observation with the lab's draw date,
+        // not the upload date. Worker is the only writer.
         const reviewResult = await sql<
           { id: string }[]
         >`INSERT INTO extraction_review_queue
           (patient_id, upload_id, biomarker_name, value_text, unit_text,
-           loinc_code, confidence_score, reason)
+           loinc_code, collected_at_text, confidence_score, reason)
           VALUES (
             ${input.patientId}::uuid,
             ${input.uploadId}::uuid,
@@ -147,6 +150,7 @@ export async function dispatchExtractedFields(
             ${field.valueText},
             ${normalizeWhitespace(field.unitText)},
             ${loinc?.loincCode ?? null},
+            ${normalizeWhitespace(field.collectedAtText)},
             ${String(effectiveConfidence)}::numeric,
             ${reason}::review_reason_enum
           )

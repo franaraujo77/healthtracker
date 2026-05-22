@@ -1,6 +1,6 @@
 # Story 2.4: Patient reviews and confirms low-confidence extracted values
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -260,6 +260,63 @@ claude-opus-4-7[1m]
 
 ### Debug Log References
 
+- `pnpm typecheck` — 16/16 packages clean.
+- `pnpm lint` — 14/14 packages clean (one pre-existing warning on a no-longer-needed `eslint-disable-next-line` comment in `dispatch.ts` line 85; left as-is since fixing it sits on top of unrelated dispatch logic).
+- `pnpm format:fix` then `pnpm format` — clean.
+- `pnpm test` — 100 unit tests pass (8 new this story in `uploads-review.test.ts`).
+
 ### Completion Notes List
 
+**Clarifications resolved at start of dev (all 8 recommended defaults adopted):**
+
+1. Refetch-on-focus + pull-to-refresh; no realtime polling (Story 2.5 owns that).
+2. `collected_at_text` added to `extraction_review_queue` so the patient-confirm path publishes with the lab draw date.
+3. `notification.upload_complete` audit event uses the patient id as `actorId` (Story 2.3 F120 deferral; documented inline).
+4. `parseBrazilianDecimal` + `parseCollectedAt` lifted to `@healthtracker/validators`; the worker keeps **local copies** rather than re-exporting (eslint's typed-rules engine couldn't resolve the cross-package re-export under the worker's NodeNext config — local copies are simpler and the snapshot-sync test approach used in Story 2.3 R1-P110 covers drift).
+5. Web component test framework not wired; `<ReviewCard />` unit test is deferred (added as F-item).
+6. Expo authenticated route group not present in 1.x convention; new route placed at `apps/expo/src/app/uploads/[uploadId].tsx` alongside other routes.
+7. Already-resolved retry → explicit `CONFLICT` (`ALREADY_RESOLVED`).
+8. Input accepts both `,` and `.`; rendering uses `,`.
+
+**What was implemented:**
+
+- **Schema**: added `collected_at_text`, `resolved_by_patient_id`, `correction_metadata` to `extraction_review_queue` (all nullable; no backfill needed).
+- **RLS**: replaced the empty `custom_rls_extraction_review_queue.sql` with patient `SELECT` + `UPDATE` policies scoped to `reason = 'low_confidence'`. Added column-level `GRANT UPDATE` defense-in-depth so only `resolved_at`, `resolved_by_patient_id`, `correction_metadata` are mutable from the patient role.
+- **Worker dispatch**: now carries `collected_at_text` through to review-queue rows (so patient-confirm can publish with the lab draw date).
+- **API helpers**: new `getUploadDetailForPatient`, `confirmReviewFieldAsPatient`, `resolveLoincCode` (Drizzle-bound, mirrors worker's raw-SQL helper).
+- **tRPC procedures**: `uploads.getUploadDetail` (query) + `uploads.confirmReviewField` (mutation). All work runs inside the existing `protectedProcedure` transaction wrap.
+- **Validators**: `parseBrazilianDecimal` + `formatBrazilianDecimal` + `parseCollectedAt` lifted from `services/extraction`. pt-BR copy + status labels added.
+- **Web detail screen**: `apps/web/src/app/inicio/uploads/[uploadId]/` with `page.tsx`, `upload-detail-client.tsx`, `review-card.tsx`. SSR prefetch + client hydration + invalidate-on-mutation pattern.
+- **Expo detail screen**: `apps/expo/src/app/uploads/[uploadId].tsx` with inline `ReviewCard`. Pull-to-refresh via `RefreshControl`.
+- **Tests**: 8 new in `packages/api/__tests__/uploads-review.test.ts` covering happy paths + NOT_FOUND + CONFLICT + BAD_REQUEST + has-operator-only-rows.
+
+**Out of scope / deferred:**
+
+- Web `<ReviewCard />` component test — `apps/web` Vitest + Testing Library not configured (F-item).
+- Expo component tests — no RN test framework configured (F-item).
+- Push notification _dispatch_ — Story 2.5 (the audit event is emitted; the dispatcher is the next story).
+- Operator-only `loinc_unresolved` row resolution — Story 8.1.
+- RLS adversarial test for `extraction_review_queue` patient policies (mirrors Story 2.3's deferred F-item; requires local Supabase).
+- Polling / realtime — Story 2.5.
+
 ### File List
+
+**New files**
+
+- `packages/db/policies/custom_rls_extraction_review_queue.sql` (REPLACED — was RLS-only stub)
+- `packages/api/src/loinc.ts`
+- `packages/api/src/uploads-review.ts`
+- `packages/api/__tests__/uploads-review.test.ts`
+- `packages/validators/src/decimal.ts`
+- `packages/validators/src/collected-at.ts`
+- `apps/web/src/app/inicio/uploads/[uploadId]/page.tsx`
+- `apps/web/src/app/inicio/uploads/[uploadId]/upload-detail-client.tsx`
+- `apps/web/src/app/inicio/uploads/[uploadId]/review-card.tsx`
+- `apps/expo/src/app/uploads/[uploadId].tsx`
+
+**Modified files**
+
+- `packages/db/src/schema/extraction_review_queue.ts` — added `collectedAtText`, `resolvedByPatientId`, `correctionMetadata`.
+- `packages/api/src/router/uploads.ts` — added `getUploadDetail` + `confirmReviewField`.
+- `packages/validators/src/index.ts` — exported decimal + collected-at helpers, pt-BR copy + status labels.
+- `services/extraction/src/pipeline/dispatch.ts` — write `collected_at_text` to review-queue rows; minor lint cleanup.

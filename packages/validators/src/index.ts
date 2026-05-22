@@ -1,5 +1,40 @@
 import { z } from "zod/v4";
 
+export { formatBrazilianDecimal, parseBrazilianDecimal } from "./decimal";
+export { parseCollectedAt } from "./collected-at";
+
+/**
+ * Story 2.4 — pt-BR copy + route constants for the upload detail
+ * review surface. The UI uses `formatBrazilianDecimal` to render
+ * numeric pre-fills with decimal-comma (UX-DR12).
+ */
+export const UPLOAD_DETAIL_ROUTE = (uploadId: string) =>
+  `/inicio/uploads/${uploadId}`;
+
+export const UPLOAD_DETAIL_REVIEW_HEADER_PT_BR = "Confirme este valor";
+export const UPLOAD_DETAIL_CONFIRM_CTA_PT_BR = "Confirmar";
+export const UPLOAD_DETAIL_SAVE_CTA_PT_BR = "Salvar";
+export const UPLOAD_DETAIL_WAITING_TEAM_PT_BR = "Aguardando revisão da equipe";
+export const UPLOAD_DETAIL_ALL_DONE_PT_BR = "Tudo certo, resultados publicados";
+export const UPLOAD_DETAIL_LOADING_PT_BR = "Carregando…";
+export const UPLOAD_DETAIL_ERROR_PT_BR =
+  "Não conseguimos abrir este upload. Tente novamente em instantes.";
+export const UPLOAD_DETAIL_VALUE_INVALID_PT_BR =
+  "Use um número válido — por exemplo, 14,2.";
+export const UPLOAD_DETAIL_SAVE_ERROR_PT_BR =
+  "Não conseguimos salvar — tente novamente.";
+
+export const UPLOAD_STATUS_LABELS_PT_BR: Record<
+  "queued" | "processing" | "pending_review" | "complete" | "failed",
+  string
+> = {
+  queued: "Na fila",
+  processing: "Processando",
+  pending_review: "Aguardando confirmação",
+  complete: "Publicado",
+  failed: "Falhou",
+};
+
 /**
  * Patient registration input (Story 1.1).
  *

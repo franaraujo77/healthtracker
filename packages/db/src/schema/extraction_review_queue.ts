@@ -4,10 +4,15 @@ import { pgEnum, pgTable, uniqueIndex } from "drizzle-orm/pg-core";
  * Story 2.3 — operator-only review queue for extracted fields that
  * fail the confidence gate (`< 0.85`) or fail LOINC resolution.
  *
- * RLS: enabled with ZERO patient/doctor policies — service-role-only.
- * Story 8.1 builds the operator UI + adds the operator-role SELECT
- * policy (anonymized view per architecture.md L29). Story 8.2 will
- * write `resolved_at` when an operator confirms or rejects.
+ * Story 2.4 — patient-facing surface for `reason = 'low_confidence'`
+ * rows: the patient confirms or corrects the extracted value; the
+ * helper writes the resulting observation, marks the row resolved
+ * (`resolved_at`, `resolved_by_patient_id`, `correction_metadata`).
+ * `reason = 'loinc_unresolved'` remains operator-only (Story 8.1).
+ *
+ * RLS: see `custom_rls_extraction_review_queue.sql`. Patients SELECT
+ * + UPDATE their own `low_confidence` rows; service-role retains full
+ * access; doctors / anon have no access.
  */
 export const reviewReasonEnum = pgEnum("review_reason_enum", [
   "low_confidence",
@@ -25,6 +30,13 @@ export const ExtractionReviewQueue = pgTable(
     valueText: t.text().notNull(),
     unitText: t.text(),
     loincCode: t.text(),
+    /**
+     * Story 2.4 — the original `collected_at` text from the source
+     * (the worker carries it through unparsed so the patient confirm
+     * path can publish the observation with the lab's draw date,
+     * not the upload date). Nullable when the source had no date.
+     */
+    collectedAtText: t.text(),
     confidenceScore: t.numeric().notNull(),
     reason: reviewReasonEnum("reason").notNull(),
     createdAt: t
@@ -32,6 +44,18 @@ export const ExtractionReviewQueue = pgTable(
       .defaultNow()
       .notNull(),
     resolvedAt: t.timestamp({ mode: "date", withTimezone: true }),
+    /** Story 2.4 — patient who resolved the row (null if operator-resolved or unresolved). */
+    resolvedByPatientId: t.uuid(),
+    /**
+     * Story 2.4 — when the patient EDITED the extracted value, the
+     * original textual value + the patient's numeric override are
+     * preserved here for audit. NULL when the patient confirmed-as-is.
+     */
+    correctionMetadata: t.jsonb().$type<{
+      patientValue: number;
+      originalValueText: string;
+      correctedAt: string;
+    }>(),
   }),
   (table) => [
     // R2-P113 — idempotency seam for crash-recovery resume. Without

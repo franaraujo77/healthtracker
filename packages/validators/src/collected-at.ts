@@ -1,10 +1,17 @@
 /**
- * Story 2.3 — collection-date normalization. Local copy of
- * `@healthtracker/validators`'s `parseCollectedAt`; kept here to
- * avoid pulling the validators package into the worker bundle.
+ * Story 2.3 / 2.4 — collection-date normalization.
+ *
+ * Brazilian lab reports default to `dd/mm/yyyy`; some PDFs include
+ * ISO-8601 `yyyy-mm-dd`. Returns `null` on unparseable input.
+ *
+ * Pure function; no locale-dependent behavior.
+ *
+ * Moved to `@healthtracker/validators` in Story 2.4 so the API's
+ * patient-confirm path and the worker share the same parser.
  */
 export function parseCollectedAt(text: string): Date | null {
   if (typeof text !== "string") return null;
+  // R1-P103 — strip trailing time portion ("dd/mm/yyyy hh:mm[:ss]")
   const trimmed = text.trim().replace(/\s+\d{1,2}:\d{2}(:\d{2})?.*$/, "");
 
   const brMatch = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/.exec(trimmed);
