@@ -10,7 +10,10 @@
  */
 export function parseCollectedAt(text: string): Date | null {
   if (typeof text !== "string") return null;
-  const trimmed = text.trim();
+  // Story 2.3 R1-P103 — strip trailing time portion ("dd/mm/yyyy hh:mm[:ss]")
+  // before regex; labs commonly emit collected-at with the collection
+  // time appended.
+  const trimmed = text.trim().replace(/\s+\d{1,2}:\d{2}(:\d{2})?.*$/, "");
 
   // dd/mm/yyyy or dd-mm-yyyy
   const brMatch = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/.exec(trimmed);

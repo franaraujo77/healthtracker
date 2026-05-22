@@ -31,7 +31,13 @@ export const Observations = pgTable(
     id: t.uuid().notNull().primaryKey().defaultRandom(),
     patientId: t.uuid().notNull(),
     uploadId: t.uuid().notNull(),
-    loincCode: t.text().notNull(),
+    // Story 2.3 R1-P102 — NULLABLE per Task 1 spec. The current
+    // pipeline routes LOINC-unresolved fields to
+    // `extraction_review_queue` so `observations` rows always have a
+    // resolved code in practice — but the schema must allow NULL so
+    // a future Story 2.4 patient-corrected path or operator
+    // confirm-with-original-name can land a row with `loinc_code IS NULL`.
+    loincCode: t.text(),
     biomarkerName: t.text().notNull(),
     valueNumeric: t.numeric().notNull(),
     unitUcum: t.text().notNull(),

@@ -14,11 +14,36 @@ import { mockTextractAdapterFromFixtures } from "./textract/mock-adapter.js";
 // Story 2.3 — adapter selection by env var. Default `mock` in
 // dev/test/CI; `aws` in prod will throw NOT_IMPLEMENTED until the
 // follow-up story ships the real SDK integration.
-const EXTRACTION_ADAPTER = process.env.EXTRACTION_ADAPTER ?? "mock";
+//
+// R1-P97 — case-insensitive + explicit reject for unknown values
+// (`EXTRACTION_ADAPTER=AWS` would otherwise silently fall through
+// to mock).
+const EXTRACTION_ADAPTER = (
+  process.env.EXTRACTION_ADAPTER ?? "mock"
+).toLowerCase();
+if (EXTRACTION_ADAPTER !== "mock" && EXTRACTION_ADAPTER !== "aws") {
+  throw new Error(
+    `EXTRACTION_ADAPTER must be 'mock' or 'aws' (case-insensitive); got '${process.env.EXTRACTION_ADAPTER ?? ""}'`,
+  );
+}
+// R1-P96 — warn loudly when worker boots with the mock adapter and
+// no fixtures. Every job will dead-letter silently otherwise.
+// Production (`EXTRACTION_ADAPTER=aws`) throws on first call, which
+// is the right fail-loud behavior; dev with mock is the silent-fail
+// case this warning addresses.
+const mockFixtures: Parameters<typeof mockTextractAdapterFromFixtures>[0] = [];
+if (EXTRACTION_ADAPTER === "mock") {
+  console.warn(
+    "[extraction-worker] BOOT: EXTRACTION_ADAPTER=mock with 0 fixtures. " +
+      "Every extraction.document job will dead-letter (the mock adapter " +
+      "rejects unknown storage paths). Register fixtures or set " +
+      "EXTRACTION_ADAPTER=aws if you mean to use real Textract.",
+  );
+}
 const textractAdapter: TextractAdapter =
   EXTRACTION_ADAPTER === "aws"
     ? awsTextractAdapter
-    : mockTextractAdapterFromFixtures([]);
+    : mockTextractAdapterFromFixtures(mockFixtures);
 
 // Story 2.3 — Supabase Storage service-role download seam. The worker
 // has its own connection to Supabase (separate from the API) for
@@ -44,7 +69,21 @@ async function downloadStorageObject(
       `[extraction.document] storage download failed for ${storagePath}: ${result.error.message}`,
     );
   }
+  // R1-P107 — defensive null check on `data`. TS narrows the
+  // discriminated union as non-null here, but the Supabase SDK has
+  // historically returned `{data: null, error: null}` in some
+  // edge cases; defense-in-depth.
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  if (!result.data) {
+    throw new Error(
+      `[extraction.document] storage download returned no data for ${storagePath}`,
+    );
+  }
   const arrayBuffer = await result.data.arrayBuffer();
+  // R1-P98 — `mimeType` is sourced from the job payload (validated at
+  // upload time by Story 2.2 confirmImport); the storage-derived
+  // `data.type` is dropped here because Supabase returns empty string
+  // for unknown MIMEs and would mislead downstream.
   return {
     bytes: new Uint8Array(arrayBuffer),
     mimeType: result.data.type,

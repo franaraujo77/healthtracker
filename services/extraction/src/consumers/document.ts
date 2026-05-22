@@ -19,18 +19,23 @@ import {
  *     ↓ applyUploadTransition (queued → processing)
  *   processing
  *     ↓ storage.download + textractAdapter.extract
- *     ↓ dispatchExtractedFields (publish + review-queue + dead-letter
- *                                 counts)
- *   complete            ← all fields published, none reviewed/dead
+ *     ↓ dispatchExtractedFields (publish + review-queue counts;
+ *                                 returns published observation ids)
+ *     ↓ writeAuditLog per published observation (R1-P93)
+ *   complete            ← every field published, none reviewed
  *   pending_review      ← any review-queue entries written
- *   failed              ← all fields below 0.01 confidence
- *                          (or no fields at all)
+ *   failed              ← zero fields extracted, OR zero fields
+ *                          published AND zero reviewed
  *
- * Errors thrown from the handler are NOT swallowed — pg-boss retries
- * (per the `extraction.document` queue config in `index.ts`), and on
- * `retryLimit` exhaustion the dead-letter consumer fires
- * `markUploadFailed`. The handler itself only returns successfully
- * once the state machine has settled.
+ * R1-P95 — optimistic-lock-miss handling. If the row is not in
+ * `queued` (e.g., a prior worker crashed mid-processing and pg-boss
+ * is retrying), the handler checks the current status and either
+ * resumes (if `processing`) or acks-and-skips (if terminal). Without
+ * this, a crashed worker leaves the row stuck in `processing` forever.
+ *
+ * R1-P109 — wraps the per-upload dispatch + audit emission in
+ * `sql.begin(async tx => ...)` so mid-batch DB errors don't leave
+ * partial review-queue dupes on pg-boss retry.
  */
 
 export interface DocumentConsumerDeps {
@@ -64,24 +69,31 @@ export async function handleDocumentJob(
   const { uploadId, storagePath, mimeType } = data.payload;
   const patientId = data.patientId;
 
-  // queued → processing
+  // R1-P95 — try queued→processing; on miss, check current status
+  // and decide whether to resume or skip.
   const moveToProcessing = await applyUploadTransition(deps.sql, {
     uploadId,
     from: "queued",
     to: "processing",
   });
   if (!moveToProcessing.updated) {
-    // Another worker picked it up, OR the row already moved past
-    // queued (dead-letter retry on a row that was hand-completed by
-    // an operator, etc.). Don't throw — log and ack the pg-boss job
-    // so it doesn't retry.
-    console.warn(
-      `[extraction.document] uploadId=${uploadId}: queued→processing failed (optimistic-lock miss); skipping`,
-    );
-    return;
+    const status = await currentStatus(deps.sql, uploadId);
+    if (status === "processing") {
+      console.warn(
+        `[extraction.document] uploadId=${uploadId}: resuming after prior worker crash (already in processing)`,
+      );
+      // Fall through to the extraction + dispatch path.
+    } else {
+      console.warn(
+        `[extraction.document] uploadId=${uploadId}: skipping; current status=${status ?? "missing"}`,
+      );
+      return;
+    }
   }
 
-  // Download bytes + extract fields.
+  // R1-P98 — use payload's `mimeType` (validated at upload time per
+  // Story 2.2 confirmImport) instead of storage-derived (Supabase
+  // can return empty `data.type` for unknown MIMEs).
   const { bytes } = await deps.downloadStorageObject(storagePath);
   const fields = await deps.textractAdapter.extract({
     bytes,
@@ -89,35 +101,70 @@ export async function handleDocumentJob(
     storagePath,
   });
 
-  // Dispatch + confidence gate.
-  const outcome = await dispatchExtractedFields(deps.sql, {
-    uploadId,
-    patientId,
-    fields,
-  });
-
-  // Decide terminal status.
-  // All fields below the dead-letter threshold (or zero fields
-  // extracted at all) → dead-letter the upload.
-  if (fields.length > 0 && outcome.deadLetterCount === fields.length) {
-    await applyDeadLetter(deps.sql, {
-      uploadId,
-      metadata: { reason: "no_readable_text", field_count: fields.length },
+  // R1-P109 — atomic per-upload: dispatch + audit emission run in
+  // one transaction. Mid-batch error → rollback → pg-boss retries
+  // cleanly (no duplicate review-queue rows).
+  let outcome;
+  try {
+    outcome = await deps.sql.begin(async (tx) => {
+      const dispatchOutcome = await dispatchExtractedFields(tx, {
+        uploadId,
+        patientId,
+        fields,
+      });
+      // R1-P93 — emit one `observation.write` audit event per
+      // published observation (`actorType: 'system'`). Worker uses
+      // raw SQL (mirrors `packages/api/src/audit.ts` `writeAuditLog`)
+      // because it's on a separate postgres-driver connection.
+      // Service-role bypasses the audit RLS WITH CHECK (Story 1.1
+      // F10 — system-actor RLS deferred).
+      for (const observationId of dispatchOutcome.publishedObservationIds) {
+        await tx`INSERT INTO audit_log
+          (actor_id, actor_type, event, resource_id, resource_type, metadata)
+          VALUES (
+            ${patientId}::uuid,
+            'system',
+            'observation.write',
+            ${observationId}::uuid,
+            'observation',
+            ${JSON.stringify({ uploadId, source: "extracted" })}::jsonb
+          )`;
+      }
+      return dispatchOutcome;
     });
+  } catch (err) {
+    console.error(
+      `[extraction.document] uploadId=${uploadId}: transaction failed; pg-boss will retry`,
+      err,
+    );
+    throw err;
+  }
+
+  // R1-P100 — terminal-status decision. Dead-letter only when
+  // nothing got written at all (empty extraction OR all-fields
+  // rejected by the dispatcher before any write — should be
+  // impossible post-R1-P100 since every field goes somewhere).
+  if (
+    fields.length === 0 ||
+    (outcome.publishedCount === 0 && outcome.reviewQueueCount === 0)
+  ) {
+    const dl = await applyDeadLetter(deps.sql, {
+      uploadId,
+      metadata: {
+        reason:
+          fields.length === 0 ? "empty_extraction" : "no_publishable_fields",
+        field_count: fields.length,
+      },
+    });
+    // R1-P106 — check the dead-letter return.
+    if (!dl.updated) {
+      console.warn(
+        `[extraction.document] uploadId=${uploadId}: dead-letter no-op (row already terminal)`,
+      );
+    }
     return;
   }
-  if (fields.length === 0) {
-    await applyDeadLetter(deps.sql, {
-      uploadId,
-      metadata: { reason: "empty_extraction" },
-    });
-    return;
-  }
 
-  // Any review-queue entries (low confidence OR LOINC unresolved OR
-  // structurally bad value) → pending_review. The published-count
-  // can be non-zero (mixed-outcome documents still publish their
-  // high-confidence fields).
   if (outcome.reviewQueueCount > 0) {
     const move = await applyUploadTransition(deps.sql, {
       uploadId,
@@ -130,13 +177,12 @@ export async function handleDocumentJob(
     });
     if (!move.updated) {
       console.warn(
-        `[extraction.document] uploadId=${uploadId}: processing→pending_review failed; row may have been moved externally`,
+        `[extraction.document] uploadId=${uploadId}: processing→pending_review failed; row externally moved`,
       );
     }
     return;
   }
 
-  // Clean run — every field published.
   const move = await applyUploadTransition(deps.sql, {
     uploadId,
     from: "processing",
@@ -145,7 +191,17 @@ export async function handleDocumentJob(
   });
   if (!move.updated) {
     console.warn(
-      `[extraction.document] uploadId=${uploadId}: processing→complete failed; row may have been moved externally`,
+      `[extraction.document] uploadId=${uploadId}: processing→complete failed; row externally moved`,
     );
   }
+}
+
+async function currentStatus(
+  sql: postgres.Sql,
+  uploadId: string,
+): Promise<string | null> {
+  const rows = await sql<
+    { status: string }[]
+  >`SELECT status FROM uploads WHERE id = ${uploadId}::uuid LIMIT 1`;
+  return rows[0]?.status ?? null;
 }

@@ -1,5 +1,20 @@
 # Deferred Work
 
+## Deferred from: code review of story-2-3 (2026-05-22)
+
+- **F103: Nested `sql\`COALESCE(...)\``template fragments in worker`applyUploadTransition`** — verify with integration test (testcontainer or local Supabase) that the `postgres` driver inlines them as fragments, not string literals.
+- **F104: `RawExtractedField.confidence` scale ambiguity** (0.0–1.0 vs 0–100) — document the contract on JSDoc; the AWS adapter stub must normalize when shipped.
+- **F105: `parseBrazilianDecimal` mis-parses US-formatted `12.345` as 12345** (BR thousands sep). Add heuristic or document the limitation.
+- **F106: Dead-letter `name.startsWith("extraction.")` queue sniff is brittle** — replace with explicit `markUploadFailedOnDeadLetter: boolean` per queue registration.
+- **F107: `metadata: Record<string, unknown>` allows un-serializable values** (BigInt, circular, functions). Sanitize at helper or tighten type.
+- **F108: collectedAt timezone-naive risk** — document the "UTC midnight only" contract or accept `YYYY-MM-DD` strings at the helper boundary.
+- **F109: `parseCollectedAt` ISO regex too strict** — rejects `2024-3-15` and `2024-03-15T00:00:00Z`. Relax.
+- **F110: `resolveLoincCode` accent-folding gap** ("Hemoglôbina" misses canonical "Hemoglobina"). Use unaccent extension if available.
+- **F111: Review-queue `reason` enum collapses two failure modes** (structural value-parse failure + low confidence) into `low_confidence`. Story 8.x.
+- **F112: Mock SQL discriminator in `document-consumer.test.ts` brittle** (`.toLowerCase().includes(...)`). Add integration test against a real Postgres.
+- **F113: Year bounds `[1900, 2100]` in `parseCollectedAt` arbitrary** — move to named constant or relax.
+- **F114: Terminal-state lock-miss in consumer's `processing→pending_review` / `processing→complete` returns silently** — should record an audit event indicating external mutation.
+
 ## Deferred from: code review of story-2-2 round 2 (2026-05-22)
 
 - **F96: ExtractionPulse `failed`-state fallback only renders when ALL three recovery callbacks are undefined** — caller with only `onRetake` set sees one button + no fallback. Decide policy: caller-controlled, or always render fallback alongside?

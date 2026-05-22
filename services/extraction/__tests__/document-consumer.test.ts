@@ -16,31 +16,53 @@ interface MockSqlBehavior {
   transitionRows: { id: string; status: string }[][];
   /** Rows returned by LOINC lookup — keyed by biomarker name (case-insensitive). */
   loinc: Record<string, { loinc_code: string; unit_ucum: string }>;
+  /** R1-P95 — status returned by the `SELECT status FROM uploads` lookup after a queued→processing miss. */
+  currentStatus?: string;
 }
 
 function makeSql(behavior: MockSqlBehavior) {
   let transitionCallIndex = 0;
+  let observationCallIndex = 0;
+  // Story 2.3 R1-P95/P106 — also handles SELECT status (re-query
+  // after queued→processing miss). R1-P109 — `.begin()` runs the
+  // passed callback with this same sql mock so transaction-scoped
+  // INSERTs route through the same handler.
   const sql = vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => {
     const raw = strings.join("?").toLowerCase();
     if (raw.includes("update uploads")) {
       const rows = behavior.transitionRows[transitionCallIndex++] ?? [];
       return Promise.resolve(rows);
     }
+    if (raw.includes("select status from uploads")) {
+      // R1-P95 — status lookup after queued→processing miss.
+      return Promise.resolve(
+        behavior.currentStatus ? [{ status: behavior.currentStatus }] : [],
+      );
+    }
     if (raw.includes("from loinc_ref")) {
-      // biomarkerName parameter is the first value
       const name = String(values[0]).toLowerCase();
       const hit = behavior.loinc[name];
       return Promise.resolve(hit ? [hit] : []);
     }
     if (raw.includes("insert into observations")) {
-      return Promise.resolve([{ id: "obs-1" }]);
+      const id = `obs-${++observationCallIndex}`;
+      return Promise.resolve([{ id }]);
     }
     if (raw.includes("insert into extraction_review_queue")) {
       return Promise.resolve([]);
     }
+    if (raw.includes("insert into audit_log")) {
+      return Promise.resolve([]);
+    }
     return Promise.resolve([]);
-  });
-  return sql as unknown as Parameters<typeof handleDocumentJob>[0]["sql"];
+  }) as unknown as Parameters<typeof handleDocumentJob>[0]["sql"];
+  // Story 2.3 R1-P109 — transaction wrapper. The mock runs the
+  // callback with the same sql tag, so writes inside .begin route
+  // through the same template-string handler above.
+  (
+    sql as unknown as { begin: (cb: (tx: unknown) => unknown) => unknown }
+  ).begin = (cb) => Promise.resolve(cb(sql));
+  return sql;
 }
 
 function jobPayload(): JobPayload<ExtractDocumentPayload> {
@@ -139,11 +161,14 @@ describe("handleDocumentJob — dead-letter (all fields < 0.01)", () => {
   });
 });
 
-describe("handleDocumentJob — optimistic-lock miss", () => {
-  it("logs and returns when queued → processing matches zero rows", async () => {
+describe("handleDocumentJob — optimistic-lock miss (R1-P95)", () => {
+  it("skips when queued→processing misses AND the row is in a terminal state", async () => {
     const sql = makeSql({
       transitionRows: [[]], // miss on first transition
       loinc: {},
+      // No `currentStatus` — simulates the row vanishing OR the
+      // SELECT returning no rows. The handler must skip silently
+      // (don't throw; don't dead-letter).
     });
     const warnSpy = vi
       .spyOn(console, "warn")
@@ -157,7 +182,33 @@ describe("handleDocumentJob — optimistic-lock miss", () => {
       jobPayload(),
     );
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringMatching(/queued→processing failed/),
+      expect.stringMatching(/skipping; current status=/),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("resumes when queued→processing misses BUT the row is already in processing (crashed worker recovery)", async () => {
+    const sql = makeSql({
+      transitionRows: [
+        [], // queued → processing misses (row already processing)
+        [{ id: UPLOAD_ID, status: "complete" }], // processing → complete succeeds
+      ],
+      loinc: { hemoglobina: HEMOGLOBINA_LOINC },
+      currentStatus: "processing",
+    });
+    const warnSpy = vi
+      .spyOn(console, "warn")
+      .mockImplementation(() => undefined);
+    await handleDocumentJob(
+      {
+        sql,
+        textractAdapter: mockAdapter([HEMOGLOBINA]),
+        downloadStorageObject: mockDownload,
+      },
+      jobPayload(),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/resuming after prior worker crash/),
     );
     warnSpy.mockRestore();
   });

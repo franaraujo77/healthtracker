@@ -5,7 +5,13 @@ import type { AuditDb } from "./audit";
 export interface ObservationInsert {
   patientId: string;
   uploadId: string;
-  loincCode: string;
+  /**
+   * Story 2.3 R1-P102 — NULLABLE. The pipeline routes LOINC-unresolved
+   * fields to `extraction_review_queue` so `observations` rows
+   * typically have a resolved code; future patient-corrected paths
+   * (Story 2.4) may insert with NULL.
+   */
+  loincCode?: string;
   biomarkerName: string;
   valueNumeric: number;
   unitUcum: string;
@@ -33,12 +39,27 @@ export async function writeObservation(
   database: AuditDb,
   entry: ObservationInsert,
 ): Promise<{ id: string } | null> {
+  // Story 2.3 R1-P108 — validate finite numerics + valid Date.
+  if (!Number.isFinite(entry.valueNumeric)) {
+    throw new Error(
+      `writeObservation: valueNumeric must be finite, got ${entry.valueNumeric}`,
+    );
+  }
+  if (!Number.isFinite(entry.confidenceScore)) {
+    throw new Error(
+      `writeObservation: confidenceScore must be finite, got ${entry.confidenceScore}`,
+    );
+  }
+  if (Number.isNaN(entry.collectedAt.getTime())) {
+    throw new Error("writeObservation: collectedAt is Invalid Date");
+  }
+
   const [row] = await database
     .insert(Observations)
     .values({
       patientId: entry.patientId,
       uploadId: entry.uploadId,
-      loincCode: entry.loincCode,
+      loincCode: entry.loincCode ?? null,
       biomarkerName: entry.biomarkerName,
       valueNumeric: String(entry.valueNumeric),
       unitUcum: entry.unitUcum,

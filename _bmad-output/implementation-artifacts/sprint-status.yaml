@@ -68,7 +68,7 @@ development_status:
   epic-2: in-progress
   2-1-patient-uploads-a-pdf-blood-test-result: done
   2-2-patient-uploads-a-photo-of-a-blood-test-result-from-camera-roll-or-camera: done
-  2-3-system-extracts-and-normalizes-biomarker-values-from-uploaded-documents: review
+  2-3-system-extracts-and-normalizes-biomarker-values-from-uploaded-documents: done
   2-4-patient-reviews-and-confirms-low-confidence-extracted-values: backlog
   2-5-patient-views-upload-status-and-receives-push-notifications: backlog
   2-6-patient-queues-an-upload-while-offline: backlog

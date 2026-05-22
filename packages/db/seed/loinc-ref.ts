@@ -10,167 +10,160 @@ import { LoincRef } from "../src/schema";
  *
  * See `docs/loinc-seed.md` for the source / refresh process.
  *
- * Categories: CBC (4), lipid_panel (4), metabolic (5), thyroid (2),
- * iron (2), crp (1), additional (2). Total 20.
+ * Round-1 R1-P112 — authored in camelCase matching the Drizzle schema
+ * directly; the previous snake_case→camelCase mapper at insert time
+ * was pointless transformation.
  *
  * Idempotent via `ON CONFLICT DO NOTHING` keyed on `loinc_code`.
  */
 
 interface LoincSeedEntry {
-  loinc_code: string;
-  biomarker_name_pt: string;
-  unit_ucum: string;
+  loincCode: string;
+  biomarkerNamePt: string;
+  unitUcum: string;
   category: string;
 }
 
 const LOINC_SEED: LoincSeedEntry[] = [
   // CBC — Complete Blood Count
   {
-    loinc_code: "718-7",
-    biomarker_name_pt: "Hemoglobina",
-    unit_ucum: "g/dL",
+    loincCode: "718-7",
+    biomarkerNamePt: "Hemoglobina",
+    unitUcum: "g/dL",
     category: "CBC",
   },
   {
-    loinc_code: "4544-3",
-    biomarker_name_pt: "Hematócrito",
-    unit_ucum: "%",
+    loincCode: "4544-3",
+    biomarkerNamePt: "Hematócrito",
+    unitUcum: "%",
     category: "CBC",
   },
   {
-    loinc_code: "6690-2",
-    biomarker_name_pt: "Leucócitos totais",
-    unit_ucum: "10*3/uL",
+    loincCode: "6690-2",
+    biomarkerNamePt: "Leucócitos totais",
+    unitUcum: "10*3/uL",
     category: "CBC",
   },
   {
-    loinc_code: "777-3",
-    biomarker_name_pt: "Plaquetas",
-    unit_ucum: "10*3/uL",
+    loincCode: "777-3",
+    biomarkerNamePt: "Plaquetas",
+    unitUcum: "10*3/uL",
     category: "CBC",
   },
   // Lipid panel
   {
-    loinc_code: "2093-3",
-    biomarker_name_pt: "Colesterol total",
-    unit_ucum: "mg/dL",
+    loincCode: "2093-3",
+    biomarkerNamePt: "Colesterol total",
+    unitUcum: "mg/dL",
     category: "lipid_panel",
   },
   {
-    loinc_code: "2085-9",
-    biomarker_name_pt: "HDL",
-    unit_ucum: "mg/dL",
+    loincCode: "2085-9",
+    biomarkerNamePt: "HDL",
+    unitUcum: "mg/dL",
     category: "lipid_panel",
   },
   {
-    loinc_code: "2089-1",
-    biomarker_name_pt: "LDL",
-    unit_ucum: "mg/dL",
+    loincCode: "2089-1",
+    biomarkerNamePt: "LDL",
+    unitUcum: "mg/dL",
     category: "lipid_panel",
   },
   {
-    loinc_code: "2571-8",
-    biomarker_name_pt: "Triglicerídeos",
-    unit_ucum: "mg/dL",
+    loincCode: "2571-8",
+    biomarkerNamePt: "Triglicerídeos",
+    unitUcum: "mg/dL",
     category: "lipid_panel",
   },
   // Metabolic
   {
-    loinc_code: "2345-7",
-    biomarker_name_pt: "Glicose",
-    unit_ucum: "mg/dL",
+    loincCode: "2345-7",
+    biomarkerNamePt: "Glicose",
+    unitUcum: "mg/dL",
     category: "metabolic",
   },
   {
-    loinc_code: "2160-0",
-    biomarker_name_pt: "Creatinina",
-    unit_ucum: "mg/dL",
+    loincCode: "2160-0",
+    biomarkerNamePt: "Creatinina",
+    unitUcum: "mg/dL",
     category: "metabolic",
   },
   {
-    loinc_code: "3094-0",
-    biomarker_name_pt: "Ureia",
-    unit_ucum: "mg/dL",
+    loincCode: "3094-0",
+    biomarkerNamePt: "Ureia",
+    unitUcum: "mg/dL",
     category: "metabolic",
   },
   {
-    loinc_code: "2951-2",
-    biomarker_name_pt: "Sódio",
-    unit_ucum: "mmol/L",
+    loincCode: "2951-2",
+    biomarkerNamePt: "Sódio",
+    unitUcum: "mmol/L",
     category: "metabolic",
   },
   {
-    loinc_code: "2823-3",
-    biomarker_name_pt: "Potássio",
-    unit_ucum: "mmol/L",
+    loincCode: "2823-3",
+    biomarkerNamePt: "Potássio",
+    unitUcum: "mmol/L",
     category: "metabolic",
   },
   // Thyroid
   {
-    loinc_code: "3016-3",
-    biomarker_name_pt: "TSH",
-    unit_ucum: "mU/L",
+    loincCode: "3016-3",
+    biomarkerNamePt: "TSH",
+    unitUcum: "mU/L",
     category: "thyroid",
   },
   {
-    loinc_code: "3024-7",
-    biomarker_name_pt: "T4 livre",
-    unit_ucum: "ng/dL",
+    loincCode: "3024-7",
+    biomarkerNamePt: "T4 livre",
+    unitUcum: "ng/dL",
     category: "thyroid",
   },
   // Iron
   {
-    loinc_code: "2498-4",
-    biomarker_name_pt: "Ferro sérico",
-    unit_ucum: "ug/dL",
+    loincCode: "2498-4",
+    biomarkerNamePt: "Ferro sérico",
+    unitUcum: "ug/dL",
     category: "iron",
   },
   {
-    loinc_code: "2276-4",
-    biomarker_name_pt: "Ferritina",
-    unit_ucum: "ng/mL",
+    loincCode: "2276-4",
+    biomarkerNamePt: "Ferritina",
+    unitUcum: "ng/mL",
     category: "iron",
   },
   // CRP
   {
-    loinc_code: "1988-5",
-    biomarker_name_pt: "PCR",
-    unit_ucum: "mg/L",
+    loincCode: "1988-5",
+    biomarkerNamePt: "PCR",
+    unitUcum: "mg/L",
     category: "crp",
   },
   // Additional commonly-tested
   {
-    loinc_code: "4548-4",
-    biomarker_name_pt: "Hemoglobina glicada",
-    unit_ucum: "%",
+    loincCode: "4548-4",
+    biomarkerNamePt: "Hemoglobina glicada",
+    unitUcum: "%",
     category: "metabolic",
   },
   {
-    loinc_code: "1742-6",
-    biomarker_name_pt: "ALT",
-    unit_ucum: "U/L",
+    loincCode: "1742-6",
+    biomarkerNamePt: "ALT",
+    unitUcum: "U/L",
     category: "metabolic",
   },
 ];
 
 /**
  * Seeds `loinc_ref` with the top-20 Brazilian biomarker entries.
- * Idempotent — re-running this function after rows already exist
- * is a no-op.
+ * Idempotent — re-running after rows exist is a no-op.
  */
 export async function seedLoincRef(
   database: typeof Database,
 ): Promise<{ inserted: number }> {
   const result = await database
     .insert(LoincRef)
-    .values(
-      LOINC_SEED.map((entry) => ({
-        loincCode: entry.loinc_code,
-        biomarkerNamePt: entry.biomarker_name_pt,
-        unitUcum: entry.unit_ucum,
-        category: entry.category,
-      })),
-    )
+    .values(LOINC_SEED)
     .onConflictDoNothing({ target: LoincRef.loincCode })
     .returning({ loincCode: LoincRef.loincCode });
   return { inserted: result.length };

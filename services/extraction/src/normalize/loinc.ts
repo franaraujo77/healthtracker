@@ -21,14 +21,19 @@ export interface LoincResolution {
 }
 
 export async function resolveLoincCode(
-  sql: postgres.Sql,
+  sql: postgres.Sql | postgres.TransactionSql,
   biomarkerNamePt: string,
 ): Promise<LoincResolution | null> {
+  // Story 2.3 R1-P104 — trim before lookup. OCR commonly emits
+  // `" Hemoglobina "` with surrounding whitespace; the seed has the
+  // canonical "Hemoglobina" without padding. Without trim, all
+  // padded matches miss.
+  const normalized = biomarkerNamePt.trim();
   const rows = await sql<
     { loinc_code: string; unit_ucum: string }[]
   >`SELECT loinc_code, unit_ucum
     FROM loinc_ref
-    WHERE LOWER(biomarker_name_pt) = LOWER(${biomarkerNamePt})
+    WHERE LOWER(biomarker_name_pt) = LOWER(${normalized})
     LIMIT 1`;
   const row = rows[0];
   if (!row) return null;

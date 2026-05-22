@@ -27,8 +27,12 @@ export type UploadStatus =
 /**
  * The legal transition arcs — mirrors `UPLOAD_TRANSITIONS` in
  * `packages/api/src/upload-transitions.ts`.
+ *
+ * Exported so the snapshot-sync test (R1-P110) can import both
+ * modules' versions and assert structural equality. SQL drift
+ * detection requires integration testing (deferred F112).
  */
-const UPLOAD_TRANSITIONS = {
+export const UPLOAD_TRANSITIONS = {
   queued: ["processing"],
   processing: ["pending_review", "complete", "failed"],
   pending_review: ["complete", "failed"],
