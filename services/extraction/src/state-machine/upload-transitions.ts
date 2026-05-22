@@ -1,5 +1,7 @@
 import type postgres from "postgres";
 
+import { emitNotificationEvent } from "../notifications/emit.js";
+
 // R2-P113 — `applyUploadTransition` is now called from inside the
 // document-consumer's `sql.begin(async tx => ...)` block (so the
 // terminal status UPDATE is atomic with dispatch + audit). Widen
@@ -135,40 +137,66 @@ export async function applyDeadLetter(
  *
  * Story 2.5 — when the dead-letter transition succeeds, also emit
  * the `notification.upload_failed` audit event + enqueue the
- * `notification.send` job so the patient receives the "we couldn't
- * process this file" push (AC4). Lookup the upload's `patient_id`
- * inside this helper since the pg-boss dead-letter callback only
- * has the upload id.
+ * `notification.send` job (AC4). R1-P151 wraps the whole sequence
+ * in a single transaction; R1-P152 guards against double-firing
+ * when the consumer also dead-lettered (e.g. storage-unavailable
+ * path emits failed-audit + then pg-boss eventually max-retries
+ * the original job into this callback). R1-P162 uses a static
+ * import so NodeNext + tsx test envs resolve cleanly.
  */
 export async function markUploadFailed(
-  sql: WorkerSql,
+  sql: postgres.Sql,
   uploadId: string,
 ): Promise<void> {
-  const result = await applyDeadLetter(sql, {
-    uploadId,
-    metadata: { reason: "retries_exhausted" },
-  });
-  if (!result.updated) {
-    console.warn(
-      `[upload-transitions] markUploadFailed: uploadId=${uploadId} was already terminal — no-op`,
-    );
-    return;
-  }
-  const ownerRows = await sql<{ patient_id: string }[]>`
-    SELECT patient_id FROM uploads WHERE id = ${uploadId}::uuid LIMIT 1
-  `;
-  const patientId = ownerRows[0]?.patient_id;
-  if (!patientId) {
-    console.warn(
-      `[upload-transitions] markUploadFailed: uploadId=${uploadId} row vanished after dead-letter — skipping notification`,
-    );
-    return;
-  }
-  const { emitNotificationEvent } = await import("../notifications/emit.js");
-  await emitNotificationEvent(sql, {
-    uploadId,
-    patientId,
-    kind: "failed",
-    metadata: { reason: "retries_exhausted" },
+  // R1-P151 — the dead-letter callback always passes the top-level
+  // Sql (not a transaction handle), so `sql.begin` is safe here.
+  // `markUploadFailed` is NOT meant to be called from inside an
+  // outer transaction.
+  await sql.begin(async (tx) => {
+    const result = await applyDeadLetter(tx, {
+      uploadId,
+      metadata: { reason: "retries_exhausted" },
+    });
+    if (!result.updated) {
+      console.warn(
+        `[upload-transitions] markUploadFailed: uploadId=${uploadId} was already terminal — no-op`,
+      );
+      return;
+    }
+    const ownerRows = await tx<{ patient_id: string }[]>`
+      SELECT patient_id FROM uploads WHERE id = ${uploadId}::uuid LIMIT 1
+    `;
+    const patientId = ownerRows[0]?.patient_id;
+    if (!patientId) {
+      console.warn(
+        `[upload-transitions] markUploadFailed: uploadId=${uploadId} row vanished after dead-letter — skipping notification`,
+      );
+      return;
+    }
+    // R1-P152 — if a `notification.upload_failed` audit row already
+    // exists for this upload (e.g. the consumer's
+    // storage-unavailable path already emitted), do not double-fire.
+    // The singleton_key on pgboss.job only dedups while the prior
+    // `notification.send` job is still active/created — once it
+    // completes the next enqueue would succeed.
+    const existing = await tx<{ exists: boolean }[]>`
+      SELECT EXISTS (
+        SELECT 1 FROM audit_log
+        WHERE resource_id = ${uploadId}::uuid
+          AND event = 'notification.upload_failed'
+      ) AS exists
+    `;
+    if (existing[0]?.exists) {
+      console.warn(
+        `[upload-transitions] markUploadFailed: uploadId=${uploadId} already has notification.upload_failed audit row — skipping`,
+      );
+      return;
+    }
+    await emitNotificationEvent(tx, {
+      uploadId,
+      patientId,
+      kind: "failed",
+      metadata: { reason: "retries_exhausted" },
+    });
   });
 }

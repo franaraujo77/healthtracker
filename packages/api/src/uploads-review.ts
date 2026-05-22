@@ -502,6 +502,16 @@ export async function confirmReviewFieldAsPatient(
     // `notification.send` is singleton-keyed on `(uploadId, kind)`
     // so an idempotent retry of the patient-confirm path does NOT
     // fire two push notifications for the same completion.
+    //
+    // R1-P163 — there are TWO `notification.upload_complete` emit
+    // sites: this one (patient-confirm path) and the worker's
+    // direct-publish path in `services/extraction/src/consumers/
+    // document.ts`. They are mutually exclusive by state: the worker
+    // only reaches `processing → complete` when no review rows
+    // were written, which means this patient-confirm path never
+    // runs for that upload. If pg-boss ever sequences them in an
+    // unexpected race, the singleton_key dedups the SECOND job
+    // (subject to F140's snapshot guard against schema drift).
     await enqueueNotificationSend(database, {
       uploadId: reviewRow.uploadId,
       patientId,

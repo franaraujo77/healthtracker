@@ -11,6 +11,7 @@ const TAB_BAR_BG = "#F9F7F4";
 // Tabs root for the post-onboarding patient experience (Story 1.2 AC5).
 // Início ships in Epic 1; Configurações lands here in Story 1.4.
 // Story 2.5 — Histórico joins between Início and Configurações.
+// R1-P169 — current tab order: Início / Histórico / Configurações.
 // Fingerprint joins in Epic 3.
 export default function TabsLayout() {
   return (

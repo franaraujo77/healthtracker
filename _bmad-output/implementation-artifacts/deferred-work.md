@@ -268,3 +268,15 @@
 - **F132** Expo `LowConfidenceField` local interface omits `loincCode`, `collectedAtText`, `confidenceScore` — type erases at the tRPC boundary. Use the inferred tRPC output type instead of a hand-rolled interface.
 - **F133** Structured log/metric for the `pending_review` post-confirm branch — already added a `console.warn` (R2-P149); upgrade to a metric so ops dashboards can alert on operator-row orphans.
 - **F134** Snapshot-sync test for `resolveLoincCode` API vs worker SQL — Story 2.3 R1-P110 pattern. The Drizzle and raw-postgres implementations can drift silently.
+
+
+## Story 2.5 — round-1 review deferrals (F135–F142)
+
+- **F135** Expo client hook (`use-push-notifications.ts`) not shipped — Task 6 fully deferred. Permission request, `getExpoPushTokenAsync`, deep-link listener, `SIGNED_OUT` revoke. Without this, AC2/AC3/AC4 are operationally unverifiable; the tRPC mutation is wired and tested. Land in the EAS-build PR.
+- **F136** Expo Push receipt polling — Tickets returned inline may say `ok` while the actual push fails at FCM/APNs. Add a polling consumer on `/--/api/v2/push/getReceipts` with a 24h delivery-rate SLO.
+- **F137** Multi-device push fan-out > 100 tokens — Currently handled via R1-P157 client-side chunking. Long-term, surface ticket failures + add structured logging per token.
+- **F138** Notification preferences (per-event opt-out) — Story 2.8.
+- **F139** Adversarial RLS test for `push_tokens` — Joins F123 family.
+- **F140** SQL snapshot-sync test for `emitNotificationEvent` vs `enqueueNotificationSend` — Two raw-SQL bodies hand-synced.
+- **F141** Lab-name aggregate column on `uploads` — Paired with R1-P156. Eliminates the per-notification SELECT subquery; populated by the dispatcher.
+- **F142** Web push notifications — Explicit defer per UX-DR4 mobile-first.

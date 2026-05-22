@@ -238,7 +238,21 @@ export const uploadsRouter = {
     )
     .query(async ({ ctx, input }) => {
       const patientId = ctx.session.user.id;
-      const cursorDate = input.cursor ? new Date(input.cursor) : null;
+      // R1-P159 — defend against Zod-internals leaking on bad cursors.
+      // Zod already enforces ISO format; this guard catches Date
+      // parsing edge cases (e.g. years > 275760) without surfacing the
+      // raw Error message.
+      let cursorDate: Date | null = null;
+      if (input.cursor) {
+        const parsed = new Date(input.cursor);
+        if (Number.isNaN(parsed.getTime())) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "INVALID_CURSOR",
+          });
+        }
+        cursorDate = parsed;
+      }
       const rows = await ctx.db
         .select({
           id: Uploads.id,

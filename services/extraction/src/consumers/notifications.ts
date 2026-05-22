@@ -34,6 +34,10 @@ interface UploadRow {
   id: string;
   original_filename: string;
   failure_reason: string | null;
+  /** R1-P156 — most-common lab_name across the upload's
+   *  observations; falls back to null when none have published yet
+   *  (typical for `pending_review` or `failed` notifications). */
+  lab_name: string | null;
 }
 
 interface NotificationCopy {
@@ -41,19 +45,28 @@ interface NotificationCopy {
   body: string;
 }
 
+// R1-P156 — AC2 says the body should identify the upload by lab
+// name when available, falling back to the original filename. The
+// notifications-consumer SELECT joins `observations` for the most
+// common lab name. `pending_review` + `failed` paths typically
+// won't have published observations, so they fall back as expected.
+function bodyForUpload(u: UploadRow): string {
+  return truncate(u.lab_name ?? u.original_filename, 60);
+}
+
 const COPY: Record<NotificationKind, (upload: UploadRow) => NotificationCopy> =
   {
     complete: (u) => ({
       title: "Seus resultados estão prontos para ver",
-      body: truncate(u.original_filename, 60),
+      body: bodyForUpload(u),
     }),
     pending_review: (u) => ({
       title: "Um resultado precisa da sua confirmação",
-      body: truncate(u.original_filename, 60),
+      body: bodyForUpload(u),
     }),
     failed: (u) => ({
       title: "Não conseguimos processar este arquivo. Toque para ver as opções.",
-      body: truncate(u.original_filename, 60),
+      body: bodyForUpload(u),
     }),
   };
 
@@ -118,9 +131,20 @@ export async function registerNotificationsConsumer(
         const patientId = job.data.patientId;
 
         const uploads = await deps.sql<UploadRow[]>`
-          SELECT id, original_filename, metadata->>'reason' AS failure_reason
-          FROM uploads
-          WHERE id = ${uploadId}::uuid
+          SELECT
+            u.id,
+            u.original_filename,
+            u.metadata->>'reason' AS failure_reason,
+            (
+              SELECT lab_name
+              FROM observations
+              WHERE upload_id = u.id AND lab_name IS NOT NULL
+              GROUP BY lab_name
+              ORDER BY count(*) DESC
+              LIMIT 1
+            ) AS lab_name
+          FROM uploads u
+          WHERE u.id = ${uploadId}::uuid
           LIMIT 1
         `;
         const upload = uploads[0];
@@ -184,31 +208,44 @@ export async function registerNotificationsConsumer(
  * Default Expo Push client — POSTs to the public Expo Push API.
  * Anonymous use is allowed for `ExponentPushToken[...]` recipients;
  * an access token improves rate limits but is optional.
+ *
+ * R1-P157 — chunk messages in groups of 100 (the Expo API's per-call
+ * cap). Patients with > 100 active devices would otherwise hit a
+ * 413. Each chunk's tickets are appended to the response array in
+ * the same order, preserving the consumer's positional ticket→token
+ * mapping.
  */
+const EXPO_PUSH_BATCH_SIZE = 100;
+
 export function createDefaultExpoPushClient(opts?: {
   accessToken?: string;
 }): ExpoPushClient {
   return {
     async sendBatch(messages) {
       if (messages.length === 0) return [];
-      const response = await fetch("https://exp.host/--/api/v2/push/send", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-          ...(opts?.accessToken
-            ? { Authorization: `Bearer ${opts.accessToken}` }
-            : {}),
-        },
-        body: JSON.stringify(messages),
-      });
-      if (!response.ok) {
-        throw new Error(
-          `Expo Push API error: ${response.status} ${response.statusText}`,
-        );
+      const allTickets: ExpoPushTicket[] = [];
+      for (let i = 0; i < messages.length; i += EXPO_PUSH_BATCH_SIZE) {
+        const chunk = messages.slice(i, i + EXPO_PUSH_BATCH_SIZE);
+        const response = await fetch("https://exp.host/--/api/v2/push/send", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            ...(opts?.accessToken
+              ? { Authorization: `Bearer ${opts.accessToken}` }
+              : {}),
+          },
+          body: JSON.stringify(chunk),
+        });
+        if (!response.ok) {
+          throw new Error(
+            `Expo Push API error: ${response.status} ${response.statusText}`,
+          );
+        }
+        const json = (await response.json()) as { data?: ExpoPushTicket[] };
+        allTickets.push(...(json.data ?? []));
       }
-      const json = (await response.json()) as { data?: ExpoPushTicket[] };
-      return json.data ?? [];
+      return allTickets;
     },
   };
 }

@@ -53,12 +53,20 @@ export const HISTORICO_RECOVERY_RESEND_PT_BR = "Enviar novamente";
 export const HISTORICO_RECOVERY_PHOTO_PT_BR = "Enviar uma foto";
 export const HISTORICO_RECOVERY_SKIP_PT_BR = "Pular este resultado";
 
+// R1-P153 — failed-card recovery CTAs route here with a pre-selected
+// source so the import flow opens the right picker (file vs camera).
+// Story 1.5 / 2.2's `ImportFlow` accepts a `source` query param.
+export function postOnboardingImportRoute(
+  source: "file" | "photo" = "file",
+): string {
+  return `/inicio?source=${source === "photo" ? "post_onboarding_photo" : "post_onboarding"}`;
+}
+
 export const FAILURE_REASON_LABELS_PT_BR: Record<string, string> = {
   retries_exhausted: "Tentamos várias vezes mas algo deu errado.",
-  empty_extraction: "Não conseguimos ler nenhum valor neste arquivo.",
   no_publishable_fields: "Os valores extraídos não puderam ser publicados.",
   storage_unavailable: "O arquivo não está acessível no momento.",
-  no_readable_text: "O arquivo não tem texto legível.",
+  no_readable_text: "Não conseguimos ler nenhum valor neste arquivo.",
 };
 
 const FAILURE_REASON_DEFAULT_PT_BR =

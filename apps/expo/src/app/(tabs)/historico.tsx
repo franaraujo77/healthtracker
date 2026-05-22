@@ -16,6 +16,8 @@ import {
   HISTORICO_RECOVERY_SKIP_PT_BR,
   HISTORICO_TITLE_PT_BR,
   INICIO_ROUTE,
+  postOnboardingImportRoute,
+  UPLOAD_DETAIL_ROUTE,
   UPLOAD_STATUS_LABELS_PT_BR,
 } from "@healthtracker/validators";
 
@@ -36,7 +38,10 @@ function Card({ row }: { row: UploadRow }) {
   const isFailed = row.status === "failed";
   const onTap = () => {
     if (!tappable) return;
-    router.push(`/uploads/${row.id}`);
+    // R1-P154 — use the canonical UPLOAD_DETAIL_ROUTE; the
+    // hand-built `/uploads/<id>` route doesn't exist under the
+    // `(tabs)` group and would 404.
+    router.push(UPLOAD_DETAIL_ROUTE(row.id));
   };
   return (
     <YStack
@@ -47,6 +52,10 @@ function Card({ row }: { row: UploadRow }) {
       borderColor="$border"
       backgroundColor="$surfaceElevated"
       onPress={tappable ? onTap : undefined}
+      accessibilityRole={tappable ? "button" : "text"}
+      accessibilityHint={
+        tappable ? "Toque para abrir o detalhe deste upload" : undefined
+      }
     >
       <Text fontWeight="600" color="$textPrimary">
         {row.originalFilename}
@@ -60,10 +69,14 @@ function Card({ row }: { row: UploadRow }) {
           <Text fontSize="$2" color="$textSecondary">
             {failureReasonLabel(row.failureReason)}
           </Text>
-          <Button onPress={() => router.push(INICIO_ROUTE)}>
+          <Button
+            onPress={() => router.push(postOnboardingImportRoute("file"))}
+          >
             {HISTORICO_RECOVERY_RESEND_PT_BR}
           </Button>
-          <Button onPress={() => router.push(INICIO_ROUTE)}>
+          <Button
+            onPress={() => router.push(postOnboardingImportRoute("photo"))}
+          >
             {HISTORICO_RECOVERY_PHOTO_PT_BR}
           </Button>
           <Button>{HISTORICO_RECOVERY_SKIP_PT_BR}</Button>
@@ -82,7 +95,13 @@ export default function HistoricoScreen() {
     ),
   );
 
-  const rows = (query.data?.rows ?? []).filter((r) => !dismissed.has(r.id));
+  const rawRows = query.data?.rows ?? [];
+  const rows = rawRows.filter((r) => !dismissed.has(r.id));
+  // R1-P160 — empty state must distinguish "no uploads ever" from
+  // "all uploads dismissed". The original copy ("Você ainda não
+  // enviou nenhum exame") only fits the first case.
+  const allDismissed =
+    query.isSuccess && rawRows.length > 0 && rows.length === 0;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: BACKGROUND_PRIMARY }}>
@@ -103,7 +122,7 @@ export default function HistoricoScreen() {
           {query.isError ? (
             <Text accessibilityRole="alert">{HISTORICO_ERROR_PT_BR}</Text>
           ) : null}
-          {query.isSuccess && rows.length === 0 ? (
+          {query.isSuccess && rawRows.length === 0 ? (
             <YStack gap="$2">
               <Text fontSize="$4">{HISTORICO_EMPTY_HEADLINE_PT_BR}</Text>
               <Button onPress={() => router.push(INICIO_ROUTE)}>
@@ -111,20 +130,18 @@ export default function HistoricoScreen() {
               </Button>
             </YStack>
           ) : null}
+          {allDismissed ? (
+            <YStack gap="$2">
+              <Text fontSize="$4">Todos os resultados foram pulados.</Text>
+              <Button onPress={() => setDismissed(new Set())}>
+                Mostrar pulados
+              </Button>
+            </YStack>
+          ) : null}
+          {/* R1-P165 — drop the dead `onTouchEnd` block; the dismiss
+              is handled by the Button below the Card. */}
           {rows.map((row) => (
-            <YStack
-              key={row.id}
-              onTouchEnd={
-                row.status === "failed"
-                  ? () => {
-                      // "Pular" sets a local-state dismiss.
-                      // Touch is wired on the surrounding YStack rather
-                      // than the button itself because the button is
-                      // the third in the recovery stack.
-                    }
-                  : undefined
-              }
-            >
+            <YStack key={row.id}>
               <Card row={row} />
               {row.status === "failed" ? (
                 <Button

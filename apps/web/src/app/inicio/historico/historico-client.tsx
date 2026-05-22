@@ -17,6 +17,7 @@ import {
   HISTORICO_RECOVERY_SKIP_PT_BR,
   HISTORICO_TITLE_PT_BR,
   INICIO_ROUTE,
+  postOnboardingImportRoute,
   UPLOAD_DETAIL_ROUTE,
   UPLOAD_STATUS_LABELS_PT_BR,
 } from "@healthtracker/validators";
@@ -45,7 +46,10 @@ export function HistoricoClient() {
     ),
   );
 
-  const rows = (query.data?.rows ?? []).filter((r) => !dismissed.has(r.id));
+  const rawRows = query.data?.rows ?? [];
+  const rows = rawRows.filter((r) => !dismissed.has(r.id));
+  const allDismissed =
+    !query.isLoading && rawRows.length > 0 && rows.length === 0;
 
   if (query.isLoading) {
     return <p className="text-stone-700">{HISTORICO_LOADING_PT_BR}</p>;
@@ -57,7 +61,7 @@ export function HistoricoClient() {
       </p>
     );
   }
-  if (rows.length === 0) {
+  if (rawRows.length === 0) {
     return (
       <section className="space-y-4">
         <h1 className="text-2xl font-semibold">{HISTORICO_TITLE_PT_BR}</h1>
@@ -65,6 +69,15 @@ export function HistoricoClient() {
         <Button onPress={() => router.push(INICIO_ROUTE)}>
           {HISTORICO_EMPTY_CTA_PT_BR}
         </Button>
+      </section>
+    );
+  }
+  if (allDismissed) {
+    return (
+      <section className="space-y-4">
+        <h1 className="text-2xl font-semibold">{HISTORICO_TITLE_PT_BR}</h1>
+        <p className="text-stone-700">Todos os resultados foram pulados.</p>
+        <Button onPress={() => setDismissed(new Set())}>Mostrar pulados</Button>
       </section>
     );
   }
@@ -92,10 +105,18 @@ export function HistoricoClient() {
                     {failureReasonLabel(row.failureReason)}
                   </p>
                   <div className="flex gap-2">
-                    <Button onPress={() => router.push(INICIO_ROUTE)}>
+                    <Button
+                      onPress={() =>
+                        router.push(postOnboardingImportRoute("file"))
+                      }
+                    >
                       {HISTORICO_RECOVERY_RESEND_PT_BR}
                     </Button>
-                    <Button onPress={() => router.push(INICIO_ROUTE)}>
+                    <Button
+                      onPress={() =>
+                        router.push(postOnboardingImportRoute("photo"))
+                      }
+                    >
                       {HISTORICO_RECOVERY_PHOTO_PT_BR}
                     </Button>
                     <Button

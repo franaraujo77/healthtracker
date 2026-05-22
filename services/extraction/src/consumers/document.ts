@@ -127,25 +127,31 @@ export async function handleDocumentJob(
       `[extraction.document] uploadId=${uploadId}: storage download failed; dead-lettering upload`,
       err,
     );
-    const dl = await applyDeadLetter(deps.sql, {
-      uploadId,
-      metadata: {
-        reason: "storage_unavailable",
-        error: err instanceof Error ? err.message : String(err),
-      },
-    });
-    if (!dl.updated) {
-      console.warn(
-        `[extraction.document] uploadId=${uploadId}: dead-letter no-op (row already terminal)`,
-      );
-      return;
-    }
-    // Story 2.5 — emit AC4 push for storage-perma-failure path.
-    await emitNotificationEvent(deps.sql, {
-      uploadId,
-      patientId,
-      kind: "failed",
-      metadata: { reason: "storage_unavailable" },
+    // R1-P150 — wrap dead-letter + notification emission in a single
+    // transaction. Without this, a crash between the two writes
+    // leaves the upload `failed` with no push fired; the pg-boss
+    // retry sees the terminal state and acks silently → AC4
+    // silently violated.
+    await deps.sql.begin(async (tx) => {
+      const dl = await applyDeadLetter(tx, {
+        uploadId,
+        metadata: {
+          reason: "storage_unavailable",
+          error: err instanceof Error ? err.message : String(err),
+        },
+      });
+      if (!dl.updated) {
+        console.warn(
+          `[extraction.document] uploadId=${uploadId}: dead-letter no-op (row already terminal)`,
+        );
+        return;
+      }
+      await emitNotificationEvent(tx, {
+        uploadId,
+        patientId,
+        kind: "failed",
+        metadata: { reason: "storage_unavailable" },
+      });
     });
     return;
   }
@@ -198,8 +204,10 @@ export async function handleDocumentJob(
       if (fields.length === 0 || !hasWork) {
         // Genuine empty extraction OR every field was quarantined
         // by per-field try/catch in dispatch (R2-P121). Dead-letter.
+        // R1-P161 — `no_readable_text` matches AC4's vocabulary; the
+        // old `empty_extraction` reason had no consumer mapping.
         const reason =
-          fields.length === 0 ? "empty_extraction" : "no_publishable_fields";
+          fields.length === 0 ? "no_readable_text" : "no_publishable_fields";
         const dl = await applyDeadLetter(tx, {
           uploadId,
           metadata: {

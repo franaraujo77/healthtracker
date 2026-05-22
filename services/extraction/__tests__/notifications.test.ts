@@ -6,6 +6,7 @@ const UPLOAD = {
   id: "11111111-1111-1111-1111-111111111111",
   original_filename: "hemograma-2024-03-15.pdf",
   failure_reason: null,
+  lab_name: null,
 };
 
 const TOKENS = ["ExponentPushToken[aaa]", "ExponentPushToken[bbb]"];
@@ -54,5 +55,14 @@ describe("buildNotificationPayload", () => {
 
   it("emits zero messages for an empty token list", () => {
     expect(buildNotificationPayload(UPLOAD, "complete", [])).toEqual([]);
+  });
+
+  it("R1-P156 — prefers lab_name over original_filename when available", () => {
+    const out = buildNotificationPayload(
+      { ...UPLOAD, lab_name: "Fleury" },
+      "complete",
+      [TOKENS[0]!],
+    );
+    expect(out[0]?.body).toBe("Fleury");
   });
 });

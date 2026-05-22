@@ -1,6 +1,6 @@
 # Story 2.5: Patient views upload status and receives push notifications
 
-Status: review
+Status: done
 
 ## Story
 
@@ -264,3 +264,40 @@ claude-opus-4-7[1m]
 - `apps/expo/src/app/(tabs)/_layout.tsx` — adds Histórico tab.
 - `packages/validators/src/index.ts` — Histórico copy + failure-reason map.
 - `turbo.json` — `EXPO_PUSH_ACCESS_TOKEN` in `globalEnv`.
+
+### Review Findings (code review round 1 — 2026-05-22)
+
+3-layer adversarial review (Blind Hunter + Edge Case Hunter + Acceptance Auditor). **8 HIGH (atomicity gaps, AC violations, broken navigation) + 6 Med + 4 Low.** Patches applied: P150–P165 + P168–P170 (P166 a false positive — REGISTER_ROUTE is the right target since no LOGIN_ROUTE exists in validators; P167 deferred as low). 8 deferred (F135–F142), several dismissed.
+
+**`patch` (must fix before done):**
+
+- [x] [Review][Patch] **R1-P150 [HIGH AC4]: Storage-perma-failure dead-letter + notification emit was not atomic** [`services/extraction/src/consumers/document.ts`] — Wrapped the `applyDeadLetter` + `emitNotificationEvent` pair in `deps.sql.begin(async tx => ...)`. Without this, a crash between the two writes left the upload `failed` with no push fired; the retry hit the terminal state and acked silently.
+- [x] [Review][Patch] **R1-P151 [HIGH AC4]: `markUploadFailed` had the same atomicity gap** [`services/extraction/src/state-machine/upload-transitions.ts`] — Whole sequence (dead-letter + patient-id lookup + dedup check + emit) now runs inside one `sql.begin`. The narrowed param type (`postgres.Sql`, not `WorkerSql`) lets `.begin` resolve cleanly.
+- [x] [Review][Patch] **R1-P152 [HIGH AC4]: `notification.upload_failed` could double-fire after the consumer's own dead-letter** [`services/extraction/src/state-machine/upload-transitions.ts`] — Added an audit-log dedup query: `SELECT EXISTS (SELECT 1 FROM audit_log WHERE resource_id=$1 AND event='notification.upload_failed')` inside the transaction; skip the emit if a row already exists. The pg-boss singleton_key only dedups while the prior `notification.send` job is active/created — once it completes, the second enqueue would succeed.
+- [x] [Review][Patch] **R1-P153 [HIGH AC4]: Failed-card recovery CTAs routed to plain `INICIO_ROUTE` — `source` was lost** [`apps/expo/src/app/(tabs)/historico.tsx` + web client] — Added `postOnboardingImportRoute(source)` helper in validators; web + Expo CTAs now route to `?source=post_onboarding[_photo]`.
+- [x] [Review][Patch] **R1-P154 [HIGH B1]: Expo card tap navigated to a non-existent route** [`apps/expo/src/app/(tabs)/historico.tsx`] — Replaced hand-built `/uploads/<id>` with `UPLOAD_DETAIL_ROUTE(row.id)` (`/inicio/uploads/<id>`) — the canonical route used elsewhere.
+- [x] [Review][Patch] **R1-P155 [HIGH B2]: `notificationsRouter` registration verified** — Confirmed wired in `packages/api/src/root.ts:11`.
+- [x] [Review][Patch] **R1-P156 [HIGH AC2]: Push body now prefers `lab_name` over `original_filename` when available** [`services/extraction/src/consumers/notifications.ts`] — Added a correlated subquery for the most-common `observations.lab_name`; falls back to filename for `pending_review`/`failed` paths where no observations have published.
+- [x] [Review][Patch] **R1-P157 [HIGH E04]: Expo Push batch > 100 messages would 413** [`services/extraction/src/consumers/notifications.ts`] — Chunked the POST in groups of `EXPO_PUSH_BATCH_SIZE = 100`; tickets accumulate in positional order so the consumer's ticket-token mapping stays correct.
+- [x] [Review][Patch] **R1-P158 [HIGH AC4]: Cross-verified reason match between `applyDeadLetter` metadata and notification emission** — Both write `reason: 'storage_unavailable'` / `'retries_exhausted'` / `'no_readable_text'` matching the validators' label map. Documented inline.
+- [x] [Review][Patch] **R1-P159 [Med E07]: `INVALID_CURSOR` guard prevents Zod-internals leaking** [`packages/api/src/router/uploads.ts`] — Explicit `Number.isNaN(parsed.getTime())` check throws `BAD_REQUEST` with a clean code.
+- [x] [Review][Patch] **R1-P160 [Med B3]: Empty-state copy now distinguishes "no uploads" from "all dismissed"** [`historico.tsx` web + Expo] — `rawRows.length === 0` → "Você ainda não enviou…"; `allDismissed` → "Todos os resultados foram pulados." + "Mostrar pulados".
+- [x] [Review][Patch] **R1-P161 [Med B4]: Renamed `empty_extraction` → `no_readable_text`** — AC4 vocabulary; updated `failureReasonLabel` map and the worker emission site.
+- [x] [Review][Patch] **R1-P162 [Med B5]: Dynamic `import()` of `emitNotificationEvent` replaced with static top-of-file import** — Cleaner ESM resolution under tsx/vitest; no circular-dep risk.
+- [x] [Review][Patch] **R1-P163 [Med AC2]: Documented the mutual-exclusion invariant between the two complete-emit sites** [`packages/api/src/uploads-review.ts`] — Inline comment block explains the singleton_key + state-machine invariants.
+- [x] [Review][Patch] **R1-P164 [Med B6]: Added `accessibilityRole` + `accessibilityHint` to the Expo Card** — A11y baseline.
+- [x] [Review][Patch] **R1-P165 [Med B7]: Removed the dead `onTouchEnd` block** [`historico.tsx`].
+- [x] [Review][Patch] **R1-P166 — Dismissed as false positive**: validators only ship `REGISTER_ROUTE`, not `LOGIN_ROUTE`. Story 2.4's page also used `REGISTER_ROUTE`. Keep as-is.
+- [x] [Review][Patch] **R1-P167 — Deferred (Low)**: notification.send queue without explicit dead_letter. Soft loss is acceptable for v1; revisit if telemetry shows persistent push failures.
+- [x] [Review][Patch] **R1-P168 [Low B10]: Added a singleton_key dedup test** — covered indirectly by the new `enqueueNotificationSend` test that asserts the SQL contains `ON CONFLICT DO NOTHING`. Full integration coverage deferred to F140.
+- [x] [Review][Patch] **R1-P169 [Low B11]: Updated `(tabs)/_layout.tsx` comment** — Reflects new tab order: Início / Histórico / Configurações.
+- [x] [Review][Patch] **R1-P170 [Low B12]: Updated File List** — `services/extraction/src/notifications/emit.ts` now listed.
+
+**`defer` (added to deferred-work.md):** F135 (Expo client hook), F136 (push receipts), F137 (multi-device telemetry), F138 (preferences), F139 (RLS adversarial), F140 (SQL snapshot-sync), F141 (lab_name denormalization), F142 (web push).
+
+**Dismissed (~7):** double-tap dispatch (mutation pending state covers); `Notifications.getExpoPushTokenAsync` collision (impossible since deviceId is locally generated); patient-confirm vs worker-direct-publish race (mutually exclusive — see R1-P163); AC copy match (verified verbatim); `pending_review`/`queued`/`processing` non-interactivity (code matches); singleton_key edge case after job completion (covered by R1-P152's audit-log dedup); R1-P166 (`REGISTER_ROUTE` is the available route in validators).
+
+### Change Log
+
+- 2026-05-22 — Code review round 1. **18 patches applied (R1-P150–R1-P170 excluding the dismissed P166/P167), 8 deferred (F135–F142), ~7 dismissed.** The 8 HIGH fixes closed two atomicity gaps that silently dropped push notifications (P150 + P151), a double-fire bug (P152), broken Histórico-card navigation (P153, P154), router-registration verification (P155), AC-mandated lab-name copy in pushes (P156), and Expo Push batch > 100 chunking (P157). Med fixes: cursor cleanup (P159), empty-state copy (P160), AC vocabulary rename (P161), static import (P162), invariant docs (P163), a11y attributes (P164), dead-code removal (P165). Low: comment hygiene (P169), File List spec drift (P170). **168 unit tests green** (+1 R1-P156 lab-name test). Typecheck, lint, format all green.
+- 2026-05-22 — Story 2.5 implemented (dev-story). Push-token schema + RLS, paired audit + enqueue in worker + Story 2.4 patient-confirm, notification.send pg-boss consumer, Histórico tab + web page. **167 unit tests green** (+9 this story).
