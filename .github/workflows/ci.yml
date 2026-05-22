@@ -162,11 +162,22 @@ jobs:
       # 'public.<X>' in the schema cache`. `db:push` is idempotent and
       # safe to run against the vanilla Supabase start.
       - name: Push schema to local Supabase
-        # Fresh CI Supabase has no prior schema, so `drizzle-kit push`
-        # only creates tables — no destructive operations, no prompts.
-        # `db:push` itself runs via `dotenv -e ../../.env --` and inherits
-        # the DATABASE_URL written to $GITHUB_ENV in the prior step.
-        run: pnpm db:push
+        # Call `drizzle-kit push --force` directly rather than going
+        # through `pnpm db:push`:
+        #   1. The `push` task is marked `"interactive": true` in
+        #      `packages/db/turbo.json` (because the local-dev usage
+        #      prompts on destructive ops). Turbo refuses to run
+        #      interactive tasks in CI without a TTY.
+        #   2. `--force` skips drizzle-kit's confirmation prompts for
+        #      any operation drizzle-kit considers destructive. A
+        #      fresh CI Supabase has no prior schema so all ops are
+        #      `CREATE TABLE` / `CREATE INDEX`, but `drizzle-kit
+        #      push` still emits a "press Enter to continue" prompt
+        #      in non-TTY environments without `--force`.
+        # `DATABASE_URL` is in the GitHub env from the
+        # `Export local Supabase env` step above; no `.env` load needed.
+        working-directory: packages/db
+        run: pnpm exec drizzle-kit push --force
         env:
           SKIP_ENV_VALIDATION: "1"
 
