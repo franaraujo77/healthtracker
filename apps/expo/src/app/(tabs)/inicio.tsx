@@ -27,6 +27,7 @@ export default function Inicio() {
   const [nowTick, setNowTick] = useState(() => Date.now());
   const {
     pickDocuments,
+    pickImages,
     uploadFiles,
     isUploading,
     progressByPath,
@@ -87,6 +88,54 @@ export default function Inicio() {
     }
   }
 
+  // Story 2.2 — the sheet's library + camera rows funnel through
+  // `pickImages` with the matching source. Share the re-entry guard
+  // with the PDF picker: only one picker can be open at a time.
+  //
+  // Round-1 P80 — `pickImages` returns `rejected` entries on
+  // permission denial, launch error, or unsupported mime (P75/P77);
+  // for Início there is no rejection surface yet (Início renders
+  // only ExtractionPulse + EmptyStateRecord — no rejection list).
+  // We `console.warn` the rejections so they appear in Sentry /
+  // dev console; a patient-facing surface is deferred (see F95).
+  async function handlePickImageLibrary() {
+    if (isPickingRef.current) return;
+    isPickingRef.current = true;
+    try {
+      const result = await pickImages({ source: "library" });
+      if (result.rejected.length > 0) {
+        console.warn(
+          "[inicio] image library picker rejections",
+          result.rejected,
+        );
+      }
+      if (result.files.length === 0) return;
+      await uploadFiles(result.files);
+    } catch (err) {
+      console.warn("[inicio] image library upload error", err);
+    } finally {
+      setSheetOpen(false);
+      isPickingRef.current = false;
+    }
+  }
+  async function handlePickImageCamera() {
+    if (isPickingRef.current) return;
+    isPickingRef.current = true;
+    try {
+      const result = await pickImages({ source: "camera" });
+      if (result.rejected.length > 0) {
+        console.warn("[inicio] camera picker rejections", result.rejected);
+      }
+      if (result.files.length === 0) return;
+      await uploadFiles(result.files);
+    } catch (err) {
+      console.warn("[inicio] camera upload error", err);
+    } finally {
+      setSheetOpen(false);
+      isPickingRef.current = false;
+    }
+  }
+
   // Compute ExtractionPulse render inputs from the active uploads.
   const filenames = activeUris.map((uri) => progressByPath[uri]?.name ?? uri);
   const earliestStart = activeUris.reduce<number | undefined>((min, uri) => {
@@ -122,7 +171,10 @@ export default function Inicio() {
           open={sheetOpen}
           onOpenChange={setSheetOpen}
           onPickPdf={() => void handlePickPdf()}
+          onPickImageFromLibrary={() => void handlePickImageLibrary()}
+          onPickImageFromCamera={() => void handlePickImageCamera()}
           pdfDisabled={isUploading}
+          photoDisabled={isUploading}
         />
       </YStack>
     </SafeAreaView>

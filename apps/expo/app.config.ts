@@ -33,6 +33,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       // per UX-DR20.
       NSPhotoLibraryUsageDescription:
         "Permita o acesso à sua biblioteca de fotos para enviar resultados de exames.",
+      // Story 2.2 FR2 — required when the app calls
+      // `ImagePicker.launchCameraAsync` for direct camera capture
+      // (AC2). pt-BR per UX-DR20; names the action so App Store
+      // review sees context, not just "this app".
+      NSCameraUsageDescription:
+        "Permita o acesso à câmera para fotografar resultados de exames.",
     },
   },
   android: {

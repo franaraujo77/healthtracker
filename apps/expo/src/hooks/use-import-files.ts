@@ -2,9 +2,15 @@ import { useCallback, useState } from "react";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 
-import type { UploadMimeType, UploadSource } from "@healthtracker/validators";
+import type {
+  PickImageSource,
+  UploadMimeType,
+  UploadSource,
+} from "@healthtracker/validators";
 import {
+  CAMERA_PERMISSION_PT_BR,
   countPdfPages,
+  GENERIC_UPLOAD_ERROR_MESSAGE_PT_BR,
   isUploadMimeType,
   PHOTO_LIBRARY_PERMISSION_PT_BR,
   UPLOAD_ALLOWED_MIME_TYPES,
@@ -249,53 +255,122 @@ export function useImportFiles(options: UseImportFilesOptions) {
   }, [pickDocumentsAccept]);
 
   /**
-   * Opens the image picker (JPEG/PNG/HEIC from photo library).
-   * Granular permission prompt handled by `expo-image-picker`.
+   * Story 2.2 — opens either the image picker (JPEG/PNG/HEIC from
+   * photo library) or the camera, based on `args.source`. Both modes
+   * share the same `validatePicked` pipeline. Camera mode requests
+   * the camera permission via `requestCameraPermissionsAsync`; the
+   * library mode keeps `requestMediaLibraryPermissionsAsync`.
+   *
+   * Permission denial is surfaced as a `rejected` entry (Story 1.5
+   * P43 pattern); the consuming screen renders rejections inline.
    */
-  const pickImages = useCallback(async (): Promise<PickResult> => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      // Review P43 — surface the denied permission instead of silently
-      // returning empty. The screen renders rejections in the same row
-      // as validation errors, so the patient sees an actionable
-      // explanation.
-      return {
-        files: [],
-        rejected: [
-          {
-            uri: "permission-denied",
-            name: "",
+  const pickImages = useCallback(
+    async (args: { source: PickImageSource }): Promise<PickResult> => {
+      const isCamera = args.source === "camera";
+      const permission = isCamera
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        return {
+          files: [],
+          rejected: [
+            {
+              uri: "permission-denied",
+              name: "",
+              mimeType: "",
+              size: 0,
+              validationError: isCamera
+                ? CAMERA_PERMISSION_PT_BR
+                : PHOTO_LIBRARY_PERMISSION_PT_BR,
+            },
+          ],
+        };
+      }
+      // Round-1 P77 — wrap the launch in try/catch so an iOS picker
+      // error, mid-call permission revocation, or hardware-unavailable
+      // bubble surfaces as a `rejected` entry instead of an unhandled
+      // promise rejection. Caller-side `finally` still resets the
+      // sheet / re-entry guard via its own try/finally pair, but the
+      // patient also needs to see a row explaining what happened.
+      let result;
+      try {
+        result = isCamera
+          ? await ImagePicker.launchCameraAsync({
+              mediaTypes: "images",
+              quality: 1,
+              // Camera mode is single-capture by design (AC2 doesn't
+              // require multi-capture).
+            })
+          : await ImagePicker.launchImageLibraryAsync({
+              mediaTypes: "images",
+              allowsMultipleSelection: true,
+              quality: 1,
+            });
+      } catch {
+        return {
+          files: [],
+          rejected: [
+            {
+              uri: isCamera ? "camera-launch-error" : "library-launch-error",
+              name: "",
+              mimeType: "",
+              size: 0,
+              validationError: GENERIC_UPLOAD_ERROR_MESSAGE_PT_BR,
+            },
+          ],
+        };
+      }
+      if (result.canceled) return { files: [], rejected: [] };
+      // Round-1 P78 — guard against an empty `result.assets` (TS
+      // types it as non-nullable post the `canceled` narrowing, but
+      // an empty array is still possible). Without this, the
+      // downstream `for (const asset of result.assets)` would silently
+      // produce a no-op upload.
+      const assets = result.assets;
+      if (assets.length === 0) return { files: [], rejected: [] };
+      const files: PickedFile[] = [];
+      const rejected: PickedFileWithError[] = [];
+      for (const asset of assets) {
+        // Round-1 P75 — when both `asset.mimeType` AND the extension
+        // inference fail, REJECT the asset rather than silently
+        // defaulting to `image/jpeg`. Android OEM cameras can return
+        // HEIC/HEIF/PNG; mis-labeling as JPEG passes the allowlist
+        // but corrupts downstream OCR (Textract dispatches by
+        // content-type).
+        const inferredMime =
+          asset.mimeType ?? inferMimeFromExtension(asset.fileName ?? "");
+        if (!inferredMime) {
+          rejected.push({
+            uri: asset.uri,
+            name: asset.fileName ?? `image-${Date.now()}`,
             mimeType: "",
-            size: 0,
-            validationError: PHOTO_LIBRARY_PERMISSION_PT_BR,
-          },
-        ],
-      };
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: "images",
-      allowsMultipleSelection: true,
-      quality: 1,
-    });
-    if (result.canceled) return { files: [], rejected: [] };
-    const files: PickedFile[] = [];
-    const rejected: PickedFileWithError[] = [];
-    for (const asset of result.assets) {
-      const candidate = {
-        uri: asset.uri,
-        name: asset.fileName ?? `image-${Date.now()}.jpg`,
-        mimeType:
-          asset.mimeType ??
-          inferMimeFromExtension(asset.fileName ?? "") ??
-          "image/jpeg",
-        size: asset.fileSize ?? 0,
-      };
-      const validated = validatePicked(candidate);
-      if ("validationError" in validated) rejected.push(validated);
-      else files.push(validated);
-    }
-    return { files, rejected };
-  }, []);
+            size: asset.fileSize ?? 0,
+            validationError: UPLOAD_UNSUPPORTED_MIME_PT_BR,
+          });
+          continue;
+        }
+        // Round-1 P79 — Android can omit `fileSize` on some OEMs for
+        // camera captures. Without a fallback, the asset is rejected
+        // as `UPLOAD_EMPTY_FILE_PT_BR` (size <= 0). Skip the
+        // empty-file check for camera captures with missing fileSize;
+        // the server-side `confirmImport` re-validates the actual
+        // size against `UPLOAD_MAX_BYTES` via `statLabUploadObject`
+        // (Story 1.5 P51 cap), so the client-side fallback is safe.
+        const inferredSize = asset.fileSize ?? (isCamera ? 1 : 0); // sentinel "non-empty"; server re-checks
+        const candidate = {
+          uri: asset.uri,
+          name: asset.fileName ?? `image-${Date.now()}.jpg`,
+          mimeType: inferredMime,
+          size: inferredSize,
+        };
+        const validated = validatePicked(candidate);
+        if ("validationError" in validated) rejected.push(validated);
+        else files.push(validated);
+      }
+      return { files, rejected };
+    },
+    [],
+  );
 
   /**
    * Two-step upload per file: requestImport → PUT to signed URL →

@@ -1,5 +1,14 @@
 # Deferred Work
 
+## Deferred from: code review of story-2-2 (2026-05-22)
+
+- **F90: Verify `expo-image-picker`'s config plugin registers `android.permission.CAMERA` automatically** — without it, `launchCameraAsync` may silently fail on Android. Hand-test required; otherwise add `CAMERA` to `android.permissions` in `app.config.ts`.
+- **F95: No rejection surface on Expo Início** — `pickImages` / `pickDocuments` return `rejected` entries on permission denial / launch error / unsupported mime; the Web Início has `lastOutcomes` to display them, but Expo Início only renders ExtractionPulse + EmptyStateRecord. Rejections currently log via `console.warn` (P80). Add a patient-facing surface (toast or inline list) when Story 2.5's status surface lands.
+- **F91: Desktop OS file picker may grey out HEIC files** with `accept="image/jpeg,image/png,image/heic"` — broaden to `accept="image/*"` and rely on server validation, OR document via the camera hint.
+- **F92: iOS camera capture at `quality: 1` routinely produces HEIC files > 5 MB** — hits `UPLOAD_FILE_TOO_LARGE_PT_BR`. Either lower `quality` (lossy; surprises the patient) or add `expo-image-manipulator` for transparent compression.
+- **F93: ExtractionPulse `failed` state visual distinction for low-vision users** — `failed` circle uses `$biomarkerDeviation` (amber) fill with no border; visually similar to `review-needed` border (same token) when animation is off. Add an icon or distinct color token.
+- **F94: ExtractionPulse callbacks have no stable-identity guarantee** — state transitions processing → failed mid-render with new callback closures could trigger a stale-handler invocation. Document the callback-identity expectation, or use a `useEvent`-style ref.
+
 ## Deferred from: code review of story-2-1 round 2 (2026-05-22)
 
 - **F84: Type-tighten `PickedFile` so `application/pdf` requires `pageCount`** — currently optional at the TS level; the gate ensures it's set in practice, but a future caller could skip the gate and the Zod error message would be confusing. Discriminated-union refactor; do when a third upload caller appears.

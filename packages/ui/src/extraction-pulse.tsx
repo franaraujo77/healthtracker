@@ -9,6 +9,10 @@ import {
   EXTRACTION_PULSE_REVIEW_NEEDED_PT_BR,
   extractionPulseCopyForElapsedMs,
   extractionPulseShouldShowManualEntry,
+  UPLOAD_IMAGE_OCR_FAILED_PT_BR,
+  UPLOAD_RECOVERY_MANUAL_PT_BR,
+  UPLOAD_RECOVERY_RETAKE_PT_BR,
+  UPLOAD_RECOVERY_UPLOAD_PDF_PT_BR,
 } from "@healthtracker/validators";
 
 import { Button } from "./button";
@@ -32,7 +36,16 @@ import { Button } from "./button";
  * patience copy as it advances.
  */
 
-export type ExtractionPulseState = "processing" | "review-needed" | "complete";
+export type ExtractionPulseState =
+  | "processing"
+  | "review-needed"
+  | "complete"
+  // Story 2.2 AC4 — image OCR confidence < 0.01 surfaces a dedicated
+  // failure state with three recovery options (retake / PDF /
+  // manual). The worker-side `applyDeadLetter` call lands in Story
+  // 2.3; Story 2.2 ships the UI ahead of the trigger so Story 2.3 has
+  // no UI work to do.
+  | "failed";
 
 export interface ExtractionPulseProps {
   state: ExtractionPulseState;
@@ -45,11 +58,22 @@ export interface ExtractionPulseProps {
    */
   elapsedMs: number;
   /**
-   * Optional callback for the 30s+ "Inserir manualmente" escape hatch.
-   * When undefined, the button is not rendered. Story 2.1 leaves this
-   * undefined; Story 2.7 (manual BIA entry) wires the destination.
+   * Optional callback for the 30s+ "Inserir manualmente" escape hatch
+   * (processing state) AND the `failed` state's third recovery
+   * option. When undefined, the button is not rendered. Story 2.7
+   * (manual BIA entry) wires the destination.
    */
   onManualEntry?: () => void;
+  /**
+   * Story 2.2 — `failed`-state recovery: re-opens the camera picker.
+   * When undefined, the button is not rendered.
+   */
+  onRetake?: () => void;
+  /**
+   * Story 2.2 — `failed`-state recovery: re-opens the sheet in PDF
+   * mode. When undefined, the button is not rendered.
+   */
+  onUploadPdf?: () => void;
   /**
    * When true, suppresses the pulse animation. Caller-supplied so each
    * platform owns its own reduced-motion detection.
@@ -80,6 +104,7 @@ function pulseCopyForState(
 ): string {
   if (state === "review-needed") return EXTRACTION_PULSE_REVIEW_NEEDED_PT_BR;
   if (state === "complete") return EXTRACTION_PULSE_COMPLETE_PT_BR;
+  if (state === "failed") return UPLOAD_IMAGE_OCR_FAILED_PT_BR;
   return extractionPulseCopyForElapsedMs(elapsedMs);
 }
 
@@ -88,6 +113,8 @@ export function ExtractionPulse({
   filenames,
   elapsedMs,
   onManualEntry,
+  onRetake,
+  onUploadPdf,
   reducedMotion,
 }: ExtractionPulseProps) {
   const animating = state === "processing" && !reducedMotion;
@@ -117,8 +144,12 @@ export function ExtractionPulse({
           size={64}
           // Story 2.1 P64 — keep the teal fill in every state; signal
           // `review-needed` with an amber border (Task 4 line 75:
-          // "static teal circle, amber ring").
-          backgroundColor="$primaryTeal"
+          // "static teal circle, amber ring"). Story 2.2 — `failed`
+          // state uses an amber background (calm-not-red per UX spec)
+          // because the failure is the message, not an alarm.
+          backgroundColor={
+            state === "failed" ? "$biomarkerDeviation" : "$primaryTeal"
+          }
           borderWidth={state === "review-needed" ? 3 : 0}
           borderColor="$biomarkerDeviation"
           opacity={opacity}
@@ -156,6 +187,39 @@ export function ExtractionPulse({
           <Button variant="outline" onPress={onManualEntry}>
             {EXTRACTION_PULSE_MANUAL_ENTRY_CTA_PT_BR}
           </Button>
+        ) : null}
+        {state === "failed" ? (
+          <YStack gap="$2" width="100%">
+            {onRetake ? (
+              <Button onPress={onRetake}>{UPLOAD_RECOVERY_RETAKE_PT_BR}</Button>
+            ) : null}
+            {onUploadPdf ? (
+              <Button variant="outline" onPress={onUploadPdf}>
+                {UPLOAD_RECOVERY_UPLOAD_PDF_PT_BR}
+              </Button>
+            ) : null}
+            {onManualEntry ? (
+              <Button variant="ghost" onPress={onManualEntry}>
+                {UPLOAD_RECOVERY_MANUAL_PT_BR}
+              </Button>
+            ) : null}
+            {/*
+              Round-1 P82 — when a caller forgets to wire any recovery
+              callback, the `failed` state would otherwise render an
+              empty button area below the failure copy. Surface a
+              generic fallback line so the patient isn't stranded.
+            */}
+            {!onRetake && !onUploadPdf && !onManualEntry ? (
+              <Text
+                fontFamily="$body"
+                fontSize="$3"
+                color="$textSecondary"
+                textAlign="center"
+              >
+                Tente novamente em alguns instantes.
+              </Text>
+            ) : null}
+          </YStack>
         ) : null}
       </YStack>
     </View>

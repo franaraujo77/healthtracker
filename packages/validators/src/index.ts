@@ -424,6 +424,11 @@ export const UPLOAD_ALLOWED_MIME_TYPES = [
   "image/jpeg",
   "image/png",
   "image/heic",
+  // Story 2.2 round-1 P81 — iOS Safari sometimes labels HEIC photos
+  // as `image/heif`; legit iPhone HEIC uploads via web were rejected
+  // as unsupported. Server-side: Supabase Storage echoes whatever the
+  // browser sends for the PUT; the allowlist must accept it.
+  "image/heif",
 ] as const;
 export type UploadMimeType = (typeof UPLOAD_ALLOWED_MIME_TYPES)[number];
 
@@ -573,9 +578,41 @@ export const UPLOAD_SOURCE_PT_BR_LABELS: Record<UploadSource, string> = {
 /** Upload-source bottom-sheet copy (Início post-onboarding entry). */
 export const UPLOAD_SHEET_TITLE_PT_BR = "Como deseja enviar?";
 export const UPLOAD_SHEET_PDF_LABEL_PT_BR = "Arquivo PDF";
-export const UPLOAD_SHEET_PHOTO_LABEL_PT_BR = "Foto ou câmera";
-export const UPLOAD_SHEET_PHOTO_DISABLED_LABEL_PT_BR = "Em breve";
+/**
+ * Story 2.2 — three active rows (PDF / Library / Camera). The single
+ * `UPLOAD_SHEET_PHOTO_LABEL_PT_BR` that Story 2.1 shipped as a
+ * disabled "Em breve" stub is removed; consumers now pick library
+ * vs camera explicitly.
+ */
+export const UPLOAD_SHEET_PHOTO_LIBRARY_LABEL_PT_BR = "Foto da galeria";
+export const UPLOAD_SHEET_PHOTO_CAMERA_LABEL_PT_BR = "Tirar foto";
+export const UPLOAD_SHEET_PHOTO_LIBRARY_HINT_PT_BR =
+  "Abre o seletor de fotos do dispositivo";
+export const UPLOAD_SHEET_PHOTO_CAMERA_HINT_PT_BR =
+  "Abre a câmera para fotografar um exame";
+export const UPLOAD_SHEET_PHOTO_CAMERA_HINT_WEB_PT_BR =
+  "Abre a câmera no celular, ou o seletor de arquivos no desktop";
 export const UPLOAD_SHEET_CANCEL_PT_BR = "Cancelar";
+
+/** Story 2.2 — camera permission denial copy (mirrors PHOTO_LIBRARY_PERMISSION_PT_BR). */
+export const CAMERA_PERMISSION_PT_BR =
+  "Permita o acesso à câmera para fotografar o seu exame.";
+
+/** Story 2.2 — image OCR failure surface + 3 recovery options (AC4). */
+export const UPLOAD_IMAGE_OCR_FAILED_PT_BR =
+  "Não conseguimos ler este exame. Tente uma destas opções abaixo.";
+export const UPLOAD_RECOVERY_RETAKE_PT_BR = "Tirar nova foto";
+export const UPLOAD_RECOVERY_UPLOAD_PDF_PT_BR = "Enviar PDF";
+export const UPLOAD_RECOVERY_MANUAL_PT_BR = "Inserir manualmente";
+
+/**
+ * Story 2.2 — explicit picker source for `pickImages`. Library uses
+ * `launchImageLibraryAsync`; camera uses `launchCameraAsync` and
+ * requires `NSCameraUsageDescription` on iOS + the camera runtime
+ * permission via `requestCameraPermissionsAsync`.
+ */
+export const PICK_IMAGE_SOURCES = ["library", "camera"] as const;
+export type PickImageSource = (typeof PICK_IMAGE_SOURCES)[number];
 
 /**
  * ExtractionPulse patience-pattern copy (UX-DR4, ux-design-specification.md

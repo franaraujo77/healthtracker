@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Stack, useRouter } from "expo-router";
@@ -14,6 +14,7 @@ import {
   IMPORT_TITLE_PT_BR,
   INICIO_ROUTE,
   UPLOAD_QUEUED_BADGE_PT_BR,
+  UPLOAD_SHEET_PHOTO_CAMERA_LABEL_PT_BR,
 } from "@healthtracker/validators";
 
 import type {
@@ -34,8 +35,13 @@ const BACKGROUND_PRIMARY = "#F9F7F4";
  */
 export default function ImportScreen() {
   const router = useRouter();
-  const { pickDocuments, uploadFiles, isUploading, progressByPath } =
-    useImportFiles({ source: "onboarding_import" });
+  const {
+    pickDocuments,
+    pickImages,
+    uploadFiles,
+    isUploading,
+    progressByPath,
+  } = useImportFiles({ source: "onboarding_import" });
   const [picked, setPicked] = useState<PickedFile[]>([]);
   const [rejected, setRejected] = useState<PickedFileWithError[]>([]);
   const [submitted, setSubmitted] = useState(false);
@@ -44,12 +50,45 @@ export default function ImportScreen() {
     router.replace({ pathname: INICIO_ROUTE });
   }
 
+  // Round-1 P74 — shared re-entry guard so double-taps (or
+  // tap-while-sibling-pending) don't spawn concurrent
+  // DocumentPicker / launchCameraAsync invocations. Mirrors the
+  // Início handlers' pattern (Story 2.1 R2-P59 + Story 2.2 P74).
+  const isPickingRef = useRef(false);
+
   async function handlePick() {
-    const result = await pickDocuments();
-    setPicked((prev) => [...prev, ...result.files]);
-    // Review P44 — accumulate rejections across picks so the patient
-    // doesn't lose context from an earlier batch when picking again.
-    setRejected((prev) => [...prev, ...result.rejected]);
+    if (isPickingRef.current) return;
+    isPickingRef.current = true;
+    try {
+      const result = await pickDocuments();
+      setPicked((prev) => [...prev, ...result.files]);
+      // Review P44 — accumulate rejections across picks so the patient
+      // doesn't lose context from an earlier batch when picking again.
+      setRejected((prev) => [...prev, ...result.rejected]);
+    } finally {
+      isPickingRef.current = false;
+    }
+  }
+
+  /**
+   * Story 2.2 — F60 fix: wire the camera-capture path into the
+   * onboarding screen. Library/PDF stays on the existing
+   * "Escolher arquivos" button (DocumentPicker already accepts the
+   * full mime allowlist); the new "Tirar foto" button funnels
+   * through `pickImages({ source: 'camera' })` for single-capture
+   * which gets appended to the same `picked` batch as the other
+   * sources.
+   */
+  async function handlePickCamera() {
+    if (isPickingRef.current) return;
+    isPickingRef.current = true;
+    try {
+      const result = await pickImages({ source: "camera" });
+      setPicked((prev) => [...prev, ...result.files]);
+      setRejected((prev) => [...prev, ...result.rejected]);
+    } finally {
+      isPickingRef.current = false;
+    }
   }
 
   async function handleConfirm() {
@@ -90,6 +129,13 @@ export default function ImportScreen() {
 
           <Button onPress={handlePick} disabled={isUploading} variant="outline">
             {IMPORT_PICK_CTA_PT_BR}
+          </Button>
+          <Button
+            onPress={handlePickCamera}
+            disabled={isUploading}
+            variant="outline"
+          >
+            {UPLOAD_SHEET_PHOTO_CAMERA_LABEL_PT_BR}
           </Button>
 
           {picked.length > 0 && (

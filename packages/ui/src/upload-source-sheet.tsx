@@ -5,19 +5,27 @@ import { Sheet, Text, YStack } from "tamagui";
 import {
   UPLOAD_SHEET_CANCEL_PT_BR,
   UPLOAD_SHEET_PDF_LABEL_PT_BR,
-  UPLOAD_SHEET_PHOTO_DISABLED_LABEL_PT_BR,
-  UPLOAD_SHEET_PHOTO_LABEL_PT_BR,
+  UPLOAD_SHEET_PHOTO_CAMERA_HINT_PT_BR,
+  UPLOAD_SHEET_PHOTO_CAMERA_HINT_WEB_PT_BR,
+  UPLOAD_SHEET_PHOTO_CAMERA_LABEL_PT_BR,
+  UPLOAD_SHEET_PHOTO_LIBRARY_HINT_PT_BR,
+  UPLOAD_SHEET_PHOTO_LIBRARY_LABEL_PT_BR,
   UPLOAD_SHEET_TITLE_PT_BR,
 } from "@healthtracker/validators";
 
 import { Button } from "./button";
 
 /**
- * Story 2.1 AC1 — post-onboarding upload source picker.
+ * Story 2.1 / 2.2 — post-onboarding upload source picker.
  *
- * Two rows: "Arquivo PDF" (active) and "Foto ou câmera" (disabled with
- * "Em breve" label — Story 2.2 wires the photo branch). Cancel returns
- * the patient to Início untouched.
+ * Three rows (Story 2.2): "Arquivo PDF", "Foto da galeria", and
+ * "Tirar foto". Story 2.1 shipped this sheet with the photo branch as
+ * a single disabled "Em breve" row; Story 2.2 splits it into two
+ * active rows and removes the stub.
+ *
+ * The photo rows are visible-and-active only when the matching
+ * callback prop is supplied — so onboarding consumers can stay
+ * PDF-only by omitting them.
  *
  * Implemented as a Tamagui `Sheet` which renders as a bottom sheet on
  * Expo and as a modal on Web (Tamagui handles the platform mapping).
@@ -28,6 +36,19 @@ export interface UploadSourceSheetProps {
   onOpenChange: (open: boolean) => void;
   onPickPdf: () => void;
   pdfDisabled?: boolean;
+  /** Story 2.2 — when provided, renders the "Foto da galeria" row. */
+  onPickImageFromLibrary?: () => void;
+  /** Story 2.2 — when provided, renders the "Tirar foto" row. */
+  onPickImageFromCamera?: () => void;
+  /** Story 2.2 — disables the photo rows while an upload is in flight. */
+  photoDisabled?: boolean;
+  /**
+   * Story 2.2 — the web camera-capture row uses `<input capture>`,
+   * which falls back to the file picker on desktop. The hint text
+   * differs accordingly. Caller-supplied so the component stays
+   * platform-agnostic.
+   */
+  cameraHintIsWeb?: boolean;
 }
 
 export function UploadSourceSheet({
@@ -35,6 +56,10 @@ export function UploadSourceSheet({
   onOpenChange,
   onPickPdf,
   pdfDisabled,
+  onPickImageFromLibrary,
+  onPickImageFromCamera,
+  photoDisabled,
+  cameraHintIsWeb,
 }: UploadSourceSheetProps) {
   return (
     <Sheet
@@ -73,22 +98,32 @@ export function UploadSourceSheet({
           >
             {UPLOAD_SHEET_PDF_LABEL_PT_BR}
           </Button>
-          {/*
-            Story 2.1 P57 — render the "Foto" row as a real disabled
-            Button (not an XStack pretending to be one). The previous
-            version had `accessibilityRole="button"` + `disabled` state
-            but no `onPress`, so screen-reader users could land on it
-            and tap with nothing happening. A real `<Button disabled>`
-            is visually + behaviourally inert and Tamagui exposes the
-            correct disabled semantics to the platform a11y layer.
-          */}
-          <Button
-            variant="outline"
-            disabled
-            accessibilityHint={UPLOAD_SHEET_PHOTO_DISABLED_LABEL_PT_BR}
-          >
-            {`${UPLOAD_SHEET_PHOTO_LABEL_PT_BR} (${UPLOAD_SHEET_PHOTO_DISABLED_LABEL_PT_BR})`}
-          </Button>
+          {onPickImageFromLibrary ? (
+            <Button
+              variant="outline"
+              onPress={onPickImageFromLibrary}
+              disabled={photoDisabled}
+              accessibilityRole="button"
+              accessibilityHint={UPLOAD_SHEET_PHOTO_LIBRARY_HINT_PT_BR}
+            >
+              {UPLOAD_SHEET_PHOTO_LIBRARY_LABEL_PT_BR}
+            </Button>
+          ) : null}
+          {onPickImageFromCamera ? (
+            <Button
+              variant="outline"
+              onPress={onPickImageFromCamera}
+              disabled={photoDisabled}
+              accessibilityRole="button"
+              accessibilityHint={
+                cameraHintIsWeb
+                  ? UPLOAD_SHEET_PHOTO_CAMERA_HINT_WEB_PT_BR
+                  : UPLOAD_SHEET_PHOTO_CAMERA_HINT_PT_BR
+              }
+            >
+              {UPLOAD_SHEET_PHOTO_CAMERA_LABEL_PT_BR}
+            </Button>
+          ) : null}
           <Button variant="ghost" onPress={() => onOpenChange(false)}>
             {UPLOAD_SHEET_CANCEL_PT_BR}
           </Button>

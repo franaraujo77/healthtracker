@@ -67,7 +67,7 @@ development_status:
   # Epic 2: Patient Can Upload and Review Blood Test Results
   epic-2: in-progress
   2-1-patient-uploads-a-pdf-blood-test-result: done
-  2-2-patient-uploads-a-photo-of-a-blood-test-result-from-camera-roll-or-camera: ready-for-dev
+  2-2-patient-uploads-a-photo-of-a-blood-test-result-from-camera-roll-or-camera: done
   2-3-system-extracts-and-normalizes-biomarker-values-from-uploaded-documents: backlog
   2-4-patient-reviews-and-confirms-low-confidence-extracted-values: backlog
   2-5-patient-views-upload-status-and-receives-push-notifications: backlog

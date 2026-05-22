@@ -39,11 +39,10 @@ interface UploadOutcome {
 function validateClientSide(file: File): string | null {
   if (file.size <= 0) return UPLOAD_EMPTY_FILE_PT_BR;
   if (file.size > UPLOAD_MAX_BYTES) return UPLOAD_FILE_TOO_LARGE_PT_BR;
-  if (file.type !== "application/pdf") {
-    // Post-onboarding entry is PDF-only for Story 2.1 (Story 2.2 wires
-    // the photo branch).
-    return UPLOAD_UNSUPPORTED_MIME_PT_BR;
-  }
+  // Story 2.2 — widened from PDF-only to the full allowlist (PDF +
+  // JPEG/PNG/HEIC). Image flows route through the same request/
+  // confirm pipeline; the page-count gate (`gatePdfPageCount`)
+  // short-circuits for non-PDF mime types.
   if (!isUploadMimeType(file.type)) return UPLOAD_UNSUPPORTED_MIME_PT_BR;
   return null;
 }
@@ -82,10 +81,16 @@ export function InicioEmptyState() {
   const confirmImport = useMutation(
     trpc.uploads.confirmImport.mutationOptions(),
   );
-  const inputRef = useRef<HTMLInputElement>(null);
-  // Story 2.1 P59 — re-entry guard so a double-tap on the sheet PDF
-  // CTA can't open two native pickers / fire two `handleFileInput`
-  // batches concurrently.
+  const pdfInputRef = useRef<HTMLInputElement>(null);
+  // Story 2.2 — separate `<input>`s for each source so the `accept`
+  // and `capture` attributes can differ. The PDF input restricts to
+  // PDF; the library input accepts any image mime; the camera input
+  // adds `capture="environment"` so mobile browsers open the camera.
+  const libraryInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  // Story 2.1 P59 — re-entry guard so a double-tap on a sheet CTA
+  // can't open two native pickers / fire two `handleFileInput`
+  // batches concurrently. Shared across all three sources.
   const isPickingRef = useRef(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [active, setActive] = useState<ActiveUpload[]>([]);
@@ -108,12 +113,11 @@ export function InicioEmptyState() {
     return () => clearInterval(id);
   }, [active.length]);
 
-  function openPdfPicker() {
+  function openPicker(input: HTMLInputElement | null) {
     // Story 2.1 P59 — drop the second tap if a picker is already open.
     if (isPickingRef.current) return;
     isPickingRef.current = true;
     setSheetOpen(false);
-    const input = inputRef.current;
     if (!input) {
       isPickingRef.current = false;
       return;
@@ -136,6 +140,16 @@ export function InicioEmptyState() {
     };
     window.addEventListener("focus", onFocus);
     input.click();
+  }
+
+  function openPdfPicker() {
+    openPicker(pdfInputRef.current);
+  }
+  function openLibraryPicker() {
+    openPicker(libraryInputRef.current);
+  }
+  function openCameraPicker() {
+    openPicker(cameraInputRef.current);
   }
 
   async function handleFileInput(ev: ChangeEvent<HTMLInputElement>) {
@@ -248,15 +262,44 @@ export function InicioEmptyState() {
           ))}
         </ul>
       ) : null}
+      {/*
+        Story 2.2 — three internal-plumbing `<input>`s, one per
+        source. All hidden from keyboard + screen reader (R2-P71);
+        the visible CTAs are the sheet rows.
+      */}
       <input
-        ref={inputRef}
+        ref={pdfInputRef}
         type="file"
         accept="application/pdf"
         className="sr-only"
-        // Round-2 R2-P71 — the visible CTA is the sheet button. The
-        // raw input is internal plumbing; hide it from keyboard +
-        // screen reader so users don't land on an unlabeled file
-        // input.
+        aria-hidden="true"
+        tabIndex={-1}
+        onChange={(ev) => {
+          void handleFileInput(ev);
+        }}
+      />
+      <input
+        ref={libraryInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/heic"
+        multiple
+        className="sr-only"
+        aria-hidden="true"
+        tabIndex={-1}
+        onChange={(ev) => {
+          void handleFileInput(ev);
+        }}
+      />
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/heic"
+        // `capture="environment"` triggers the device camera on
+        // mobile browsers (iOS Safari + Android Chrome). Desktop
+        // browsers ignore it and fall back to the file picker —
+        // documented in the sheet's accessibilityHint.
+        capture="environment"
+        className="sr-only"
         aria-hidden="true"
         tabIndex={-1}
         onChange={(ev) => {
@@ -267,7 +310,11 @@ export function InicioEmptyState() {
         open={sheetOpen}
         onOpenChange={setSheetOpen}
         onPickPdf={openPdfPicker}
+        onPickImageFromLibrary={openLibraryPicker}
+        onPickImageFromCamera={openCameraPicker}
         pdfDisabled={active.length > 0}
+        photoDisabled={active.length > 0}
+        cameraHintIsWeb
       />
     </>
   );
