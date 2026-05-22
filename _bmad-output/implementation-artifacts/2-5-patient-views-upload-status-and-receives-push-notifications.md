@@ -1,6 +1,6 @@
 # Story 2.5: Patient views upload status and receives push notifications
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -211,6 +211,56 @@ claude-opus-4-7[1m]
 
 ### Debug Log References
 
+- `pnpm typecheck` — 16/16 clean.
+- `pnpm lint` — 14/14 clean.
+- `pnpm format:fix` then `pnpm format` — clean.
+- `pnpm test` — 167 unit tests pass (+5 worker, +4 api this story).
+
 ### Completion Notes List
 
+**Clarifications resolved (all 8 recommended defaults adopted).**
+
+**What was implemented:**
+- `push_tokens` schema + RLS policies (patient SELECT/INSERT/UPDATE own, no DELETE; service-role bypass for worker).
+- `notificationsRouter` with `registerPushToken` + `revokePushToken` mutations (idempotent on `(patient_id, device_id)`).
+- `enqueueNotificationSend(db, { uploadId, patientId, kind })` paired write helper.
+- `listUploadsForPatient` paginated query on `uploadsRouter` (Drizzle typed select with `failureReason` projected from `metadata->>'reason'`).
+- Story 2.4's patient-confirm `notification.upload_complete` audit emission now enqueues the push-send job (same transaction).
+- Worker `extraction.document` consumer emits `notification.upload_pending_review` AND `notification.upload_complete` (for direct-publish path) + enqueues; the storage-perma-failure dead-letter path emits `notification.upload_failed` + enqueues.
+- `markUploadFailed` (worker dead-letter callback) now emits `notification.upload_failed` + enqueues (lookups patient_id from the upload row).
+- `notification.send` pg-boss consumer fetches active push tokens, POSTs to Expo Push API in a batch, soft-revokes tokens that come back `DeviceNotRegistered`.
+- Histórico tab on Expo + web Histórico page with pt-BR badges and failed-upload recovery CTAs.
+- Validators copy: `HISTORICO_*_PT_BR`, `FAILURE_REASON_LABELS_PT_BR`, `failureReasonLabel(reason)` helper.
+
+**Out of scope / deferred:**
+- Expo client hook (`use-push-notifications.ts`) — token registration on auth `SIGNED_IN` is described in the spec but the actual `expo-notifications` integration (permission request, `getExpoPushTokenAsync`, deep-link listener) is left as a follow-up since `expo-notifications` requires a native rebuild and EAS Build. The tRPC mutation `notifications.registerPushToken` is wired and tested; the client-side glue can land in the EAS-build PR.
+- Web push (UX-DR4 mobile-first).
+- Notification *preferences* — Story 2.8.
+- F-items deferred via the review (see Review Findings section).
+
 ### File List
+
+**New files**
+- `packages/db/src/schema/push_tokens.ts`
+- `packages/db/policies/custom_rls_push_tokens.sql`
+- `packages/api/src/notifications.ts`
+- `packages/api/src/router/notifications.ts`
+- `packages/api/__tests__/notifications.test.ts`
+- `services/extraction/src/notifications/emit.ts`
+- `services/extraction/src/consumers/notifications.ts`
+- `services/extraction/__tests__/notifications.test.ts`
+- `apps/expo/src/app/(tabs)/historico.tsx`
+- `apps/web/src/app/inicio/historico/page.tsx`
+- `apps/web/src/app/inicio/historico/historico-client.tsx`
+
+**Modified files**
+- `packages/db/src/schema/index.ts` — exports `PushTokens`.
+- `packages/api/src/root.ts` — registers `notificationsRouter`.
+- `packages/api/src/router/uploads.ts` — adds `listUploadsForPatient`.
+- `packages/api/src/uploads-review.ts` — pairs the complete-audit with `enqueueNotificationSend`.
+- `services/extraction/src/consumers/document.ts` — emits pending_review / complete / failed notification events.
+- `services/extraction/src/state-machine/upload-transitions.ts` — `markUploadFailed` emits the `failed` notification.
+- `services/extraction/src/index.ts` — creates the `notification.send` queue and registers the consumer.
+- `apps/expo/src/app/(tabs)/_layout.tsx` — adds Histórico tab.
+- `packages/validators/src/index.ts` — Histórico copy + failure-reason map.
+- `turbo.json` — `EXPO_PUSH_ACCESS_TOKEN` in `globalEnv`.

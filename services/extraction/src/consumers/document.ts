@@ -4,6 +4,7 @@ import type postgres from "postgres";
 import type { ExtractDocumentPayload, JobPayload } from "@healthtracker/types";
 
 import type { TextractAdapter } from "../textract/adapter.js";
+import { emitNotificationEvent } from "../notifications/emit.js";
 import { dispatchExtractedFields } from "../pipeline/dispatch.js";
 import {
   applyDeadLetter,
@@ -137,7 +138,15 @@ export async function handleDocumentJob(
       console.warn(
         `[extraction.document] uploadId=${uploadId}: dead-letter no-op (row already terminal)`,
       );
+      return;
     }
+    // Story 2.5 — emit AC4 push for storage-perma-failure path.
+    await emitNotificationEvent(deps.sql, {
+      uploadId,
+      patientId,
+      kind: "failed",
+      metadata: { reason: "storage_unavailable" },
+    });
     return;
   }
 
@@ -189,13 +198,12 @@ export async function handleDocumentJob(
       if (fields.length === 0 || !hasWork) {
         // Genuine empty extraction OR every field was quarantined
         // by per-field try/catch in dispatch (R2-P121). Dead-letter.
+        const reason =
+          fields.length === 0 ? "empty_extraction" : "no_publishable_fields";
         const dl = await applyDeadLetter(tx, {
           uploadId,
           metadata: {
-            reason:
-              fields.length === 0
-                ? "empty_extraction"
-                : "no_publishable_fields",
+            reason,
             field_count: fields.length,
             error_count: outcome.errorCount,
           },
@@ -204,7 +212,18 @@ export async function handleDocumentJob(
           console.warn(
             `[extraction.document] uploadId=${uploadId}: dead-letter no-op (row already terminal)`,
           );
+          return;
         }
+        // Story 2.5 — emit `notification.upload_failed` audit +
+        // enqueue the push-send job so the patient receives the
+        // "we couldn't process this file" push with the failure
+        // reason in the metadata (AC4).
+        await emitNotificationEvent(tx, {
+          uploadId,
+          patientId,
+          kind: "failed",
+          metadata: { reason, field_count: fields.length },
+        });
         return;
       }
 
@@ -227,7 +246,20 @@ export async function handleDocumentJob(
           console.warn(
             `[extraction.document] uploadId=${uploadId}: processing→pending_review failed; row externally moved`,
           );
+          return;
         }
+        // Story 2.5 — emit `notification.upload_pending_review` audit
+        // + enqueue the push-send job. Patient gets the "needs your
+        // confirmation" push (AC3).
+        await emitNotificationEvent(tx, {
+          uploadId,
+          patientId,
+          kind: "pending_review",
+          metadata: {
+            published: outcome.publishedCount,
+            review: outcome.reviewQueueCount,
+          },
+        });
         return;
       }
 
@@ -244,7 +276,22 @@ export async function handleDocumentJob(
         console.warn(
           `[extraction.document] uploadId=${uploadId}: processing→complete failed; row externally moved`,
         );
+        return;
       }
+      // Story 2.5 — direct processing→complete (no review needed)
+      // emits the audit + enqueues the "your results are ready" push
+      // (AC2). The patient-confirm path emits its own copy via
+      // `packages/api/src/uploads-review.ts`; singleton_key on the
+      // pg-boss job dedups in the (rare) race.
+      await emitNotificationEvent(tx, {
+        uploadId,
+        patientId,
+        kind: "complete",
+        metadata: {
+          published: outcome.publishedCount,
+          conflicts: outcome.conflictCount,
+        },
+      });
     });
   } catch (err) {
     console.error(

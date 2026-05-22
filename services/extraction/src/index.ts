@@ -5,6 +5,10 @@ import type { JobPayload } from "@healthtracker/types";
 
 import type { TextractAdapter } from "./textract/adapter.js";
 import { registerDocumentConsumer } from "./consumers/document.js";
+import {
+  createDefaultExpoPushClient,
+  registerNotificationsConsumer,
+} from "./consumers/notifications.js";
 import { registerSmokeTestConsumer } from "./consumers/smoke-test.js";
 import { sql } from "./db.js";
 import { markUploadFailed } from "./state-machine/upload-transitions.js";
@@ -130,6 +134,17 @@ await boss.createQueue("extraction.document", {
   deadLetter: "extraction.dead_letter",
 });
 
+// Story 2.5 — `notification.send` queue. Higher retry count
+// (5) absorbs Expo Push API transient outages. No dead-letter
+// routing yet — failed notifications are a soft loss (user can
+// always pull-to-refresh Histórico) so we don't mark the upload
+// as failed on push delivery failure.
+await boss.createQueue("notification.send", {
+  retryLimit: 5,
+  retryDelay: 30,
+  retryBackoff: true,
+});
+
 // Dead-letter handler: extraction.* jobs that exhausted retries arrive here.
 // Only extraction jobs trigger upload-state transitions; other future job domains
 // (e.g. letter.generate) must not invoke markUploadFailed.
@@ -166,6 +181,17 @@ await registerDocumentConsumer(boss, {
   sql,
   textractAdapter,
   downloadStorageObject,
+});
+
+// Story 2.5 — notification dispatch consumer. The Expo Push API
+// is anonymous-friendly for `ExponentPushToken[...]` recipients;
+// the access token (env) lifts rate limits.
+const EXPO_PUSH_ACCESS_TOKEN = process.env.EXPO_PUSH_ACCESS_TOKEN;
+await registerNotificationsConsumer(boss, {
+  sql,
+  expoPushClient: createDefaultExpoPushClient({
+    accessToken: EXPO_PUSH_ACCESS_TOKEN,
+  }),
 });
 
 const SIGTERM_TIMEOUT_MS = 30_000;

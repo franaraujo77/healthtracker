@@ -38,6 +38,37 @@ export const UPLOAD_STATUS_LABELS_PT_BR: Record<
   failed: "Falhou",
 };
 
+// Story 2.5 — Histórico tab + push-notification copy.
+export const HISTORICO_ROUTE = "/inicio/historico";
+export const HISTORICO_TITLE_PT_BR = "Histórico";
+export const HISTORICO_TAB_LABEL_PT_BR = "Histórico";
+export const HISTORICO_EMPTY_HEADLINE_PT_BR =
+  "Você ainda não enviou nenhum exame";
+export const HISTORICO_EMPTY_CTA_PT_BR = "Enviar primeiro exame";
+export const HISTORICO_LOAD_MORE_PT_BR = "Carregar mais";
+export const HISTORICO_LOADING_PT_BR = "Carregando…";
+export const HISTORICO_ERROR_PT_BR =
+  "Não conseguimos carregar seu histórico. Tente novamente em instantes.";
+export const HISTORICO_RECOVERY_RESEND_PT_BR = "Enviar novamente";
+export const HISTORICO_RECOVERY_PHOTO_PT_BR = "Enviar uma foto";
+export const HISTORICO_RECOVERY_SKIP_PT_BR = "Pular este resultado";
+
+export const FAILURE_REASON_LABELS_PT_BR: Record<string, string> = {
+  retries_exhausted: "Tentamos várias vezes mas algo deu errado.",
+  empty_extraction: "Não conseguimos ler nenhum valor neste arquivo.",
+  no_publishable_fields: "Os valores extraídos não puderam ser publicados.",
+  storage_unavailable: "O arquivo não está acessível no momento.",
+  no_readable_text: "O arquivo não tem texto legível.",
+};
+
+const FAILURE_REASON_DEFAULT_PT_BR =
+  "Tentamos várias vezes mas algo deu errado.";
+
+export function failureReasonLabel(reason: string | null): string {
+  if (!reason) return "Algo deu errado durante o processamento.";
+  return FAILURE_REASON_LABELS_PT_BR[reason] ?? FAILURE_REASON_DEFAULT_PT_BR;
+}
+
 /**
  * Patient registration input (Story 1.1).
  *

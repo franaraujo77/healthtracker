@@ -14,6 +14,7 @@ import {
 import type { AuditDb } from "./audit";
 import { writeAuditLog } from "./audit";
 import { resolveLoincCode } from "./loinc";
+import { enqueueNotificationSend } from "./notifications";
 import { writeObservation } from "./observations";
 import { applyUploadTransition } from "./upload-transitions";
 
@@ -496,6 +497,15 @@ export async function confirmReviewFieldAsPatient(
       resourceId: reviewRow.uploadId,
       resourceType: "upload",
       metadata: { triggeredBy: "patient_confirmation" },
+    });
+    // Story 2.5 — paired audit + enqueue. The pg-boss job
+    // `notification.send` is singleton-keyed on `(uploadId, kind)`
+    // so an idempotent retry of the patient-confirm path does NOT
+    // fire two push notifications for the same completion.
+    await enqueueNotificationSend(database, {
+      uploadId: reviewRow.uploadId,
+      patientId,
+      kind: "complete",
     });
   }
 

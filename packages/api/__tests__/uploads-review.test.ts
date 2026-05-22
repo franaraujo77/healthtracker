@@ -86,15 +86,21 @@ function makeScriptedDb(script: {
     return chain;
   });
 
+  // Story 2.5 — `enqueueNotificationSend` uses raw `database.execute`.
+  // The mock just resolves; tests don't introspect job rows.
+  const executeFn = vi.fn(() => Promise.resolve(undefined));
+
   return {
     db: {
       select: selectFn,
       insert: insertFn,
       update: updateFn,
+      execute: executeFn,
     } as unknown as AuditDb,
     selectFn,
     insertFn,
     updateFn,
+    executeFn,
     insertValuesArgs,
     updateSetArgs,
   };

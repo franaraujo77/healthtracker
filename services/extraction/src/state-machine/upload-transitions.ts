@@ -132,6 +132,13 @@ export async function applyDeadLetter(
  * wrapper around `applyDeadLetter` so the existing
  * `services/extraction/src/index.ts` dead-letter handler doesn't
  * change shape.
+ *
+ * Story 2.5 — when the dead-letter transition succeeds, also emit
+ * the `notification.upload_failed` audit event + enqueue the
+ * `notification.send` job so the patient receives the "we couldn't
+ * process this file" push (AC4). Lookup the upload's `patient_id`
+ * inside this helper since the pg-boss dead-letter callback only
+ * has the upload id.
  */
 export async function markUploadFailed(
   sql: WorkerSql,
@@ -145,5 +152,23 @@ export async function markUploadFailed(
     console.warn(
       `[upload-transitions] markUploadFailed: uploadId=${uploadId} was already terminal — no-op`,
     );
+    return;
   }
+  const ownerRows = await sql<{ patient_id: string }[]>`
+    SELECT patient_id FROM uploads WHERE id = ${uploadId}::uuid LIMIT 1
+  `;
+  const patientId = ownerRows[0]?.patient_id;
+  if (!patientId) {
+    console.warn(
+      `[upload-transitions] markUploadFailed: uploadId=${uploadId} row vanished after dead-letter — skipping notification`,
+    );
+    return;
+  }
+  const { emitNotificationEvent } = await import("../notifications/emit.js");
+  await emitNotificationEvent(sql, {
+    uploadId,
+    patientId,
+    kind: "failed",
+    metadata: { reason: "retries_exhausted" },
+  });
 }

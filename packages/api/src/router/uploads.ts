@@ -2,6 +2,8 @@ import type { TRPCRouterRecord } from "@trpc/server";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod/v4";
 
+import { and, desc, eq, lt, sql } from "@healthtracker/db";
+import { Uploads } from "@healthtracker/db/schema";
 import {
   isUploadMimeType,
   sanitizeFilename,
@@ -216,6 +218,57 @@ export const uploadsRouter = {
       });
 
       return { uploadId: insertedRow.id, created: true as const };
+    }),
+
+  /**
+   * Story 2.5 — paginated list of the patient's uploads (most recent
+   * first). Returns the fields the Histórico tab needs: id, original
+   * filename, status, timestamps, and (if `failed`) the failure
+   * reason extracted from the upload's metadata jsonb.
+   *
+   * Cursor pagination keyed on `created_at` so newly-arriving uploads
+   * don't shuffle existing pages. Page size capped at 50 by Zod.
+   */
+  listUploadsForPatient: protectedProcedure
+    .input(
+      z.object({
+        cursor: z.string().datetime().optional(),
+        limit: z.number().int().min(1).max(50).default(20),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const patientId = ctx.session.user.id;
+      const cursorDate = input.cursor ? new Date(input.cursor) : null;
+      const rows = await ctx.db
+        .select({
+          id: Uploads.id,
+          originalFilename: Uploads.originalFilename,
+          status: Uploads.status,
+          createdAt: Uploads.createdAt,
+          processingStartedAt: Uploads.processingStartedAt,
+          processingCompletedAt: Uploads.processingCompletedAt,
+          // Drizzle exposes jsonb extracts via `sql<T>` template; the
+          // generic T flows through the row type below.
+          failureReason: sql<string | null>`${Uploads.metadata}->>'reason'`,
+        })
+        .from(Uploads)
+        .where(
+          and(
+            eq(Uploads.patientId, patientId),
+            cursorDate !== null ? lt(Uploads.createdAt, cursorDate) : undefined,
+          ),
+        )
+        .orderBy(desc(Uploads.createdAt))
+        .limit(input.limit + 1);
+
+      const hasNext = rows.length > input.limit;
+      const trimmed = hasNext ? rows.slice(0, input.limit) : rows;
+      const last = trimmed[trimmed.length - 1];
+
+      return {
+        rows: trimmed,
+        nextCursor: hasNext && last ? last.createdAt.toISOString() : null,
+      };
     }),
 
   /**

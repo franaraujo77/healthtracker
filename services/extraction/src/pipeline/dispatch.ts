@@ -81,7 +81,6 @@ export async function dispatchExtractedFields(
     // downstream; better to silently skip and log than to roll back
     // the whole batch.
     const biomarkerName = field.biomarkerName.trim();
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (biomarkerName.length === 0 || typeof field.valueText !== "string") {
       console.warn(
         `[dispatch] uploadId=${input.uploadId}: skipping field with empty biomarkerName or non-string valueText`,
