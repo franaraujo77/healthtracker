@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { UPLOAD_TRANSITIONS as API_TRANSITIONS } from "@healthtracker/api/upload-transitions";
+
 import { UPLOAD_TRANSITIONS as WORKER_TRANSITIONS } from "../src/state-machine/upload-transitions.js";
 
 /**
@@ -18,7 +20,7 @@ import { UPLOAD_TRANSITIONS as WORKER_TRANSITIONS } from "../src/state-machine/u
  * integration testing (deferred F103 + F112 — testcontainer or local
  * Supabase).
  */
-describe("Story 2.3 R1-P110 — worker / API state-machine snapshot sync", () => {
+describe("Story 2.3 R1-P110 + R2-P129 — worker / API state-machine snapshot sync", () => {
   it("worker's UPLOAD_TRANSITIONS matches the canonical map", () => {
     expect(WORKER_TRANSITIONS).toEqual({
       queued: ["processing"],
@@ -29,10 +31,16 @@ describe("Story 2.3 R1-P110 — worker / API state-machine snapshot sync", () =>
     });
   });
 
+  // R2-P129 — actually compare worker vs API. R1-P110 originally
+  // only pinned the worker side. This test catches divergence between
+  // `services/extraction/src/state-machine/upload-transitions.ts`
+  // and `packages/api/src/upload-transitions.ts` — the canonical
+  // source of truth Story 2.1 shipped.
+  it("worker's UPLOAD_TRANSITIONS exactly equals the API helper's", () => {
+    expect(WORKER_TRANSITIONS).toEqual(API_TRANSITIONS);
+  });
+
   it("worker's UPLOAD_TRANSITIONS shape is frozen (regression guard)", () => {
-    // Mirrors the API helper's `as const satisfies Record<...>` —
-    // adding a new state without updating both files would change
-    // the keys() count below.
     const keys = Object.keys(WORKER_TRANSITIONS).sort();
     expect(keys).toEqual([
       "complete",

@@ -19,23 +19,25 @@ import {
  *     ↓ applyUploadTransition (queued → processing)
  *   processing
  *     ↓ storage.download + textractAdapter.extract
- *     ↓ dispatchExtractedFields (publish + review-queue counts;
- *                                 returns published observation ids)
- *     ↓ writeAuditLog per published observation (R1-P93)
+ *     ↓ sql.begin: dispatch + audit + terminal UPDATE (all-or-nothing)
  *   complete            ← every field published, none reviewed
  *   pending_review      ← any review-queue entries written
- *   failed              ← zero fields extracted, OR zero fields
- *                          published AND zero reviewed
+ *   failed              ← zero fields extracted, OR every field
+ *                          errored / was skipped
  *
- * R1-P95 — optimistic-lock-miss handling. If the row is not in
- * `queued` (e.g., a prior worker crashed mid-processing and pg-boss
- * is retrying), the handler checks the current status and either
- * resumes (if `processing`) or acks-and-skips (if terminal). Without
- * this, a crashed worker leaves the row stuck in `processing` forever.
+ * R2-P113 — the terminal `applyUploadTransition` now runs INSIDE the
+ * `sql.begin()` block alongside dispatch + audit. If any step fails,
+ * the entire transaction rolls back; pg-boss retries cleanly with
+ * the row still in `processing`. This + the review-queue idempotency
+ * seam (R2-P113 unique index) makes crash-recovery resumes safe.
  *
- * R1-P109 — wraps the per-upload dispatch + audit emission in
- * `sql.begin(async tx => ...)` so mid-batch DB errors don't leave
- * partial review-queue dupes on pg-boss retry.
+ * R2-P114 — explicit status enumeration on optimistic-lock miss:
+ * `processing` → resume (prior crash); `pending_review|complete|
+ * failed` → ack-skip; anything else (`queued`, missing) → throw.
+ *
+ * R2-P115 — distinguish "ON CONFLICT no-op" from "empty extraction"
+ * via `conflictCount`. Idempotent retry of a complete upload no
+ * longer dead-letters it.
  */
 
 export interface DocumentConsumerDeps {
@@ -43,7 +45,6 @@ export interface DocumentConsumerDeps {
   textractAdapter: TextractAdapter;
   downloadStorageObject: (storagePath: string) => Promise<{
     bytes: Uint8Array;
-    mimeType: string;
   }>;
 }
 
@@ -66,11 +67,20 @@ export async function handleDocumentJob(
   deps: DocumentConsumerDeps,
   data: JobPayload<ExtractDocumentPayload>,
 ): Promise<void> {
-  const { uploadId, storagePath, mimeType } = data.payload;
+  // R2-P124 — validate inputs at entry. `::uuid` cast on undefined
+  // would throw inside the transaction and trigger an infinite
+  // pg-boss retry loop.
   const patientId = data.patientId;
+  const { uploadId, storagePath, mimeType } = data.payload;
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  if (!patientId || !uploadId || !storagePath || !mimeType) {
+    throw new Error(
+      `[extraction.document] invalid payload — required fields missing: patientId=${patientId}, uploadId=${uploadId}, storagePath=${storagePath}, mimeType=${mimeType}`,
+    );
+  }
 
-  // R1-P95 — try queued→processing; on miss, check current status
-  // and decide whether to resume or skip.
+  // R1-P95 + R2-P114 — try queued→processing; on miss, dispatch on
+  // current status explicitly.
   const moveToProcessing = await applyUploadTransition(deps.sql, {
     uploadId,
     from: "queued",
@@ -78,47 +88,81 @@ export async function handleDocumentJob(
   });
   if (!moveToProcessing.updated) {
     const status = await currentStatus(deps.sql, uploadId);
-    if (status === "processing") {
-      console.warn(
-        `[extraction.document] uploadId=${uploadId}: resuming after prior worker crash (already in processing)`,
-      );
-      // Fall through to the extraction + dispatch path.
-    } else {
-      console.warn(
-        `[extraction.document] uploadId=${uploadId}: skipping; current status=${status ?? "missing"}`,
-      );
-      return;
+    switch (status) {
+      case "processing":
+        console.warn(
+          `[extraction.document] uploadId=${uploadId}: resuming after prior worker crash (already in processing)`,
+        );
+        // Fall through to dispatch.
+        break;
+      case "pending_review":
+      case "complete":
+      case "failed":
+        // Terminal-equivalent: someone (operator, other path)
+        // already finalized this upload. Ack the job.
+        console.warn(
+          `[extraction.document] uploadId=${uploadId}: skipping; current status=${status}`,
+        );
+        return;
+      default:
+        // `queued`, `null`, or unknown — the state machine should
+        // never deliver a job to this consumer when the row is in
+        // `queued` and the UPDATE missed. Throw so pg-boss retries.
+        throw new Error(
+          `[extraction.document] uploadId=${uploadId}: queued→processing missed AND status='${status ?? "missing"}'; pg-boss will retry`,
+        );
     }
   }
 
-  // R1-P98 — use payload's `mimeType` (validated at upload time per
-  // Story 2.2 confirmImport) instead of storage-derived (Supabase
-  // can return empty `data.type` for unknown MIMEs).
-  const { bytes } = await deps.downloadStorageObject(storagePath);
+  // R2-P123 — wrap download in try/catch. Permanent storage failures
+  // (404, perm-denied) shouldn't loop forever; dead-letter directly
+  // with a clear reason and let the patient see the failed state.
+  let bytes: Uint8Array;
+  try {
+    const downloaded = await deps.downloadStorageObject(storagePath);
+    bytes = downloaded.bytes;
+  } catch (err) {
+    console.error(
+      `[extraction.document] uploadId=${uploadId}: storage download failed; dead-lettering upload`,
+      err,
+    );
+    const dl = await applyDeadLetter(deps.sql, {
+      uploadId,
+      metadata: {
+        reason: "storage_unavailable",
+        error: err instanceof Error ? err.message : String(err),
+      },
+    });
+    if (!dl.updated) {
+      console.warn(
+        `[extraction.document] uploadId=${uploadId}: dead-letter no-op (row already terminal)`,
+      );
+    }
+    return;
+  }
+
   const fields = await deps.textractAdapter.extract({
     bytes,
     mimeType,
     storagePath,
   });
 
-  // R1-P109 — atomic per-upload: dispatch + audit emission run in
-  // one transaction. Mid-batch error → rollback → pg-boss retries
-  // cleanly (no duplicate review-queue rows).
-  let outcome;
+  // R2-P113 + R1-P109 — atomic per-upload: dispatch + audit emission
+  // + terminal UPDATE all run in one transaction. Mid-batch error →
+  // rollback → pg-boss retries cleanly. Review-queue's unique index
+  // (R2-P113) keeps the retry idempotent.
   try {
-    outcome = await deps.sql.begin(async (tx) => {
-      const dispatchOutcome = await dispatchExtractedFields(tx, {
+    await deps.sql.begin(async (tx) => {
+      const outcome = await dispatchExtractedFields(tx, {
         uploadId,
         patientId,
         fields,
       });
+
       // R1-P93 — emit one `observation.write` audit event per
-      // published observation (`actorType: 'system'`). Worker uses
-      // raw SQL (mirrors `packages/api/src/audit.ts` `writeAuditLog`)
-      // because it's on a separate postgres-driver connection.
-      // Service-role bypasses the audit RLS WITH CHECK (Story 1.1
-      // F10 — system-actor RLS deferred).
-      for (const observationId of dispatchOutcome.publishedObservationIds) {
+      // newly-published observation. ON-CONFLICT no-op observations
+      // (re-processed) intentionally don't re-audit.
+      for (const observationId of outcome.publishedObservationIds) {
         await tx`INSERT INTO audit_log
           (actor_id, actor_type, event, resource_id, resource_type, metadata)
           VALUES (
@@ -130,7 +174,77 @@ export async function handleDocumentJob(
             ${JSON.stringify({ uploadId, source: "extracted" })}::jsonb
           )`;
       }
-      return dispatchOutcome;
+
+      // R2-P115 — distinguish "all-already-written (retry)" from
+      // "empty extraction". `conflictCount > 0` means we re-ran a
+      // doc that previously completed — DON'T dead-letter; instead
+      // re-converge the terminal state.
+      const hasWork =
+        outcome.publishedCount > 0 ||
+        outcome.reviewQueueCount > 0 ||
+        outcome.conflictCount > 0;
+      const needsReview =
+        outcome.reviewQueueCount > 0 || outcome.conflictCount > 0;
+
+      if (fields.length === 0 || !hasWork) {
+        // Genuine empty extraction OR every field was quarantined
+        // by per-field try/catch in dispatch (R2-P121). Dead-letter.
+        const dl = await applyDeadLetter(tx, {
+          uploadId,
+          metadata: {
+            reason:
+              fields.length === 0
+                ? "empty_extraction"
+                : "no_publishable_fields",
+            field_count: fields.length,
+            error_count: outcome.errorCount,
+          },
+        });
+        if (!dl.updated) {
+          console.warn(
+            `[extraction.document] uploadId=${uploadId}: dead-letter no-op (row already terminal)`,
+          );
+        }
+        return;
+      }
+
+      // Determine terminal status. `needsReview` covers both fresh
+      // review-queue inserts AND re-processed (conflict) rows where
+      // the prior run had review entries.
+      if (needsReview) {
+        const move = await applyUploadTransition(tx, {
+          uploadId,
+          from: "processing",
+          to: "pending_review",
+          metadata: {
+            published: outcome.publishedCount,
+            review: outcome.reviewQueueCount,
+            conflicts: outcome.conflictCount,
+            errors: outcome.errorCount,
+          },
+        });
+        if (!move.updated) {
+          console.warn(
+            `[extraction.document] uploadId=${uploadId}: processing→pending_review failed; row externally moved`,
+          );
+        }
+        return;
+      }
+
+      const move = await applyUploadTransition(tx, {
+        uploadId,
+        from: "processing",
+        to: "complete",
+        metadata: {
+          published: outcome.publishedCount,
+          conflicts: outcome.conflictCount,
+        },
+      });
+      if (!move.updated) {
+        console.warn(
+          `[extraction.document] uploadId=${uploadId}: processing→complete failed; row externally moved`,
+        );
+      }
     });
   } catch (err) {
     console.error(
@@ -138,61 +252,6 @@ export async function handleDocumentJob(
       err,
     );
     throw err;
-  }
-
-  // R1-P100 — terminal-status decision. Dead-letter only when
-  // nothing got written at all (empty extraction OR all-fields
-  // rejected by the dispatcher before any write — should be
-  // impossible post-R1-P100 since every field goes somewhere).
-  if (
-    fields.length === 0 ||
-    (outcome.publishedCount === 0 && outcome.reviewQueueCount === 0)
-  ) {
-    const dl = await applyDeadLetter(deps.sql, {
-      uploadId,
-      metadata: {
-        reason:
-          fields.length === 0 ? "empty_extraction" : "no_publishable_fields",
-        field_count: fields.length,
-      },
-    });
-    // R1-P106 — check the dead-letter return.
-    if (!dl.updated) {
-      console.warn(
-        `[extraction.document] uploadId=${uploadId}: dead-letter no-op (row already terminal)`,
-      );
-    }
-    return;
-  }
-
-  if (outcome.reviewQueueCount > 0) {
-    const move = await applyUploadTransition(deps.sql, {
-      uploadId,
-      from: "processing",
-      to: "pending_review",
-      metadata: {
-        published: outcome.publishedCount,
-        review: outcome.reviewQueueCount,
-      },
-    });
-    if (!move.updated) {
-      console.warn(
-        `[extraction.document] uploadId=${uploadId}: processing→pending_review failed; row externally moved`,
-      );
-    }
-    return;
-  }
-
-  const move = await applyUploadTransition(deps.sql, {
-    uploadId,
-    from: "processing",
-    to: "complete",
-    metadata: { published: outcome.publishedCount },
-  });
-  if (!move.updated) {
-    console.warn(
-      `[extraction.document] uploadId=${uploadId}: processing→complete failed; row externally moved`,
-    );
   }
 }
 

@@ -161,14 +161,33 @@ describe("handleDocumentJob — dead-letter (all fields < 0.01)", () => {
   });
 });
 
-describe("handleDocumentJob — optimistic-lock miss (R1-P95)", () => {
-  it("skips when queued→processing misses AND the row is in a terminal state", async () => {
+describe("handleDocumentJob — optimistic-lock miss (R1-P95 + R2-P114)", () => {
+  it("R2-P114: throws (so pg-boss retries) when queued→processing misses AND status is missing/null", async () => {
     const sql = makeSql({
       transitionRows: [[]], // miss on first transition
       loinc: {},
-      // No `currentStatus` — simulates the row vanishing OR the
-      // SELECT returning no rows. The handler must skip silently
-      // (don't throw; don't dead-letter).
+      // No `currentStatus` — the SELECT returns no rows. The
+      // handler must THROW so pg-boss retries (post-R2-P114).
+      // The old behavior was silent-skip; new contract is explicit
+      // case enumeration.
+    });
+    await expect(
+      handleDocumentJob(
+        {
+          sql,
+          textractAdapter: mockAdapter([HEMOGLOBINA]),
+          downloadStorageObject: mockDownload,
+        },
+        jobPayload(),
+      ),
+    ).rejects.toThrow(/queued→processing missed/);
+  });
+
+  it("R2-P114: ack-skips silently when the row is in pending_review", async () => {
+    const sql = makeSql({
+      transitionRows: [[]],
+      loinc: {},
+      currentStatus: "pending_review",
     });
     const warnSpy = vi
       .spyOn(console, "warn")
@@ -182,7 +201,7 @@ describe("handleDocumentJob — optimistic-lock miss (R1-P95)", () => {
       jobPayload(),
     );
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringMatching(/skipping; current status=/),
+      expect.stringMatching(/skipping; current status=pending_review/),
     );
     warnSpy.mockRestore();
   });

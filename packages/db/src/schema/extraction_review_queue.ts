@@ -1,4 +1,4 @@
-import { pgEnum, pgTable } from "drizzle-orm/pg-core";
+import { pgEnum, pgTable, uniqueIndex } from "drizzle-orm/pg-core";
 
 /**
  * Story 2.3 — operator-only review queue for extracted fields that
@@ -33,4 +33,16 @@ export const ExtractionReviewQueue = pgTable(
       .notNull(),
     resolvedAt: t.timestamp({ mode: "date", withTimezone: true }),
   }),
+  (table) => [
+    // R2-P113 — idempotency seam for crash-recovery resume. Without
+    // this, R1-P95's resume path duplicates review-queue rows when
+    // the prior run committed dispatch but crashed before the
+    // terminal UPDATE. The 3-column key matches the dedup contract
+    // the operator UI assumes.
+    uniqueIndex("extraction_review_queue_upload_biomarker_reason_unique").on(
+      table.uploadId,
+      table.biomarkerName,
+      table.reason,
+    ),
+  ],
 );

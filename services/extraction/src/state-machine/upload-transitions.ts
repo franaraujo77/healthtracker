@@ -1,4 +1,10 @@
-import postgres from "postgres";
+import type postgres from "postgres";
+
+// R2-P113 — `applyUploadTransition` is now called from inside the
+// document-consumer's `sql.begin(async tx => ...)` block (so the
+// terminal status UPDATE is atomic with dispatch + audit). Widen
+// the type to accept both top-level `Sql` and `TransactionSql`.
+type WorkerSql = postgres.Sql | postgres.TransactionSql;
 
 /**
  * Story 2.3 — worker-side upload state-machine helpers.
@@ -59,7 +65,7 @@ function isLegalTransition(from: UploadStatus, to: UploadStatus): boolean {
 }
 
 export async function applyUploadTransition(
-  sql: postgres.Sql,
+  sql: WorkerSql,
   input: ApplyUploadTransitionInput,
 ): Promise<ApplyUploadTransitionResult> {
   if (!isLegalTransition(input.from, input.to)) {
@@ -103,7 +109,7 @@ export async function applyUploadTransition(
  * that case.
  */
 export async function applyDeadLetter(
-  sql: postgres.Sql,
+  sql: WorkerSql,
   input: { uploadId: string; metadata?: Record<string, unknown> },
 ): Promise<ApplyUploadTransitionResult> {
   const merged = JSON.stringify(input.metadata ?? {});
@@ -128,7 +134,7 @@ export async function applyDeadLetter(
  * change shape.
  */
 export async function markUploadFailed(
-  sql: postgres.Sql,
+  sql: WorkerSql,
   uploadId: string,
 ): Promise<void> {
   const result = await applyDeadLetter(sql, {

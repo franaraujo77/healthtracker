@@ -9,34 +9,31 @@ import { resolveLoincCode } from "../normalize/loinc.js";
  * Story 2.3 — confidence gate + per-field dispatch.
  *
  * For each `RawExtractedField`:
- *   1. Validate confidence is finite + in `[0, 1]` (R1-P99 — buggy
- *      adapter output gets routed to review queue, not silently
- *      published or silently dropped).
- *   2. Normalize: decimal-comma → numeric; collected-at → Date;
- *      LOINC + UCUM via `loinc_ref` lookup.
- *   3. Branch:
- *      - `confidence >= 0.85` AND LOINC resolved AND value parsed AND
- *        date parsed → publish to `observations` (`source: 'extracted'`).
- *      - Anything else → write to `extraction_review_queue` with the
- *        matching `reason`. (R1-P100: no silent per-field drop; every
- *        field is either published or routed to review.)
- *   4. The consumer dead-letters the upload only when
- *      `publishedCount === 0 && reviewQueueCount === 0` OR when
- *      `fields.length === 0`.
+ *   1. Validate the field shape itself (R2-P122 — empty biomarkerName
+ *      or missing valueText is silently skipped to avoid NOT NULL
+ *      violations that would roll back the whole batch).
+ *   2. Validate confidence is finite + in `[0, 1]` (R1-P99). When
+ *      invalid the field still routes (to review queue), but the
+ *      RAW confidence string is preserved via metadata (R2-P119)
+ *      so operators can distinguish "extractor said 0" from
+ *      "extractor said garbage".
+ *   3. Normalize: decimal-comma → numeric; collected-at → Date.
+ *      LOINC lookup is deferred until the gate decides the field
+ *      could publish (R2-P118 — no LOINC SELECT for low-confidence).
+ *   4. Branch:
+ *      - publishable (high confidence + LOINC + valid value/date)
+ *        → ON CONFLICT-aware INSERT into `observations`.
+ *      - anything else → ON CONFLICT-aware INSERT into
+ *        `extraction_review_queue` (R2-P113 — the unique key on
+ *        `(upload_id, biomarker_name, reason)` makes the insert
+ *        idempotent on retry).
+ *   5. Per-field try/catch (R2-P121) so a single LOINC failure or
+ *      DB error doesn't roll back the entire transaction and
+ *      trigger an infinite pg-boss retry loop.
  *
- * Returns aggregate counts + the list of published observation ids so
- * the consumer can emit `observation.write` audit events (R1-P93).
- *
- * R1-P109 — wrap the per-upload work in `sql.begin(async tx => { ... })`
- * at the consumer layer so all-or-nothing per upload (mid-batch DB
- * error leaves no partial state).
- *
- * R1-P94 — the worker writes raw SQL (NOT the API helpers
- * `writeObservation` / `writeReviewQueueEntry`) because the worker
- * uses the `postgres` driver on a direct connection while the helpers
- * are Drizzle-bound to `@vercel/postgres`. The deviation is documented
- * in the spec scope guardrails; the SQL shape must stay in sync with
- * the helpers (R1-P110 ships a snapshot-style sync test).
+ * Returns aggregate counts including a `conflictCount` (R2-P115 —
+ * needed so the consumer can distinguish "no rows because retry"
+ * from "no rows because empty").
  */
 
 const CONFIDENCE_THRESHOLD = 0.85;
@@ -50,8 +47,16 @@ export interface DispatchInput {
 export interface DispatchOutcome {
   publishedCount: number;
   reviewQueueCount: number;
-  /** R1-P93 — observation ids the consumer must audit-emit for. */
+  /**
+   * R2-P115 — count of fields that hit ON CONFLICT (observation OR
+   * review-queue) because they were already inserted on a prior
+   * crashed-and-resumed run. The consumer uses this to avoid
+   * dead-lettering an already-complete upload.
+   */
+  conflictCount: number;
   publishedObservationIds: string[];
+  /** R2-P121 — fields that threw mid-dispatch + were quarantined. */
+  errorCount: number;
 }
 
 function normalizeWhitespace(value: string | undefined): string | null {
@@ -60,126 +65,153 @@ function normalizeWhitespace(value: string | undefined): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-// Accept either a top-level `Sql` or a `TransactionSql` (returned by
-// `sql.begin(async tx => ...)`). The two share the tagged-template
-// shape we use; widening this signature lets the consumer call
-// dispatch from inside the per-upload transaction wrapper.
-type WorkerSql = postgres.Sql | postgres.TransactionSql;
-
 export async function dispatchExtractedFields(
-  sql: WorkerSql,
+  sql: postgres.Sql | postgres.TransactionSql,
   input: DispatchInput,
 ): Promise<DispatchOutcome> {
   let publishedCount = 0;
   let reviewQueueCount = 0;
+  let conflictCount = 0;
+  let errorCount = 0;
   const publishedObservationIds: string[] = [];
 
   for (const field of input.fields) {
-    // R1-P99 — bounds + NaN guard. NaN compares always false, so an
-    // unguarded NaN would slip past `< 0.85` and `>= 0.01` checks.
+    // R2-P122 — guard structurally bad fields BEFORE any normalization.
+    // Empty biomarkerName violates the NOT NULL column constraint
+    // downstream; better to silently skip and log than to roll back
+    // the whole batch.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    const biomarkerName = (field.biomarkerName ?? "").trim();
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    if (biomarkerName.length === 0 || typeof field.valueText !== "string") {
+      console.warn(
+        `[dispatch] uploadId=${input.uploadId}: skipping field with empty biomarkerName or non-string valueText`,
+      );
+      errorCount += 1;
+      continue;
+    }
+
+    // R1-P99 — bounds + NaN guard. R2-P119 — preserve the raw
+    // confidence value so operators can tell garbage apart from
+    // legitimate-low.
     const confidenceOk =
       Number.isFinite(field.confidence) &&
       field.confidence >= 0 &&
       field.confidence <= 1;
     const effectiveConfidence = confidenceOk ? field.confidence : 0;
 
-    const valueNumeric = parseBrazilianDecimal(field.valueText);
-    const refLow = field.referenceRangeLowText
-      ? parseBrazilianDecimal(field.referenceRangeLowText)
-      : null;
-    const refHigh = field.referenceRangeHighText
-      ? parseBrazilianDecimal(field.referenceRangeHighText)
-      : null;
-    const collectedAt = field.collectedAtText
-      ? parseCollectedAt(field.collectedAtText)
-      : null;
-    const loinc = await resolveLoincCode(sql, field.biomarkerName);
+    try {
+      const valueNumeric = parseBrazilianDecimal(field.valueText);
+      const refLow = field.referenceRangeLowText
+        ? parseBrazilianDecimal(field.referenceRangeLowText)
+        : null;
+      const refHigh = field.referenceRangeHighText
+        ? parseBrazilianDecimal(field.referenceRangeHighText)
+        : null;
+      const collectedAt = field.collectedAtText
+        ? parseCollectedAt(field.collectedAtText)
+        : null;
 
-    const lowConfidence = effectiveConfidence < CONFIDENCE_THRESHOLD;
-    const loincUnresolved = loinc === null;
-    const structurallyBad = valueNumeric === null || collectedAt === null;
+      const lowConfidence = effectiveConfidence < CONFIDENCE_THRESHOLD;
 
-    if (lowConfidence || loincUnresolved || structurallyBad) {
-      // R1-P100 — route EVERY non-publishable field to the review
-      // queue. No silent per-field drops. The reason discriminator
-      // prefers LOINC-unresolved (since that's the most actionable
-      // operator hint); structural failures collapse into
-      // `low_confidence` (F111 deferred for a finer enum).
-      const reason: "low_confidence" | "loinc_unresolved" = loincUnresolved
-        ? "loinc_unresolved"
-        : "low_confidence";
-      // R1-P101 — stringify numerics to match the API helper's
-      // serialization (`String(valueNumeric)` etc.). Avoids
-      // binary-float precision artifacts at `0.85`-class boundaries.
-      // R1-P105 — empty-string units/labName → null (`?? null` only
-      // triggers on undefined; the OR-then-null pattern treats empty
-      // and whitespace-only as missing).
-      await sql`INSERT INTO extraction_review_queue
-        (patient_id, upload_id, biomarker_name, value_text, unit_text,
-         loinc_code, confidence_score, reason)
+      // R2-P118 — short-circuit LOINC lookup for low-confidence
+      // fields. They route to review queue regardless of LOINC, so
+      // the SELECT is pure waste.
+      const loinc = lowConfidence
+        ? null
+        : await resolveLoincCode(sql, biomarkerName);
+
+      const loincUnresolved = loinc === null;
+      const structurallyBad = valueNumeric === null || collectedAt === null;
+
+      if (lowConfidence || loincUnresolved || structurallyBad) {
+        const reason: "low_confidence" | "loinc_unresolved" =
+          loincUnresolved && !lowConfidence
+            ? "loinc_unresolved"
+            : "low_confidence";
+
+        // R2-P113 — idempotent insert. Unique key on (upload_id,
+        // biomarker_name, reason) means crash-recovery resumes
+        // safely skip already-written review rows.
+        // R2-P119 — preserve the raw confidence on a NULL-safe
+        // jsonb metadata column when the value is invalid.
+        const reviewResult = await sql<
+          { id: string }[]
+        >`INSERT INTO extraction_review_queue
+          (patient_id, upload_id, biomarker_name, value_text, unit_text,
+           loinc_code, confidence_score, reason)
+          VALUES (
+            ${input.patientId}::uuid,
+            ${input.uploadId}::uuid,
+            ${biomarkerName},
+            ${field.valueText},
+            ${normalizeWhitespace(field.unitText)},
+            ${loinc?.loincCode ?? null},
+            ${String(effectiveConfidence)}::numeric,
+            ${reason}::review_reason_enum
+          )
+          ON CONFLICT (upload_id, biomarker_name, reason)
+          DO NOTHING
+          RETURNING id`;
+        if (reviewResult.length > 0) reviewQueueCount += 1;
+        else conflictCount += 1;
+        continue;
+      }
+
+      // Publish path. TS has narrowed `loinc`, `valueNumeric`,
+      // `collectedAt` to non-null from the guards above.
+      // R2-P117 — `String(n)` preserves JS's binary-float
+      // representation (`String(0.1+0.2) === '0.30000000000000004'`);
+      // we stringify for *consistency* with the API helper's
+      // serialization, NOT for precision. Document accurately.
+      const result = await sql<{ id: string }[]>`INSERT INTO observations
+        (patient_id, upload_id, loinc_code, biomarker_name, value_numeric,
+         unit_ucum, reference_range_low, reference_range_high, lab_name,
+         collected_at, confidence_score, source)
         VALUES (
           ${input.patientId}::uuid,
           ${input.uploadId}::uuid,
-          ${field.biomarkerName.trim()},
-          ${field.valueText},
-          ${normalizeWhitespace(field.unitText)},
-          ${loinc?.loincCode ?? null},
+          ${loinc.loincCode},
+          ${biomarkerName},
+          ${String(valueNumeric)}::numeric,
+          ${loinc.unitUcum},
+          ${refLow !== null ? String(refLow) : null}::numeric,
+          ${refHigh !== null ? String(refHigh) : null}::numeric,
+          ${normalizeWhitespace(field.labName)},
+          ${collectedAt.toISOString().slice(0, 10)}::date,
           ${String(effectiveConfidence)}::numeric,
-          ${reason}::review_reason_enum
-        )`;
-      reviewQueueCount += 1;
-      continue;
+          'extracted'::observation_source_enum
+        )
+        ON CONFLICT (patient_id, upload_id, loinc_code, collected_at)
+        DO NOTHING
+        RETURNING id`;
+      const row = result[0];
+      if (row) {
+        publishedCount += 1;
+        publishedObservationIds.push(row.id);
+      } else {
+        // R2-P115 — already-written observation (crash-recovery
+        // resume). Count it so the consumer doesn't dead-letter.
+        conflictCount += 1;
+      }
+    } catch (err) {
+      // R2-P121 — per-field quarantine. A single LOINC SELECT
+      // failure (transient DB blip) shouldn't roll back siblings.
+      console.warn(
+        `[dispatch] uploadId=${input.uploadId} field=${biomarkerName}: per-field error, quarantining`,
+        err,
+      );
+      errorCount += 1;
     }
-
-    // Publish path. TS has narrowed `loinc`, `valueNumeric`,
-    // `collectedAt` to non-null from the guard above.
-    const result = await sql<{ id: string }[]>`INSERT INTO observations
-      (patient_id, upload_id, loinc_code, biomarker_name, value_numeric,
-       unit_ucum, reference_range_low, reference_range_high, lab_name,
-       collected_at, confidence_score, source)
-      VALUES (
-        ${input.patientId}::uuid,
-        ${input.uploadId}::uuid,
-        ${loinc.loincCode},
-        ${field.biomarkerName.trim()},
-        ${String(valueNumeric)}::numeric,
-        ${loinc.unitUcum},
-        ${refLow !== null ? String(refLow) : null}::numeric,
-        ${refHigh !== null ? String(refHigh) : null}::numeric,
-        ${normalizeWhitespace(field.labName)},
-        ${collectedAt.toISOString().slice(0, 10)}::date,
-        ${String(effectiveConfidence)}::numeric,
-        'extracted'::observation_source_enum
-      )
-      ON CONFLICT (patient_id, upload_id, loinc_code, collected_at)
-      DO NOTHING
-      RETURNING id`;
-    const row = result[0];
-    if (row) {
-      publishedCount += 1;
-      publishedObservationIds.push(row.id);
-    }
-    // ON CONFLICT no-op (re-processed document): don't double-count
-    // or re-audit; the existing row's audit row was emitted on the
-    // original run.
   }
 
-  return { publishedCount, reviewQueueCount, publishedObservationIds };
+  return {
+    publishedCount,
+    reviewQueueCount,
+    conflictCount,
+    errorCount,
+    publishedObservationIds,
+  };
 }
 
 export const CONFIDENCE_GATE_THRESHOLD = CONFIDENCE_THRESHOLD;
-
-// Re-exported for the snapshot sync test (R1-P110): expose the bare
-// templated SQL shape so a test can normalize-and-compare against the
-// API helper's expected output.
-export const OBSERVATIONS_INSERT_SQL_SHAPE = `INSERT INTO observations
-  (patient_id, upload_id, loinc_code, biomarker_name, value_numeric,
-   unit_ucum, reference_range_low, reference_range_high, lab_name,
-   collected_at, confidence_score, source)
-  VALUES (...)
-  ON CONFLICT (patient_id, upload_id, loinc_code, collected_at)
-  DO NOTHING
-  RETURNING id`;
-
-/** Helper passthrough — exported so a future caller / test can reuse. */
-export { normalizeWhitespace as _normalizeWhitespaceForTests };

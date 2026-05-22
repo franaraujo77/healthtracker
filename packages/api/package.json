@@ -6,6 +6,10 @@
     ".": {
       "types": "./dist/src/index.d.ts",
       "default": "./src/index.ts"
+    },
+    "./upload-transitions": {
+      "types": "./dist/src/upload-transitions.d.ts",
+      "default": "./src/upload-transitions.ts"
     }
   },
   "license": "MIT",

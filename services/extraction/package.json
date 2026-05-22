@@ -20,6 +20,7 @@
     "postgres": "catalog:"
   },
   "devDependencies": {
+    "@healthtracker/api": "workspace:*",
     "@healthtracker/eslint-config": "workspace:*",
     "@types/node": "catalog:",
     "eslint": "catalog:",

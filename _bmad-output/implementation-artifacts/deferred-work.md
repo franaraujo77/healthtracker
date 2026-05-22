@@ -1,5 +1,16 @@
 # Deferred Work
 
+## Deferred from: code review of story-2-3 round 2 (2026-05-22)
+
+- **F115: `sql.begin` test mock makes `tx === sql`** — production `postgres.js` `TransactionSql` forbids nested `.begin` without `.savepoint`; current tests give false confidence. Add typing-only doc; integration test deferred.
+- **F116: `awsTextractAdapter` import is eager** in worker `index.ts` regardless of `EXTRACTION_ADAPTER`. Switch to dynamic `await import()` when real SDK lands.
+- **F117: `parseCollectedAt` still rejects `2024-03-15T00:00:00Z`** — R1-P103 only stripped space-then-time, not T-suffix. Extends F109.
+- **F118: Worker `applyUploadTransition` raw SQL drift from API helper** — snapshot test pins only the arc map, not the SQL body. Integration test required (extends F112).
+- **F119: `pending_review → processing` not in `UPLOAD_TRANSITIONS`** — Story 8.2's reviewer-reject-retry can't be modeled in the current state machine. Design decision.
+- **F120: R1-P93 audit emission uses `actor_id = patientId` for system events** — actor is the worker, not the patient. F10 follow-up should introduce a sentinel system UUID or nullable actor_id.
+- **F121: `writeObservation` `toISOString().slice(0, 10)` throws RangeError for years > 9999** — theoretical; document the contract.
+- **F122: Empty-fixtures mock-mode error doesn't `applyDeadLetter` directly** — propagates to pg-boss → dead-letter handler → `markUploadFailed`. Multi-hop but eventually correct.
+
 ## Deferred from: code review of story-2-3 (2026-05-22)
 
 - **F103: Nested `sql\`COALESCE(...)\``template fragments in worker`applyUploadTransition`** — verify with integration test (testcontainer or local Supabase) that the `postgres` driver inlines them as fragments, not string literals.

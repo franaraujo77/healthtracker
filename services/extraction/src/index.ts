@@ -33,11 +33,17 @@ if (EXTRACTION_ADAPTER !== "mock" && EXTRACTION_ADAPTER !== "aws") {
 // case this warning addresses.
 const mockFixtures: Parameters<typeof mockTextractAdapterFromFixtures>[0] = [];
 if (EXTRACTION_ADAPTER === "mock") {
+  // R2-P120 — accurate boot warning. The mock adapter rejects
+  // unknown storage paths → handler throws → pg-boss retries to
+  // the queue's retry limit → dead-letter handler fires
+  // `markUploadFailed`. The upload eventually reaches `failed` but
+  // it's a multi-hop path, not a direct dead-letter on the upload.
   console.warn(
     "[extraction-worker] BOOT: EXTRACTION_ADAPTER=mock with 0 fixtures. " +
-      "Every extraction.document job will dead-letter (the mock adapter " +
-      "rejects unknown storage paths). Register fixtures or set " +
-      "EXTRACTION_ADAPTER=aws if you mean to use real Textract.",
+      "Every extraction.document job will fail with NO_FIXTURE; pg-boss " +
+      "will retry to the queue's retry limit, then the extraction.dead_letter " +
+      "handler will mark each upload as failed via markUploadFailed. Register " +
+      "fixtures or set EXTRACTION_ADAPTER=aws if you mean to use real Textract.",
   );
 }
 const textractAdapter: TextractAdapter =
@@ -60,7 +66,7 @@ const storageClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 async function downloadStorageObject(
   storagePath: string,
-): Promise<{ bytes: Uint8Array; mimeType: string }> {
+): Promise<{ bytes: Uint8Array }> {
   const result = await storageClient.storage
     .from("lab-uploads")
     .download(storagePath);
@@ -80,14 +86,12 @@ async function downloadStorageObject(
     );
   }
   const arrayBuffer = await result.data.arrayBuffer();
-  // R1-P98 — `mimeType` is sourced from the job payload (validated at
-  // upload time by Story 2.2 confirmImport); the storage-derived
-  // `data.type` is dropped here because Supabase returns empty string
-  // for unknown MIMEs and would mislead downstream.
-  return {
-    bytes: new Uint8Array(arrayBuffer),
-    mimeType: result.data.type,
-  };
+  // R1-P98 + R2-P116 — `mimeType` is sourced from the job payload
+  // (validated at upload time by Story 2.2 confirmImport); the
+  // storage-derived `data.type` was dropped because Supabase
+  // returns empty string for unknown MIMEs. The return type now
+  // matches actual consumer usage (`{ bytes }` only).
+  return { bytes: new Uint8Array(arrayBuffer) };
 }
 
 const WORKER_DATABASE_URL = process.env.WORKER_DATABASE_URL;
