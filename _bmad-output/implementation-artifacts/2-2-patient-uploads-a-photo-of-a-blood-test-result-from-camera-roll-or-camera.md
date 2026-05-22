@@ -284,7 +284,8 @@ claude-opus-4-7[1m]
 - `apps/expo/app.config.ts` — `NSCameraUsageDescription` in `ios.infoPlist`.
 - `apps/expo/src/app/(tabs)/inicio.tsx` — `handlePickImageLibrary` + `handlePickImageCamera`; passes both to `<UploadSourceSheet>`; shared `isPickingRef` guard.
 - `apps/expo/src/app/onboarding/import.tsx` — F60 fix: added "Tirar foto" button + `handlePickCamera` (kept the existing "Escolher arquivos" PDF/image picker button — no sheet here, see Clarification #4).
-- `apps/web/src/app/inicio/inicio-empty-state.tsx` — widened `validateClientSide` to accept the full allowlist; generalized `openPdfPicker` → `openPicker(input)`; added `libraryInputRef` + `cameraInputRef` + their hidden `<input>`s (`accept` + `capture="environment"` set per source); passes `onPickImageFromLibrary`, `onPickImageFromCamera`, `cameraHintIsWeb` to the sheet.
+- `apps/web/src/app/inicio/inicio-empty-state.tsx` — widened `validateClientSide` to accept the full allowlist; generalized `openPdfPicker` → `openPicker(input)`; added `libraryInputRef` + `cameraInputRef` + their hidden `<input>`s (`accept` + `capture="environment"` set per source); passes `onPickImageFromLibrary`, `onPickImageFromCamera`, `cameraHintIsWeb` to the sheet. **Round 2 R2-P89**: web `<input accept>` widened to include `image/heif` (iOS Safari HEIC labelling).
+- `packages/types/src/jobs.ts` — **Round 1 P81 (added in round 2 audit per R2-P92)**: widened `ExtractDocumentPayload.mimeType` to include `image/heif`. **Honest note**: a whole-file semicolon + double-quote reformat landed alongside the union widening because the file predated the project's current prettier config (the original used no-semicolons / single-quotes style). The R2-P92 patch attempted to revert the reformat, but `pnpm format:fix` re-applied prettier; the formatting-normalization is therefore accepted as a one-time fix rather than a violation of CLAUDE.md §3 (the original style was already failing `pnpm format`).
 
 **No new files.**
 
