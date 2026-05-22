@@ -73,6 +73,12 @@ development_status:
   # round-1 patches applied: P130 audit resourceId on ON-CONFLICT (HIGH AC),
   # P131 numeric isDirty (HIGH AC), P132 page-level auth gate (HIGH privacy),
   # P133 confidence numeric coerce, P134 REVOKE anon/PUBLIC, P135–P142.
+  # round-2 patches applied: R2-P143 dropped dead-code cross-upload guard
+  # (HIGH regression), R2-P144 UTC-midnight normalize for re-SELECT probe
+  # (HIGH), R2-P146 patientId+resolvedAt predicate on review UPDATE +
+  # returning rowcount (HIGH race), R2-P147 staleTime:0 for focus refetch,
+  # R2-P148 ON-CONFLICT + completion-audit test coverage, R2-P149
+  # unconditional notification.upload_complete emission.
   2-5-patient-views-upload-status-and-receives-push-notifications: backlog
   2-6-patient-queues-an-upload-while-offline: backlog
   2-7-patient-manually-enters-bioimpedance-bia-measurements: backlog

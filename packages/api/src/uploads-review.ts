@@ -248,10 +248,23 @@ export async function confirmReviewFieldAsPatient(
   }
 
   // Resolve collectedAt: prefer the review row's text, fall back to
-  // the upload's createdAt date.
+  // the upload's createdAt date. R2-P144 — normalize to UTC midnight
+  // unconditionally so the re-SELECT conflict-key probe below uses
+  // the same ISO date string the original `writeObservation` insert
+  // computed (otherwise a parsed-Date with a local-TZ offset would
+  // ISO-format to a different day than the on-disk row).
   let collectedAt: Date | null = reviewRow.collectedAtText
     ? parseCollectedAt(reviewRow.collectedAtText)
     : null;
+  if (collectedAt !== null) {
+    collectedAt = new Date(
+      Date.UTC(
+        collectedAt.getUTCFullYear(),
+        collectedAt.getUTCMonth(),
+        collectedAt.getUTCDate(),
+      ),
+    );
+  }
   if (collectedAt === null) {
     const [uploadRow] = await database
       .select({ createdAt: Uploads.createdAt })
@@ -288,18 +301,23 @@ export async function confirmReviewFieldAsPatient(
     source: "patient_corrected",
   });
 
-  // P130 / P136 / P137 — on ON-CONFLICT (idempotent retry) the helper
-  // returns null. We must re-fetch the existing observation so the
-  // audit event carries the correct `resourceId` (the observation id,
-  // not the review-queue id) AND so we can verify the existing row
-  // actually belongs to this review row's upload (defensive guard
-  // against a same-day same-biomarker collision across uploads).
+  // P130 / P136 — on ON-CONFLICT (idempotent retry) the helper
+  // returns null. Re-fetch the existing observation so the audit
+  // event carries the correct `resourceId` (the observation id, not
+  // the review-queue id).
+  //
+  // R2-P143 — the cross-upload guard that P137 added was dead code
+  // (the SELECT predicate already filters by `uploadId`). The unique
+  // index includes `upload_id`, so a same-(patient, loinc, date)
+  // collision across two distinct uploads CANNOT trigger ON CONFLICT
+  // — both rows simply insert with their own `upload_id`. The guard
+  // is dropped.
   let observationId: string;
   if (inserted) {
     observationId = inserted.id;
   } else {
     const [existing] = await database
-      .select({ id: Observations.id, uploadId: Observations.uploadId })
+      .select({ id: Observations.id })
       .from(Observations)
       .where(
         and(
@@ -316,12 +334,6 @@ export async function confirmReviewFieldAsPatient(
         message: "OBSERVATION_CONFLICT_MISSING",
       });
     }
-    if (existing.uploadId !== reviewRow.uploadId) {
-      throw new TRPCError({
-        code: "CONFLICT",
-        message: "OBSERVATION_BELONGS_TO_DIFFERENT_UPLOAD",
-      });
-    }
     observationId = existing.id;
   }
 
@@ -335,14 +347,41 @@ export async function confirmReviewFieldAsPatient(
       }
     : null;
 
-  await database
+  // R2-P146 — defense-in-depth: the WHERE clause now scopes by
+  // `patient_id` AND `resolved_at IS NULL`. RLS already enforces
+  // ownership; the explicit predicates protect against (a) future
+  // service-role callers bypassing RLS, and (b) lost-update races
+  // where two confirm calls for the same review row would otherwise
+  // both succeed and the second writer's `correction_metadata`
+  // would silently clobber the first. The `isNull(resolvedAt)`
+  // guard means the second writer's UPDATE matches zero rows; the
+  // helper continues (idempotent — both calls reach the same
+  // post-state) but the audit event still fires for both, which
+  // matches the AC2/AC3 contract (we audit the patient action, not
+  // the DB-row creation).
+  const updatedRows = await database
     .update(ExtractionReviewQueue)
     .set({
       resolvedAt: new Date(),
       resolvedByPatientId: patientId,
       correctionMetadata,
     })
-    .where(eq(ExtractionReviewQueue.id, reviewRow.id));
+    .where(
+      and(
+        eq(ExtractionReviewQueue.id, reviewRow.id),
+        eq(ExtractionReviewQueue.patientId, patientId),
+        isNull(ExtractionReviewQueue.resolvedAt),
+      ),
+    )
+    .returning({ id: ExtractionReviewQueue.id });
+  // updatedRows.length === 0 means a concurrent confirm beat us;
+  // log so operations can spot it but don't throw — the AC contract
+  // for idempotent retry should "look like success".
+  if (updatedRows.length === 0) {
+    console.warn(
+      `[confirmReviewField] reviewQueueId=${reviewRow.id}: UPDATE matched zero rows — concurrent confirm OR foreign UPDATE attempt`,
+    );
+  }
 
   // observation may be null when ON CONFLICT no-op'd (idempotent retry).
   // We still emit the audit event (the patient action is what we audit;
@@ -419,23 +458,11 @@ export async function confirmReviewFieldAsPatient(
     });
     if (transitionResult.updated) {
       uploadStatus = "complete";
-      // Story 2.5 will consume this; we just emit the audit event here.
-      await writeAuditLog(database, {
-        actorId: patientId,
-        actorType: "system",
-        event: "notification.upload_complete",
-        resourceId: reviewRow.uploadId,
-        resourceType: "upload",
-        metadata: {
-          // Story 2.3 F120 — no system-sentinel UUID yet; we reuse the
-          // patient id as actorId for system events tied to a patient
-          // action. Documented gap.
-          triggeredBy: "patient_confirmation",
-        },
-      });
     } else {
       // Either already-complete (idempotent retry) OR operator-only
       // rows still block completion. Re-read status to know.
+      // F133 — log the operator-row-blocked branch so ops can spot
+      // orphaned operator rows quietly holding the upload back.
       const [post] = await database
         .select({ status: Uploads.status })
         .from(Uploads)
@@ -443,8 +470,33 @@ export async function confirmReviewFieldAsPatient(
         .limit(1);
       if (post?.status === "complete") {
         uploadStatus = "complete";
+      } else {
+        // F133 — operator-only rows still block completion; surface
+        // this so Ops can investigate orphans.
+        console.warn(
+          `[confirmReviewField] uploadId=${reviewRow.uploadId}: patient finished but upload is in ${post?.status ?? "unknown"} — operator-only rows likely block completion`,
+        );
       }
     }
+  }
+
+  // R2-P149 — emit `notification.upload_complete` whenever the
+  // upload reaches `complete` via this code path, INCLUDING when a
+  // concurrent finalizer beat us to the transition. Story 2.5's
+  // notification dispatcher is the consumer; idempotency on
+  // delivery is its responsibility. The audit row carries
+  // `actorType: 'system'` because the upload-completion fact is a
+  // system event tied to a patient action (F127 — no system
+  // sentinel UUID yet).
+  if (uploadStatus === "complete") {
+    await writeAuditLog(database, {
+      actorId: patientId,
+      actorType: "system",
+      event: "notification.upload_complete",
+      resourceId: reviewRow.uploadId,
+      resourceType: "upload",
+      metadata: { triggeredBy: "patient_confirmation" },
+    });
   }
 
   return {

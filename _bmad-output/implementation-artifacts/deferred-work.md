@@ -259,3 +259,12 @@
 - **F127** System-sentinel UUID for audit `actorType: 'system'` events — Story 2.3 F120 carries forward; `notification.upload_complete` still uses the patient id as actor.
 - **F128** Snapshot-sync test for the worker's raw-SQL `resolveLoincCode` vs `packages/api/src/loinc.ts` (the Drizzle version) — Story 2.3 R1-P110 pattern.
 - **F129** Refetch-on-focus for the web detail screen — `refetchOnWindowFocus` doesn't fire on mobile-web returning from camera/picker. Closed by Story 2.5 realtime.
+
+
+## Story 2.4 — round-2 review deferrals (F130–F134)
+
+- **F130** Introduce `markReviewQueueResolved` helper for write-path symmetry — `writeReviewQueueEntry` only handles INSERT; the patient-confirm flow does its own raw `database.update`. Sanctioned-write-path discipline would suggest a sibling helper.
+- **F131** Expo `⚑` glyph isn't a true Lucide/Tamagui icon — spec says "yellow flag icon"; the unicode glyph renders inconsistently across iOS/Android. Replace with a Tamagui/Lucide `Flag` component.
+- **F132** Expo `LowConfidenceField` local interface omits `loincCode`, `collectedAtText`, `confidenceScore` — type erases at the tRPC boundary. Use the inferred tRPC output type instead of a hand-rolled interface.
+- **F133** Structured log/metric for the `pending_review` post-confirm branch — already added a `console.warn` (R2-P149); upgrade to a metric so ops dashboards can alert on operator-row orphans.
+- **F134** Snapshot-sync test for `resolveLoincCode` API vs worker SQL — Story 2.3 R1-P110 pattern. The Drizzle and raw-postgres implementations can drift silently.

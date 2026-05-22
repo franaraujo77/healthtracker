@@ -23,7 +23,14 @@ export function UploadDetailClient({ uploadId }: Props) {
   const query = useQuery(
     trpc.uploads.getUploadDetail.queryOptions(
       { uploadId },
-      { refetchOnWindowFocus: true },
+      {
+        // R2-P147 — `staleTime: 0` so focus-refetch actually fires
+        // even after an SSR-hydrated cache. AC1's "refetches when
+        // the patient pulls to refresh" doesn't apply to desktop
+        // web; focus-refetch is the analogue.
+        refetchOnWindowFocus: true,
+        staleTime: 0,
+      },
     ),
   );
 

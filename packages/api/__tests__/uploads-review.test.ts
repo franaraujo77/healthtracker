@@ -240,6 +240,56 @@ describe("confirmReviewFieldAsPatient", () => {
       correctionMetadata: null,
     });
     expect(updateFn).toHaveBeenCalled();
+    // R2-P148 — last-confirm path emits `notification.upload_complete`
+    // with actorType 'system'. This is what Story 2.5's notification
+    // dispatcher consumes.
+    expect(insertValuesArgs[2]).toMatchObject({
+      actorType: "system",
+      event: "notification.upload_complete",
+      resourceId: UPLOAD_ID,
+      resourceType: "upload",
+    });
+  });
+
+  it("R2-P148 — idempotent retry: ON-CONFLICT re-SELECTs the existing observation id", async () => {
+    const reviewRow = {
+      id: REVIEW_ID,
+      uploadId: UPLOAD_ID,
+      biomarkerName: "Hemoglobina",
+      valueText: "14,2",
+      unitText: "g/dL",
+      loincCode: "718-7",
+      collectedAtText: "15/03/2024",
+      confidenceScore: "0.6",
+      resolvedAt: null,
+      reason: "low_confidence",
+    };
+    const { db, insertValuesArgs } = makeScriptedDb({
+      // selects: review row, loinc lookup, EXISTING observation
+      // (re-SELECT on conflict), remaining count
+      selects: [
+        [reviewRow],
+        [{ loincCode: "718-7", unitUcum: "g/dL" }],
+        [{ id: "obs-existing-1" }],
+        [{ c: 2 }],
+      ],
+      // observation insert returns [] (ON CONFLICT no-op)
+      insertReturning: [[]],
+      updates: [[{ id: REVIEW_ID }]],
+    });
+
+    const result = await confirmReviewFieldAsPatient(db, PATIENT_ID, {
+      reviewQueueId: REVIEW_ID,
+    });
+
+    // R2-P148 — observationId comes from the re-SELECT, not null.
+    expect(result.observationId).toBe("obs-existing-1");
+    // R2-P148 — audit event still fires with the correct observation
+    // id (not the review-queue id — P130's regression-guard).
+    expect(insertValuesArgs[1]).toMatchObject({
+      event: "observation.patient_confirmed",
+      resourceId: "obs-existing-1",
+    });
   });
 
   it("correct (edit) — uses the patient-provided value", async () => {
