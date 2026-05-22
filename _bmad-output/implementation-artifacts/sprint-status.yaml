@@ -91,7 +91,7 @@ development_status:
   # chunk-progress in thrown error, R2-P174 tightened ExpoPushToken
   # regex, R2-P175 status-label fallback through Record cast,
   # R2-P176 dropped dead Pular button, R2-P178 handler tests.
-  2-6-patient-queues-an-upload-while-offline: backlog
+  2-6-patient-queues-an-upload-while-offline: ready-for-dev
   2-7-patient-manually-enters-bioimpedance-bia-measurements: backlog
   2-8-patient-manages-push-notification-preferences: backlog
   epic-2-retrospective: optional
