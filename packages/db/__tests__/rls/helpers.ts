@@ -76,11 +76,41 @@ async function setLocal(
   await tx`SELECT set_config(${name}, ${value}, true)`;
 }
 
+/**
+ * Drops to the Supabase `authenticated` role for the rest of the
+ * transaction. PostgreSQL bypasses RLS for table owners and superusers
+ * — `DATABASE_URL` from `supabase start` is `postgres://postgres:…`,
+ * the superuser, which means policies don't fire and every test
+ * assertion that depends on RLS enforcement is meaningless. Switching
+ * to `authenticated` (the role Supabase's PostgREST + RLS contract is
+ * built around) restores enforcement. The `postgres` role is a member
+ * of `authenticated` so `SET ROLE` succeeds without GRANT.
+ *
+ * Caught at Epic 1 PR open in CI — Story 0.4's harness was wired with
+ * `it.todo()` stubs (per Epic 0 retro), so the wrong-role connection
+ * was latent until Story 1.1+ ran real RLS assertions.
+ *
+ * No template-literal interpolation here, so postgres.js doesn't
+ * parameterize — `SET LOCAL ROLE` issues the literal role name and
+ * Postgres accepts it.
+ */
+async function dropToAuthenticatedRole(
+  tx: postgres.TransactionSql,
+): Promise<void> {
+  await tx`SET LOCAL ROLE authenticated`;
+}
+
 async function applyClaims(
   tx: postgres.TransactionSql,
   identity: IdentityType,
   opts: IdentityOptions,
 ): Promise<void> {
+  // Drop to `authenticated` before applying any GUC so the role-switch
+  // affects every subsequent statement in the transaction (including
+  // the test's own SELECT / INSERT). All identity types — including
+  // `wrongPatient` and `revokedToken` — flow through this path.
+  await dropToAuthenticatedRole(tx);
+
   switch (identity) {
     case "correctPatient":
       await setLocal(tx, "app.current_patient_id", opts.patientId);
