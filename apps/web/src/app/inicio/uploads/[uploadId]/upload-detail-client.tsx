@@ -6,6 +6,7 @@ import {
   UPLOAD_DETAIL_ALL_DONE_PT_BR,
   UPLOAD_DETAIL_ERROR_PT_BR,
   UPLOAD_DETAIL_LOADING_PT_BR,
+  UPLOAD_DETAIL_TITLE_PT_BR,
   UPLOAD_DETAIL_WAITING_TEAM_PT_BR,
   UPLOAD_STATUS_LABELS_PT_BR,
 } from "@healthtracker/validators";
@@ -53,7 +54,7 @@ export function UploadDetailClient({ uploadId }: Props) {
   return (
     <>
       <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Resultado do upload</h1>
+        <h1 className="text-2xl font-semibold">{UPLOAD_DETAIL_TITLE_PT_BR}</h1>
         <span className="rounded-full border px-3 py-1 text-sm text-stone-700">
           {statusLabel}
         </span>

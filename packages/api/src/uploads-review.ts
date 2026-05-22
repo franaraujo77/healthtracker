@@ -92,16 +92,16 @@ export async function getUploadDetailForPatient(
     );
 
   // Operator-only rows are NOT visible to the patient via RLS — so we
-  // can't `SELECT` them on the patient connection. Use a COUNT against
-  // a service-role-bypassed view? No — we have only `ctx.db` here. The
-  // pragmatic answer: `loinc_unresolved` rows live alongside the
-  // upload, and the patient query above also returns rows; if the
-  // `uploads.status` is `pending_review` AND `lowConfidenceRows` is
-  // empty, the only way the upload is still in `pending_review` is
-  // because operator-only rows exist. This is sufficient for the UI
-  // to render the "Aguardando revisão da equipe" copy.
+  // infer their presence from the upload's state. P135 — also require
+  // `processingCompletedAt !== null` so a transient post-`processing`
+  // moment (worker finished dispatch but hasn't transitioned the
+  // upload status yet) doesn't surface a misleading "Aguardando
+  // revisão da equipe" banner. Service-role-bypassed exact count is
+  // F126 (requires SECURITY DEFINER view).
   const hasOperatorOnlyRows =
-    uploadRow.status === "pending_review" && lowConfidenceRows.length === 0;
+    uploadRow.status === "pending_review" &&
+    uploadRow.processingCompletedAt !== null &&
+    lowConfidenceRows.length === 0;
 
   const [obsCountRow] = await database
     .select({ c: sql<number>`count(*)::int` })
@@ -132,7 +132,7 @@ export interface ConfirmReviewFieldInput {
 }
 
 export interface ConfirmReviewFieldResult {
-  observationId: string | null;
+  observationId: string;
   uploadStatus: "pending_review" | "complete";
   remainingPatientReviewable: number;
 }
@@ -237,6 +237,16 @@ export async function confirmReviewFieldAsPatient(
     unitUcum = resolved?.unitUcum ?? reviewRow.unitText ?? "";
   }
 
+  // P138 — publishing with an empty unit produces meaningless data.
+  // If both the LOINC lookup miss AND the review row's text are empty,
+  // surface the worker-side bug instead of swallowing.
+  if (unitUcum.trim().length === 0) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "UNIT_UNRESOLVED",
+    });
+  }
+
   // Resolve collectedAt: prefer the review row's text, fall back to
   // the upload's createdAt date.
   let collectedAt: Date | null = reviewRow.collectedAtText
@@ -264,7 +274,7 @@ export async function confirmReviewFieldAsPatient(
     );
   }
 
-  const observation = await writeObservation(database, {
+  const inserted = await writeObservation(database, {
     patientId,
     uploadId: reviewRow.uploadId,
     loincCode,
@@ -277,6 +287,43 @@ export async function confirmReviewFieldAsPatient(
     confidenceScore: 1.0,
     source: "patient_corrected",
   });
+
+  // P130 / P136 / P137 — on ON-CONFLICT (idempotent retry) the helper
+  // returns null. We must re-fetch the existing observation so the
+  // audit event carries the correct `resourceId` (the observation id,
+  // not the review-queue id) AND so we can verify the existing row
+  // actually belongs to this review row's upload (defensive guard
+  // against a same-day same-biomarker collision across uploads).
+  let observationId: string;
+  if (inserted) {
+    observationId = inserted.id;
+  } else {
+    const [existing] = await database
+      .select({ id: Observations.id, uploadId: Observations.uploadId })
+      .from(Observations)
+      .where(
+        and(
+          eq(Observations.patientId, patientId),
+          eq(Observations.uploadId, reviewRow.uploadId),
+          eq(Observations.loincCode, loincCode),
+          eq(Observations.collectedAt, collectedAt.toISOString().slice(0, 10)),
+        ),
+      )
+      .limit(1);
+    if (!existing) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "OBSERVATION_CONFLICT_MISSING",
+      });
+    }
+    if (existing.uploadId !== reviewRow.uploadId) {
+      throw new TRPCError({
+        code: "CONFLICT",
+        message: "OBSERVATION_BELONGS_TO_DIFFERENT_UPLOAD",
+      });
+    }
+    observationId = existing.id;
+  }
 
   const isEdit = input.patientValueNumeric !== undefined;
   const correctedAt = new Date().toISOString();
@@ -306,12 +353,18 @@ export async function confirmReviewFieldAsPatient(
     event: isEdit
       ? "observation.patient_corrected"
       : "observation.patient_confirmed",
-    resourceId: observation?.id ?? reviewRow.id,
+    resourceId: observationId,
     resourceType: "observation",
     metadata: {
       uploadId: reviewRow.uploadId,
       reviewQueueId: reviewRow.id,
-      originalConfidence: reviewRow.confidenceScore,
+      // P133 — `confidenceScore` is a Postgres `numeric` returned as
+      // a string by Drizzle. Coerce to number for downstream consumers
+      // that key off ranges; guard against NaN by falling back to the
+      // string when parse fails.
+      originalConfidence: Number.isFinite(Number(reviewRow.confidenceScore))
+        ? Number(reviewRow.confidenceScore)
+        : reviewRow.confidenceScore,
       ...(isEdit
         ? {
             originalValueText: reviewRow.valueText,
@@ -395,7 +448,7 @@ export async function confirmReviewFieldAsPatient(
   }
 
   return {
-    observationId: observation?.id ?? null,
+    observationId,
     uploadStatus,
     remainingPatientReviewable,
   };

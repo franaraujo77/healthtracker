@@ -48,6 +48,14 @@ CREATE POLICY "extraction_review_queue_update_own_low_confidence"
 -- only mutate the three resolution columns. Even if a future policy
 -- broadened the row scope, an UPDATE that touches any other column
 -- would be rejected at the GRANT layer.
+--
+-- P134 — also strip `anon` and `PUBLIC` grants. The default search-path
+-- inheritance from prior migrations can grant a row's access to
+-- `PUBLIC`; a hostile unauthenticated PostgREST request would otherwise
+-- inherit table-level read where the policy's `current_setting()`
+-- predicate is forgiving.
+REVOKE ALL ON "extraction_review_queue" FROM PUBLIC;
+REVOKE ALL ON "extraction_review_queue" FROM "anon";
 REVOKE ALL ON "extraction_review_queue" FROM "authenticated";
 GRANT SELECT ON "extraction_review_queue" TO "authenticated";
 GRANT UPDATE (

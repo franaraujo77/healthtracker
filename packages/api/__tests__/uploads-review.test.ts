@@ -25,13 +25,15 @@ function makeScriptedDb(script: {
   const insertReturningQueue = [...(script.insertReturning ?? [])];
   const updatesQueue = [...(script.updates ?? [])];
 
+  // P141 — capture the actual values argument to every `.insert(...).values(...)`
+  // + every `.update(...).set(...)` call, so tests can assert the
+  // serialization (source, confidence, audit event name, etc.).
+  const insertValuesArgs: unknown[] = [];
+  const updateSetArgs: unknown[] = [];
+
   const selectFn = vi.fn(() => {
     const result = selectsQueue.shift() ?? [];
     const finalize = Promise.resolve(result);
-    // The helper composes `.select().from().where().limit()` and
-    // sometimes `.select().from().where()` (no limit). Both shapes
-    // resolve to the same scripted array; the returned chain is
-    // `then`-able at any step.
     const chain: Record<string, unknown> = {};
     chain.from = vi.fn(() => chain);
     chain.where = vi.fn(() => chain);
@@ -44,9 +46,28 @@ function makeScriptedDb(script: {
   const insertFn = vi.fn(() => {
     const result = insertReturningQueue.shift() ?? [];
     const chain: Record<string, unknown> = {};
-    chain.values = vi.fn(() => chain);
+    chain.values = vi.fn((arg: unknown) => {
+      insertValuesArgs.push(arg);
+      return chain;
+    });
     chain.onConflictDoNothing = vi.fn(() => chain);
     chain.returning = vi.fn(() => Promise.resolve(result));
+    // Make values() also thenable so `await database.insert().values()`
+    // works for inserts that don't .returning() (writeAuditLog).
+    const valuesPromise = Promise.resolve(undefined);
+    const originalValues = chain.values as (a: unknown) => unknown;
+    chain.values = vi.fn((arg: unknown) => {
+      originalValues(arg);
+      const inner: Record<string, unknown> = {
+        onConflictDoNothing: vi.fn(() => ({
+          returning: vi.fn(() => Promise.resolve(result)),
+        })),
+        returning: vi.fn(() => Promise.resolve(result)),
+        then: valuesPromise.then.bind(valuesPromise),
+        catch: valuesPromise.catch.bind(valuesPromise),
+      };
+      return inner;
+    });
     return chain;
   });
 
@@ -54,7 +75,10 @@ function makeScriptedDb(script: {
     const result = updatesQueue.shift() ?? [];
     const finalize = Promise.resolve(result);
     const chain: Record<string, unknown> = {};
-    chain.set = vi.fn(() => chain);
+    chain.set = vi.fn((arg: unknown) => {
+      updateSetArgs.push(arg);
+      return chain;
+    });
     chain.where = vi.fn(() => chain);
     chain.returning = vi.fn(() => finalize);
     chain.then = finalize.then.bind(finalize);
@@ -71,6 +95,8 @@ function makeScriptedDb(script: {
     selectFn,
     insertFn,
     updateFn,
+    insertValuesArgs,
+    updateSetArgs,
   };
 }
 
@@ -122,7 +148,7 @@ describe("getUploadDetailForPatient", () => {
     ).rejects.toBeInstanceOf(TRPCError);
   });
 
-  it("flags hasOperatorOnlyRows when pending_review + zero patient rows", async () => {
+  it("flags hasOperatorOnlyRows when pending_review + zero patient rows + processing finished", async () => {
     const now = new Date();
     const { db } = makeScriptedDb({
       selects: [
@@ -132,7 +158,10 @@ describe("getUploadDetailForPatient", () => {
             status: "pending_review",
             createdAt: now,
             processingStartedAt: now,
-            processingCompletedAt: null,
+            // P135 — the heuristic now requires processingCompletedAt
+            // so a mid-dispatch refetch doesn't show a misleading
+            // "Aguardando revisão da equipe" banner.
+            processingCompletedAt: now,
           },
         ],
         // zero patient-visible rows
@@ -165,19 +194,20 @@ describe("confirmReviewFieldAsPatient", () => {
       resolvedAt: null,
       reason: "low_confidence",
     };
-    const { db, insertFn, updateFn } = makeScriptedDb({
-      // 1. review row, 2. loinc resolve, 3. remaining-count
-      selects: [
-        [reviewRow],
-        [{ loincCode: "718-7", unitUcum: "g/dL" }], // resolveLoincCode lookup for unit
-        [{ c: 0 }], // remaining patient-reviewable
-      ],
-      insertReturning: [[{ id: "obs-1" }]],
-      updates: [
-        [], // UPDATE review row (no returning needed)
-        [{ id: UPLOAD_ID, status: "complete" }], // applyUploadTransition
-      ],
-    });
+    const { db, insertFn, updateFn, insertValuesArgs, updateSetArgs } =
+      makeScriptedDb({
+        // 1. review row, 2. loinc resolve (unit lookup), 3. remaining-count
+        selects: [
+          [reviewRow],
+          [{ loincCode: "718-7", unitUcum: "g/dL" }],
+          [{ c: 0 }],
+        ],
+        insertReturning: [[{ id: "obs-1" }]],
+        updates: [
+          [], // UPDATE review row
+          [{ id: UPLOAD_ID, status: "complete" }], // applyUploadTransition
+        ],
+      });
 
     const result = await confirmReviewFieldAsPatient(db, PATIENT_ID, {
       reviewQueueId: REVIEW_ID,
@@ -187,10 +217,28 @@ describe("confirmReviewFieldAsPatient", () => {
     expect(result.uploadStatus).toBe("complete");
     expect(result.remainingPatientReviewable).toBe(0);
 
-    // writeObservation called with source = 'patient_corrected' + 1.0 confidence.
-    const insertCalls = insertFn.mock.calls.length;
-    expect(insertCalls).toBeGreaterThanOrEqual(1);
-    // UPDATE the review row + applyUploadTransition both called.
+    // P141 — observation written with source = 'patient_corrected' +
+    // confidence 1.0 + patient's parsed value (14.2).
+    expect(insertValuesArgs[0]).toMatchObject({
+      source: "patient_corrected",
+      confidenceScore: "1",
+      valueNumeric: "14.2",
+    });
+    // P141 — audit event is `observation.patient_confirmed` (no edit
+    // branch); actor type is 'patient'; resourceId is the new
+    // observation id (not the review row id — P130).
+    expect(insertValuesArgs[1]).toMatchObject({
+      actorType: "patient",
+      event: "observation.patient_confirmed",
+      resourceId: "obs-1",
+    });
+    expect(insertFn).toHaveBeenCalled();
+    // P141 — review row marked resolved with NULL correction_metadata
+    // (no edit) AND the patient as resolver.
+    expect(updateSetArgs[0]).toMatchObject({
+      resolvedByPatientId: PATIENT_ID,
+      correctionMetadata: null,
+    });
     expect(updateFn).toHaveBeenCalled();
   });
 
@@ -207,7 +255,7 @@ describe("confirmReviewFieldAsPatient", () => {
       resolvedAt: null,
       reason: "low_confidence",
     };
-    const { db } = makeScriptedDb({
+    const { db, insertValuesArgs, updateSetArgs } = makeScriptedDb({
       selects: [
         [reviewRow],
         [{ loincCode: "718-7", unitUcum: "g/dL" }],
@@ -225,6 +273,26 @@ describe("confirmReviewFieldAsPatient", () => {
     expect(result.observationId).toBe("obs-2");
     expect(result.uploadStatus).toBe("pending_review");
     expect(result.remainingPatientReviewable).toBe(2);
+
+    // P141 — observation written with the PATIENT-provided value (14.2)
+    // not the original adapter value (1.4). source = 'patient_corrected'.
+    expect(insertValuesArgs[0]).toMatchObject({
+      source: "patient_corrected",
+      valueNumeric: "14.2",
+    });
+    // P141 — audit event is `observation.patient_corrected` (edit branch).
+    expect(insertValuesArgs[1]).toMatchObject({
+      event: "observation.patient_corrected",
+    });
+    // P141 — correction_metadata is populated with the patient's value
+    // AND the original valueText.
+    expect(updateSetArgs[0]).toMatchObject({
+      resolvedByPatientId: PATIENT_ID,
+      correctionMetadata: expect.objectContaining({
+        patientValue: 14.2,
+        originalValueText: "1,4",
+      }) as unknown,
+    });
   });
 
   it("throws CONFLICT (ALREADY_RESOLVED) when the review row is already resolved", async () => {

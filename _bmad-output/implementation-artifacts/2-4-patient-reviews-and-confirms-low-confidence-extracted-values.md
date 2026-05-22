@@ -1,6 +1,6 @@
 # Story 2.4: Patient reviews and confirms low-confidence extracted values
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -320,3 +320,34 @@ claude-opus-4-7[1m]
 - `packages/api/src/router/uploads.ts` — added `getUploadDetail` + `confirmReviewField`.
 - `packages/validators/src/index.ts` — exported decimal + collected-at helpers, pt-BR copy + status labels.
 - `services/extraction/src/pipeline/dispatch.ts` — write `collected_at_text` to review-queue rows; minor lint cleanup.
+- `apps/expo/src/app/_layout.tsx` — pre-existing lint nit cleared en route to commit (P132 sister).
+- `_bmad-output/implementation-artifacts/deferred-work.md` — appended F123–F129 round-1 deferrals.
+
+### Review Findings (code review round 1 — 2026-05-22)
+
+3-layer adversarial review (Blind Hunter + Edge Case Hunter + Acceptance Auditor). **3 HIGH (AC + privacy + data-integrity) + 8 Med + 1 Low.** 13 patches applied, 7 deferred (F123–F129), 7 dismissed.
+
+**`patch` (must fix before done):**
+
+- [x] [Review][Patch] **P130 [HIGH AC2/AC3]: Audit `resourceId` falls back to `reviewQueueId` on ON-CONFLICT** [`packages/api/src/uploads-review.ts`] — When `writeObservation` returns null (idempotent retry), the audit event was emitted with `resourceId: reviewRow.id` typed as `resourceType: 'observation'` — a wrong-type cross-reference. Fix: re-SELECT the existing observation by `(patient_id, upload_id, loinc_code, collected_at)` on conflict and use its real id; throw `INTERNAL_SERVER_ERROR` if absent.
+- [x] [Review][Patch] **P131 [HIGH AC3]: Dirty flag was string-comparison; cosmetic re-formats counted as edits** [`apps/web/.../review-card.tsx`, `apps/expo/.../[uploadId].tsx`] — `isDirty = value !== initialDisplay` would stamp `correction_metadata` for `"14,20"` → `"14,2"` re-renders and miss real edits that round back to the original display. Fix: introduce `touched` flag + numeric comparison via `parseBrazilianDecimal(value) !== parsedOriginal`.
+- [x] [Review][Patch] **P132 [HIGH Privacy]: Web detail page not gated by auth** [`apps/web/.../page.tsx`] — Inicio is not under an `(authenticated)` segment and the middleware only refreshes sessions. Anonymous users hitting the prefetch would see SSR throw UNAUTHORIZED. Fix: explicit `getSession()` check at the page entry; redirect to `REGISTER_ROUTE` when absent.
+- [x] [Review][Patch] **P133 [HIGH Data-integrity]: Audit `originalConfidence` written as string** [`packages/api/src/uploads-review.ts`] — Drizzle returns `numeric` columns as strings; the audit metadata stored `"0.6"` not `0.6`, silently breaking downstream range filters. Fix: coerce to number with a NaN guard fallback.
+- [x] [Review][Patch] **P134 [HIGH RLS]: SQL only `REVOKE`d from `authenticated`, not `anon` / `PUBLIC`** [`packages/db/policies/custom_rls_extraction_review_queue.sql`] — A future migration that grants to `PUBLIC` would leak the table to anonymous PostgREST. Fix: explicit `REVOKE ALL ... FROM PUBLIC, anon, authenticated`, then re-grant the narrow SELECT/UPDATE.
+- [x] [Review][Patch] **P135 [Med Correctness]: `hasOperatorOnlyRows` heuristic false-positive during transient post-dispatch moment** [`packages/api/src/uploads-review.ts`] — A worker that finished dispatch but hasn't transitioned the upload status would surface a misleading "Aguardando revisão da equipe". Fix: also require `processingCompletedAt !== null`.
+- [x] [Review][Patch] **P136 [Med Correctness]: `observationId: null` on idempotent retry** — Folded into P130; idempotent retries now return the real id.
+- [x] [Review][Patch] **P137 [Med Correctness]: ON-CONFLICT could resolve a different upload's observation** [`packages/api/src/uploads-review.ts`] — Same-day same-biomarker collision across two of the patient's uploads. Fix: validate `existing.uploadId === reviewRow.uploadId`; throw `CONFLICT` with `OBSERVATION_BELONGS_TO_DIFFERENT_UPLOAD` if not.
+- [x] [Review][Patch] **P138 [Med Correctness]: `unitUcum` fallback chain could publish empty unit** [`packages/api/src/uploads-review.ts`] — Both LOINC miss AND empty `unitText` → observation written with `unit_ucum = ""`. Fix: throw `PRECONDITION_FAILED` (`UNIT_UNRESOLVED`).
+- [x] [Review][Patch] **P139 [Med Hygiene]: Expo screen used `useGlobalSearchParams`** [`apps/expo/.../[uploadId].tsx`] — Re-renders on foreign route changes; can leak stale upload id during transitions. Fix: switch to `useLocalSearchParams`.
+- [x] [Review][Patch] **P140 [Med Hygiene]: Verify Expo uses Tamagui** — Confirmed via `apps/expo/src/app/(tabs)/inicio.tsx` and others. No code change needed; documented as verified.
+- [x] [Review][Patch] **P141 [Med Test-quality]: Tests asserted only call counts, not value shapes** [`packages/api/__tests__/uploads-review.test.ts`] — Couldn't verify `source: 'patient_corrected'`, `confidence: 1.0`, audit event name, `correctionMetadata` shape reached the writers. Fix: scripted-mock now captures `.values()` and `.set()` arguments; tests `toMatchObject` against them.
+- [x] [Review][Patch] **P142 [Low pt-BR]: Inline pt-BR strings outside `validators`** — Added `UPLOAD_DETAIL_TITLE_PT_BR`, `UPLOAD_DETAIL_VALUE_LABEL_PT_BR`, `UPLOAD_DETAIL_EXTRACTED_VALUE_PT_BR`; wired in both clients.
+
+**`defer` (added to deferred-work.md):** F123–F129.
+
+**Dismissed (~7):** double-tap Confirm (mutation.isPending disable + server CONFLICT), `loinc_unresolved` reviewQueueId (SELECT predicate rejects), transition race miss (handled), pure-SELECT LOINC mid-call drift (one transaction), `NaN`/`Infinity` (Zod catches), unique-index collision on retry (only UPDATE), `collectedAtText: null` fallback (works cleanly).
+
+### Change Log
+
+- 2026-05-22 — Code review round 1. **13 patches applied (P130–P142), 7 deferred (F123–F129), 7 dismissed.** Three HIGH fixes closed: P130 (audit `resourceId` now references the actual observation id on idempotent retry; helper re-SELECTs by the conflict key), P131 (web + Expo dirty-flag now uses `touched + numeric comparison` — corrects AC3's `correction_metadata` semantics), P132 (web detail page gates on `getSession()` + redirect to `REGISTER_ROUTE`). HIGH data-integrity (P133): `originalConfidence` coerced to number. HIGH RLS (P134): SQL revokes from `PUBLIC` + `anon` explicitly before granting. Med (P135–P140): `hasOperatorOnlyRows` requires `processingCompletedAt`; ON-CONFLICT validates upload id match; empty `unitUcum` now throws `PRECONDITION_FAILED`; Expo uses `useLocalSearchParams`. Test quality (P141): tests now capture + assert `.values()` and `.set()` arguments. pt-BR (P142): inline strings lifted to `validators`. **100 unit tests green** (same count as round-0; assertions strengthened in-place). Lint, typecheck, format all green.
+- 2026-05-22 — Story 2.4 implemented (dev-story). All 8 tasks complete; status → review. Shipped: new tRPC procedures `uploads.getUploadDetail` + `uploads.confirmReviewField`; `extraction_review_queue` schema additions; patient-facing RLS policies with column-level GRANT defense; LOINC resolver in `packages/api/src/loinc.ts`; pt-BR copy + decimal helpers in validators; web + Expo upload-detail screens. 100 unit tests green (+8 new). Real implementation deferrals: web/Expo component tests, RLS adversarial tests, service-role-bypassed operator-row count, system-sentinel UUID, snapshot-sync test for LOINC resolver, mobile-web focus refetch (F123–F129).

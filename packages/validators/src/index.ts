@@ -23,6 +23,9 @@ export const UPLOAD_DETAIL_VALUE_INVALID_PT_BR =
   "Use um número válido — por exemplo, 14,2.";
 export const UPLOAD_DETAIL_SAVE_ERROR_PT_BR =
   "Não conseguimos salvar — tente novamente.";
+export const UPLOAD_DETAIL_TITLE_PT_BR = "Resultado do upload";
+export const UPLOAD_DETAIL_VALUE_LABEL_PT_BR = "Valor";
+export const UPLOAD_DETAIL_EXTRACTED_VALUE_PT_BR = "Valor extraído";
 
 export const UPLOAD_STATUS_LABELS_PT_BR: Record<
   "queued" | "processing" | "pending_review" | "complete" | "failed",

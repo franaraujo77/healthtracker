@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { RefreshControl, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Stack, useGlobalSearchParams } from "expo-router";
+import { Stack, useLocalSearchParams } from "expo-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Input, Text, YStack } from "tamagui";
 
@@ -11,6 +11,7 @@ import {
   UPLOAD_DETAIL_ALL_DONE_PT_BR,
   UPLOAD_DETAIL_CONFIRM_CTA_PT_BR,
   UPLOAD_DETAIL_ERROR_PT_BR,
+  UPLOAD_DETAIL_EXTRACTED_VALUE_PT_BR,
   UPLOAD_DETAIL_LOADING_PT_BR,
   UPLOAD_DETAIL_REVIEW_HEADER_PT_BR,
   UPLOAD_DETAIL_SAVE_CTA_PT_BR,
@@ -44,6 +45,8 @@ function ReviewCard({ uploadId, field }: CardProps) {
       ? formatBrazilianDecimal(parsedOriginal)
       : field.valueText;
   const [value, setValue] = useState(initialDisplay);
+  // P131 — see web review-card.tsx for the rationale.
+  const [touched, setTouched] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const mutation = useMutation(
@@ -59,7 +62,12 @@ function ReviewCard({ uploadId, field }: CardProps) {
     }),
   );
 
-  const isDirty = value !== initialDisplay;
+  const parsedCurrent = parseBrazilianDecimal(value);
+  const isDirty =
+    touched &&
+    (parsedCurrent === null ||
+      parsedOriginal === null ||
+      parsedCurrent !== parsedOriginal);
   const isPending = mutation.isPending;
 
   function onConfirm() {
@@ -95,12 +103,15 @@ function ReviewCard({ uploadId, field }: CardProps) {
         {field.biomarkerName}
       </Text>
       <Text fontSize="$2" color="$textSecondary">
-        Valor extraído: {field.valueText}
+        {UPLOAD_DETAIL_EXTRACTED_VALUE_PT_BR}: {field.valueText}
         {field.unitText !== null ? ` ${field.unitText}` : ""}
       </Text>
       <Input
         value={value}
-        onChangeText={setValue}
+        onChangeText={(next: string) => {
+          setValue(next);
+          setTouched(true);
+        }}
         keyboardType="decimal-pad"
         editable={!isPending}
         accessibilityLabel={`${field.biomarkerName} valor`}
@@ -129,7 +140,7 @@ function ReviewCard({ uploadId, field }: CardProps) {
 }
 
 export default function UploadDetailScreen() {
-  const { uploadId } = useGlobalSearchParams<{ uploadId: string }>();
+  const { uploadId } = useLocalSearchParams<{ uploadId: string }>();
   const query = useQuery(
     trpc.uploads.getUploadDetail.queryOptions(
       { uploadId },

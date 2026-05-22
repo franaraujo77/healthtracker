@@ -8,10 +8,12 @@ import {
   formatBrazilianDecimal,
   parseBrazilianDecimal,
   UPLOAD_DETAIL_CONFIRM_CTA_PT_BR,
+  UPLOAD_DETAIL_EXTRACTED_VALUE_PT_BR,
   UPLOAD_DETAIL_REVIEW_HEADER_PT_BR,
   UPLOAD_DETAIL_SAVE_CTA_PT_BR,
   UPLOAD_DETAIL_SAVE_ERROR_PT_BR,
   UPLOAD_DETAIL_VALUE_INVALID_PT_BR,
+  UPLOAD_DETAIL_VALUE_LABEL_PT_BR,
 } from "@healthtracker/validators";
 
 import { useTRPC } from "~/trpc/react";
@@ -44,6 +46,11 @@ export function ReviewCard({
       ? formatBrazilianDecimal(parsedOriginal)
       : valueText;
   const [value, setValue] = useState(initialDisplay);
+  // P131 — `touched` separates "patient interacted" from "value
+  // happens to re-render to the same display". String comparison
+  // would conflate cosmetic re-formats (e.g. `"14,20"` → `"14,2"`)
+  // as edits, and edits-that-round-back-to-original as confirms.
+  const [touched, setTouched] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const confirmMutation = useMutation(
@@ -60,7 +67,16 @@ export function ReviewCard({
     }),
   );
 
-  const isDirty = value !== initialDisplay;
+  // Numeric isDirty: the patient has touched the input AND the
+  // parsed numeric differs from the original parse. Cosmetic
+  // changes (re-spacing, equivalent decimal forms) don't trigger
+  // the Save branch.
+  const parsedCurrent = parseBrazilianDecimal(value);
+  const isDirty =
+    touched &&
+    (parsedCurrent === null ||
+      parsedOriginal === null ||
+      parsedCurrent !== parsedOriginal);
   const isPending = confirmMutation.isPending;
 
   function onConfirm() {
@@ -94,18 +110,23 @@ export function ReviewCard({
       <div>
         <p className="text-base font-medium text-stone-900">{biomarkerName}</p>
         <p className="text-xs text-stone-600">
-          Valor extraído: {valueText}
+          {UPLOAD_DETAIL_EXTRACTED_VALUE_PT_BR}: {valueText}
           {unitText !== null ? ` ${unitText}` : ""}
         </p>
       </div>
       <label className="flex flex-col gap-1 text-sm">
-        <span className="text-stone-700">Valor</span>
+        <span className="text-stone-700">
+          {UPLOAD_DETAIL_VALUE_LABEL_PT_BR}
+        </span>
         <input
           type="text"
           inputMode="decimal"
           aria-label={`${biomarkerName} valor`}
           value={value}
-          onChange={(e) => setValue(e.target.value)}
+          onChange={(e) => {
+            setValue(e.target.value);
+            setTouched(true);
+          }}
           disabled={isPending}
           className="rounded-md border border-stone-300 bg-white px-3 py-2 text-base"
         />

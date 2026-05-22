@@ -248,3 +248,14 @@
 - **F64** Service-role client cache staleness on `SUPABASE_SERVICE_ROLE_KEY` rotation.
 - **F65** Web `validateClientSide` empty `file.type` extension fallback.
 - **F66** Distinct badge copy for `skipped_duplicate` vs `queued`.
+
+
+## Story 2.4 — round-1 review deferrals (F123–F129)
+
+- **F123** RLS adversarial test for `extraction_review_queue` patient policies (Task 2 listed five cases). Requires local Supabase; carries Story 2.3 family.
+- **F124** Web `<ReviewCard />` component test — vitest+RTL not wired in `apps/web`. Wire the framework, port AC2/AC3 interaction assertions.
+- **F125** Expo `<ReviewCard />` component test — no RN test framework configured. Wire detox/jest-expo for at least snapshot + tap-mutation coverage.
+- **F126** Service-role-bypassed exact `hasOperatorOnlyRows` count (see P135 patch). Needs a SECURITY DEFINER view exposing only `(upload_id, exists)`.
+- **F127** System-sentinel UUID for audit `actorType: 'system'` events — Story 2.3 F120 carries forward; `notification.upload_complete` still uses the patient id as actor.
+- **F128** Snapshot-sync test for the worker's raw-SQL `resolveLoincCode` vs `packages/api/src/loinc.ts` (the Drizzle version) — Story 2.3 R1-P110 pattern.
+- **F129** Refetch-on-focus for the web detail screen — `refetchOnWindowFocus` doesn't fire on mobile-web returning from camera/picker. Closed by Story 2.5 realtime.
