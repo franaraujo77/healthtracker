@@ -63,7 +63,15 @@ function Card({ row }: { row: UploadRow }) {
       <Text fontSize="$2" color="$textSecondary">
         {row.createdAt.toLocaleDateString("pt-BR")}
       </Text>
-      <Text fontSize="$2">{UPLOAD_STATUS_LABELS_PT_BR[row.status]}</Text>
+      {/* R2-P175 — cast widens the indexed type to `string | undefined`
+          so the fallback survives if a future column value reaches the
+          UI without a pt-BR label. TS thinks the union is closed; the
+          wire type is `string`, so the runtime guard is real. */}
+      <Text fontSize="$2">
+        {(UPLOAD_STATUS_LABELS_PT_BR as Record<string, string | undefined>)[
+          row.status
+        ] ?? row.status}
+      </Text>
       {isFailed ? (
         <YStack gap="$2">
           <Text fontSize="$2" color="$textSecondary">
@@ -79,7 +87,10 @@ function Card({ row }: { row: UploadRow }) {
           >
             {HISTORICO_RECOVERY_PHOTO_PT_BR}
           </Button>
-          <Button>{HISTORICO_RECOVERY_SKIP_PT_BR}</Button>
+          {/* R2-P176 — the real "Pular este resultado" button lives
+              outside this Card (in HistoricoScreen) so it can flip
+              the parent's `dismissed` state. Two same-label buttons
+              would confuse a11y. */}
         </YStack>
       ) : null}
     </YStack>

@@ -38,9 +38,14 @@ export async function emitNotificationEvent(
   },
 ): Promise<void> {
   const event = NOTIFICATION_EVENT[args.kind];
-  // Audit emission first — append-only contract (Story 1.1 F10
-  // service-role bypass; worker writes via service-role).
-  await tx`
+  // R2-P172 — `ON CONFLICT DO NOTHING` against the partial unique
+  // index `audit_log_notification_event_unique` closes the TOCTOU
+  // race where two concurrent writers (e.g. the consumer's dead-
+  // letter path AND the dead-letter callback's `markUploadFailed`)
+  // both insert for the same (upload, event). The unique index
+  // matches only the three notification events, so non-notification
+  // audit rows still INSERT freely.
+  const inserted = await tx<{ id: string }[]>`
     INSERT INTO audit_log
       (actor_id, actor_type, event, resource_id, resource_type, metadata)
     VALUES (
@@ -51,7 +56,18 @@ export async function emitNotificationEvent(
       'upload',
       ${JSON.stringify({ triggeredBy: "worker", kind: args.kind, ...(args.metadata ?? {}) })}::jsonb
     )
+    ON CONFLICT ON CONSTRAINT audit_log_notification_event_unique
+    DO NOTHING
+    RETURNING id
   `;
+  if (inserted.length === 0) {
+    // Another writer beat us — the audit row exists. Skip the
+    // pg-boss enqueue too; the original writer queued it.
+    console.warn(
+      `[notifications/emit] uploadId=${args.uploadId} kind=${args.kind}: audit row already exists — skipping enqueue`,
+    );
+    return;
+  }
 
   // Enqueue the `notification.send` pg-boss job. Singleton-keyed on
   // (upload_id, kind) so an idempotent worker retry doesn't fire

@@ -85,6 +85,12 @@ development_status:
   # P154 canonical UPLOAD_DETAIL_ROUTE on Expo (HIGH), P156 lab_name in
   # push body (HIGH AC), P157 Expo Push chunking >100 (HIGH), P159-P170
   # smaller cleanups. P166/P167 dismissed.
+  # round-2 patches applied: R2-P171 ?source= query param now consumed by
+  # Início pages (HIGH AC), R2-P172 partial unique index on
+  # audit_log(resource_id, event) closes TOCTOU race (HIGH), R2-P173
+  # chunk-progress in thrown error, R2-P174 tightened ExpoPushToken
+  # regex, R2-P175 status-label fallback through Record cast,
+  # R2-P176 dropped dead Pular button, R2-P178 handler tests.
   2-6-patient-queues-an-upload-while-offline: backlog
   2-7-patient-manually-enters-bioimpedance-bia-measurements: backlog
   2-8-patient-manages-push-notification-preferences: backlog

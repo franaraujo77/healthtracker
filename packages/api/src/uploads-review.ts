@@ -490,14 +490,35 @@ export async function confirmReviewFieldAsPatient(
   // system event tied to a patient action (F127 — no system
   // sentinel UUID yet).
   if (uploadStatus === "complete") {
-    await writeAuditLog(database, {
-      actorId: patientId,
-      actorType: "system",
-      event: "notification.upload_complete",
-      resourceId: reviewRow.uploadId,
-      resourceType: "upload",
-      metadata: { triggeredBy: "patient_confirmation" },
-    });
+    // R2-P172 — defend against the TOCTOU race between this path and
+    // the worker's direct-publish complete-emit. The partial unique
+    // index `audit_log_notification_event_unique` makes the second
+    // INSERT raise `unique_violation` (SQLSTATE 23505); catch +
+    // skip the enqueue (the first writer queued it).
+    try {
+      await writeAuditLog(database, {
+        actorId: patientId,
+        actorType: "system",
+        event: "notification.upload_complete",
+        resourceId: reviewRow.uploadId,
+        resourceType: "upload",
+        metadata: { triggeredBy: "patient_confirmation" },
+      });
+    } catch (err) {
+      const code =
+        typeof err === "object" && err !== null && "code" in err
+          ? (err as { code: unknown }).code
+          : undefined;
+      if (code !== "23505") throw err;
+      console.warn(
+        `[confirmReviewField] uploadId=${reviewRow.uploadId}: notification.upload_complete audit already exists — skipping enqueue`,
+      );
+      return {
+        observationId,
+        uploadStatus,
+        remainingPatientReviewable,
+      };
+    }
     // Story 2.5 — paired audit + enqueue. The pg-boss job
     // `notification.send` is singleton-keyed on `(uploadId, kind)`
     // so an idempotent retry of the patient-confirm path does NOT

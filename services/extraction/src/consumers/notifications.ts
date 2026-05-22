@@ -224,7 +224,9 @@ export function createDefaultExpoPushClient(opts?: {
     async sendBatch(messages) {
       if (messages.length === 0) return [];
       const allTickets: ExpoPushTicket[] = [];
+      const chunkCount = Math.ceil(messages.length / EXPO_PUSH_BATCH_SIZE);
       for (let i = 0; i < messages.length; i += EXPO_PUSH_BATCH_SIZE) {
+        const chunkIndex = Math.floor(i / EXPO_PUSH_BATCH_SIZE);
         const chunk = messages.slice(i, i + EXPO_PUSH_BATCH_SIZE);
         const response = await fetch("https://exp.host/--/api/v2/push/send", {
           method: "POST",
@@ -238,8 +240,12 @@ export function createDefaultExpoPushClient(opts?: {
           body: JSON.stringify(chunk),
         });
         if (!response.ok) {
+          // R2-P173 — log chunk progress before the throw so ops can
+          // correlate duplicate pushes on pg-boss retry. F143 tracks
+          // a future per-chunk receipt log so retries can skip
+          // already-delivered chunks.
           throw new Error(
-            `Expo Push API error: ${response.status} ${response.statusText}`,
+            `Expo Push API error: ${response.status} ${response.statusText} (chunk ${chunkIndex + 1}/${chunkCount}; ${i} messages already delivered will resend on retry)`,
           );
         }
         const json = (await response.json()) as { data?: ExpoPushTicket[] };

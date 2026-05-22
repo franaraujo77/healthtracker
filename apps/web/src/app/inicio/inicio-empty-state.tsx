@@ -73,7 +73,20 @@ async function gatePdfPageCount(
   return { pageCount };
 }
 
-export function InicioEmptyState() {
+interface InicioEmptyStateProps {
+  /**
+   * R2-P171 — Story 2.5 failed-card recovery CTAs route here with a
+   * `?source=` query param. When set to `post_onboarding_photo`,
+   * the source-picker sheet auto-opens so the patient can pick the
+   * camera/photo-library entry without an extra tap. The default
+   * `post_onboarding` value renders the unchanged Início landing.
+   */
+  initialSource?: "post_onboarding" | "post_onboarding_photo";
+}
+
+export function InicioEmptyState({
+  initialSource,
+}: InicioEmptyStateProps = {}) {
   const trpc = useTRPC();
   const requestImport = useMutation(
     trpc.uploads.requestImport.mutationOptions(),
@@ -92,7 +105,13 @@ export function InicioEmptyState() {
   // can't open two native pickers / fire two `handleFileInput`
   // batches concurrently. Shared across all three sources.
   const isPickingRef = useRef(false);
-  const [sheetOpen, setSheetOpen] = useState(false);
+  // R2-P171 — auto-open the source-picker when the URL carries
+  // `?source=post_onboarding_photo` (failed-card "Enviar uma foto"
+  // recovery CTA). The plain `post_onboarding` source still lands
+  // on the default empty state.
+  const [sheetOpen, setSheetOpen] = useState(
+    initialSource === "post_onboarding_photo",
+  );
   const [active, setActive] = useState<ActiveUpload[]>([]);
   const [reducedMotion, setReducedMotion] = useState(false);
   const [nowTick, setNowTick] = useState(() => Date.now());

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AccessibilityInfo } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Stack } from "expo-router";
+import { Stack, useLocalSearchParams } from "expo-router";
 import { YStack } from "tamagui";
 
 import { EmptyStateRecord, ExtractionPulse } from "@healthtracker/ui";
@@ -22,7 +22,13 @@ const PDF_ONLY_ACCEPT = [UPLOAD_ALLOWED_MIME_TYPES[0]] as const;
 const ELAPSED_TICK_MS = 1000;
 
 export default function Inicio() {
-  const [sheetOpen, setSheetOpen] = useState(false);
+  // R2-P171 — auto-open the source-picker when Story 2.5's
+  // failed-card "Enviar uma foto" recovery CTA navigates here with
+  // `?source=post_onboarding_photo`.
+  const params = useLocalSearchParams<{ source?: string }>();
+  const [sheetOpen, setSheetOpen] = useState(
+    params.source === "post_onboarding_photo",
+  );
   const [reducedMotion, setReducedMotion] = useState(false);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const {

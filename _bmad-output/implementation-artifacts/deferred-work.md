@@ -280,3 +280,12 @@
 - **F140** SQL snapshot-sync test for `emitNotificationEvent` vs `enqueueNotificationSend` — Two raw-SQL bodies hand-synced.
 - **F141** Lab-name aggregate column on `uploads` — Paired with R1-P156. Eliminates the per-notification SELECT subquery; populated by the dispatcher.
 - **F142** Web push notifications — Explicit defer per UX-DR4 mobile-first.
+
+
+## Story 2.5 — round-2 review deferrals (F143–F147)
+
+- **F143** Per-chunk receipt persistence so Expo Push mid-chunk retry doesn't resend earlier chunks. Pairs with F136 receipt polling.
+- **F144** Refactor `writeAuditLog` to natively support `ON CONFLICT DO NOTHING` for notification events instead of the SQLSTATE 23505 catch at the call site.
+- **F145** Prometheus counter `notification_send_skipped_total{reason="no_tokens"}` for ops visibility — currently a console.log only.
+- **F146** Vocabulary-rename consumer audit — R1-P161 renamed `empty_extraction` → `no_readable_text`. Sweep future analytics consumers + alert filters when they ship.
+- **F147** Persisted dismiss state for the Histórico failed-card 'Pular' button — currently in React local state, evaporates on tab remount.

@@ -94,10 +94,22 @@ export function HistoricoClient() {
               <span className="text-xs text-stone-600">
                 {new Date(row.createdAt).toLocaleDateString("pt-BR")}
               </span>
+              {/* R2-P175 — cast widens the indexed type so the
+                  fallback survives if a future column value lands
+                  here without a pt-BR label / color mapping. */}
               <span
-                className={`inline-block w-fit rounded-full px-2 py-0.5 text-xs ${BADGE_CLASSES[row.status]}`}
+                className={`inline-block w-fit rounded-full px-2 py-0.5 text-xs ${
+                  (BADGE_CLASSES as Record<string, string | undefined>)[
+                    row.status
+                  ] ?? "bg-stone-100 text-stone-700"
+                }`}
               >
-                {UPLOAD_STATUS_LABELS_PT_BR[row.status]}
+                {(
+                  UPLOAD_STATUS_LABELS_PT_BR as Record<
+                    string,
+                    string | undefined
+                  >
+                )[row.status] ?? row.status}
               </span>
               {row.status === "failed" ? (
                 <div className="mt-2 flex flex-col gap-2">

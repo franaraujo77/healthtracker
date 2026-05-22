@@ -4,11 +4,15 @@ import { z } from "zod/v4";
 import { revokePushTokenByDevice, writePushToken } from "../notifications";
 import { protectedProcedure } from "../trpc";
 
+// R2-P174 — tighten the format check. The original `startsWith`/
+// `endsWith` accepted `ExponentPushToken[]`, padded variants, and
+// arbitrarily long strings. Expo's tokens are URL-safe base64-ish
+// payloads of 18-40 chars between the brackets.
 const ExpoPushTokenSchema = z
   .string()
-  .min(1)
-  .refine(
-    (s) => s.startsWith("ExponentPushToken[") && s.endsWith("]"),
+  .max(64)
+  .regex(
+    /^ExponentPushToken\[[A-Za-z0-9_-]{18,40}\]$/,
     "EXPO_TOKEN_FORMAT_INVALID",
   );
 
