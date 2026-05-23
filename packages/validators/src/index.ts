@@ -203,6 +203,27 @@ export const NOTIF_OPEN_SYSTEM_SETTINGS_CTA_PT_BR =
 
 export const NOTIFICATIONS_SETTINGS_LINK_LABEL_PT_BR = "Notificações";
 
+/**
+ * R2-P229 — single source of truth for the notification-kind →
+ * preference-column mapping. The worker (`isPreferenceMuted`) and
+ * any future API consumer reference this map so a new kind can't
+ * silently desynchronize from the preference columns.
+ *
+ * `failed` folds into `results_ready` per Story 2.8 Clarification #1
+ * (the patient who muted "Resultados prontos" doesn't want to hear
+ * about failed extractions either).
+ */
+export const NOTIFICATION_KIND_TO_PREFERENCE = {
+  complete: "resultsReady",
+  pending_review: "reviewRequired",
+  failed: "resultsReady",
+} as const satisfies Record<
+  "complete" | "pending_review" | "failed",
+  keyof NotificationPreferencesInput
+>;
+export type NotificationKindForPreferences =
+  keyof typeof NOTIFICATION_KIND_TO_PREFERENCE;
+
 // Story 2.5 — Histórico tab + push-notification copy.
 export const HISTORICO_ROUTE = "/inicio/historico";
 export const HISTORICO_TITLE_PT_BR = "Histórico";

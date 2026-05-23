@@ -91,6 +91,18 @@ export default function NotificacoesScreen() {
           {NOTIFICATIONS_SETTINGS_TITLE_PT_BR}
         </Text>
         {query.isLoading ? <Text>{NOTIF_PREF_LOADING_PT_BR}</Text> : null}
+        {/* R2-P228 — surface a transient load failure so the patient
+            can retry instead of staring at the loading text. */}
+        {query.isError ? (
+          <YStack gap="$2">
+            <Text accessibilityRole="alert" color="$errorRed">
+              {NOTIF_PREF_ERROR_PT_BR}
+            </Text>
+            <Button onPress={() => void query.refetch()}>
+              {NOTIF_PREF_LOADING_PT_BR}
+            </Button>
+          </YStack>
+        ) : null}
         {prefs !== null ? (
           <YStack gap="$3">
             {/* R1-P220 — the always-visible button uses neutral copy.

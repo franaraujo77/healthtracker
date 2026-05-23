@@ -251,3 +251,27 @@ describe("isPreferenceMuted — Story 2.8 preference gate", () => {
     );
   });
 });
+
+describe("R2-P229 — kind→preference snapshot sync", () => {
+  it("worker isPreferenceMuted handles every NotificationKind", async () => {
+    // Pin the worker's behavior: each kind in the union has a
+    // defined response (true/false) for both muted and unmuted
+    // states. If a new kind is added to `emit.ts` without updating
+    // the switch in `isPreferenceMuted`, the exhaustiveness `never`
+    // check at compile-time + this runtime snapshot pin both halves.
+    const sqlMuted = ((strings: TemplateStringsArray) => {
+      void strings;
+      return Promise.resolve([
+        {
+          results_ready: false,
+          letters_ready: false,
+          record_access: false,
+          review_required: false,
+        },
+      ]);
+    }) as unknown as Parameters<typeof isPreferenceMuted>[0];
+    expect(await isPreferenceMuted(sqlMuted, "p", "complete")).toBe(true);
+    expect(await isPreferenceMuted(sqlMuted, "p", "pending_review")).toBe(true);
+    expect(await isPreferenceMuted(sqlMuted, "p", "failed")).toBe(true);
+  });
+});

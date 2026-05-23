@@ -124,6 +124,10 @@ development_status:
   # R1-P220 neutral OS-settings CTA copy (HIGH UX), R1-P221 .strict()
   # schema, R1-P225 array-form UPSERT target. R1-P222/P223/P224
   # deferred to F171/F172/F169.
+  # round-2 patches applied: R2-P226 narrow worker fail-open catch
+  # (HIGH regression), R2-P227 read-side row validation, R2-P228
+  # query.isError UX on both screens, R2-P229 NOTIFICATION_KIND_TO_
+  # PREFERENCE + snapshot test. R2-P230 documented no-change.
   epic-2-retrospective: optional
 
   # Epic 3: Patient Can See Their Health Fingerprint Over Time

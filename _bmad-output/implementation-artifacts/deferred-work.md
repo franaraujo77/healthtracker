@@ -334,3 +334,11 @@
 - **F170** Structured log when worker preference lookup returns no row for a present `patientId` (debug observability).
 - **F171** Partial UPSERT for `updatePreferences` — today the helper writes all 4 fields; multi-tab / multi-device toggles can lose updates. Switch to `.partial()` schema + dynamic SET when telemetry shows it matters.
 - **F172** Debounce (300 ms) on the optimistic toggle clients — concurrent mutations race today; defer until field data shows it matters.
+
+
+## Story 2.8 — round-2 review deferrals (F173–F176)
+
+- **F173** Disable toggles during in-flight mutation (rapid-tap defense). Mutually exclusive with F172 (300ms debounce); F172 owns the resolution.
+- **F174** `onSuccess` overwrite causes brief flicker on staggered toggles — fix by merging instead of overwriting the optimistic state.
+- **F175** Worker preference SELECT not memoized across a job batch (currently one SELECT per job). Acceptable for v1 with `batchSize: 10`; revisit if batches grow.
+- **F176** Differentiate "fail-open infra fault" from "no row → defaults" with a 3-state return or out-of-band metric. Not actionable until an ops dashboard demands it.

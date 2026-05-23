@@ -167,8 +167,28 @@ export async function getNotificationPreferences(
     .from(NotificationPreferences)
     .where(eq(NotificationPreferences.patientId, patientId))
     .limit(1);
-  // Return a fresh copy so callers can safely mutate the result.
-  return row ?? { ...DEFAULT_NOTIFICATION_PREFERENCES };
+  // R2-P227 — defend against partial rows from a future schema
+  // migration: any boolean field that came back undefined falls back
+  // to the default-true. Returns a fresh copy so callers can mutate.
+  if (!row) return { ...DEFAULT_NOTIFICATION_PREFERENCES };
+  return {
+    resultsReady:
+      typeof row.resultsReady === "boolean"
+        ? row.resultsReady
+        : DEFAULT_NOTIFICATION_PREFERENCES.resultsReady,
+    lettersReady:
+      typeof row.lettersReady === "boolean"
+        ? row.lettersReady
+        : DEFAULT_NOTIFICATION_PREFERENCES.lettersReady,
+    recordAccess:
+      typeof row.recordAccess === "boolean"
+        ? row.recordAccess
+        : DEFAULT_NOTIFICATION_PREFERENCES.recordAccess,
+    reviewRequired:
+      typeof row.reviewRequired === "boolean"
+        ? row.reviewRequired
+        : DEFAULT_NOTIFICATION_PREFERENCES.reviewRequired,
+  };
 }
 
 /**

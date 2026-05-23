@@ -217,3 +217,28 @@ claude-opus-4-7[1m]
 
 - 2026-05-22 — Code review round 1. **5 patches applied (R1-P218/P219/P220/P221/P225), 3 deferred to F-items (R1-P222/P223/P224), 6 F-items deferred (F167–F172), 7 dismissed.** Three HIGH fixes closed: R1-P218 wrapped the worker preference SELECT in try/catch with fail-open semantics so a missing table doesn't pg-boss-retry-forever; R1-P219 froze `DEFAULT_NOTIFICATION_PREFERENCES` and returned a spread copy from `getNotificationPreferences`; R1-P220 swapped the always-visible Expo button copy to a neutral CTA so AC4's alarmist banner doesn't render with granted permissions. Med + Low: R1-P221 `.strict()` schema, R1-P225 array form on UPSERT target. **190 unit tests green** (no test count change — the existing helper tests cover the freeze behavior via "returns synthetic default when no row"). Typecheck, lint, format all green.
 - 2026-05-22 — Story 2.8 implemented (dev-story). 190 unit tests green (+9 this story).
+
+### Review Findings (code review round 2 — 2026-05-22)
+
+3-layer adversarial round-2. **1 HIGH (round-1 fail-open catch too broad) + 3 Med + 1 Low + 1 Doc-only.** 5 patches applied (R2-P226–R2-P230); 4 deferred (F173–F176); 6 dismissed.
+
+**`patch` (must fix before done):**
+
+- [x] [Review][Patch] **R2-P226 [HIGH Regression]: Round-1's fail-open catch swallowed programmer errors** [`services/extraction/src/consumers/notifications.ts`] — R1-P218 wrapped the worker SELECT in a function-scope try/catch that silently fail-opened on TypeError/ReferenceError too. Mirrors Story 2.5 R2-P193. Fix: narrow to db/network-shaped errors (PG `code` or ECONN/timeout substrings); re-throw programmer errors so they surface in logs.
+- [x] [Review][Patch] **R2-P227 [Med Defense-in-depth]: `getNotificationPreferences` returned partial rows unchecked** [`packages/api/src/notifications.ts`] — A future schema migration dropping a column would propagate `undefined` past the `.strict()` write-boundary schema (which only validates input, not DB reads). Fix: per-field `typeof === "boolean"` guard with default-fallback on any non-boolean value.
+- [x] [Review][Patch] **R2-P228 [Med UX]: Screens silently stuck on "Carregando…" when `query.isError`** [Expo + web] — A transient tRPC failure left `prefs === null` forever. Fix: render `NOTIF_PREF_ERROR_PT_BR` + a retry button when `query.isError`.
+- [x] [Review][Patch] **R2-P229 [Doc]: Kind→column mapping was duplicated between validators map (R2-P229 introduced) and worker switch** — Added `NOTIFICATION_KIND_TO_PREFERENCE` in validators as the documented source of truth + inline comment in the worker pointing to the snapshot test. Snapshot test in `notifications.test.ts` pins both surfaces.
+- [x] [Review][Patch] **R2-P230 [Low]: `writeNotificationPreferences` uses JS-clock `updatedAt`** — Acknowledged inline; not applied (Drizzle `.set` expects JS Date or `sql.raw`; switching to `sql\`now()\`` would require a `sql` import in the helper and complicates the type). Acceptable for v1; revisit when clock-skew telemetry demands.
+
+**`defer` (added to deferred-work.md):**
+
+- [x] [Review][Defer] **F173** Disable toggles during in-flight mutation (mutually exclusive with F172 debounce).
+- [x] [Review][Defer] **F174** `onSuccess` overwrite flicker on staggered toggles.
+- [x] [Review][Defer] **F175** Worker preference SELECT memoization per batch.
+- [x] [Review][Defer] **F176** Differentiate fail-open vs no-row in the worker return.
+
+**Dismissed (~6):** shallow `Object.freeze` (all values are booleans); `Linking.openSettings` rejection swallowing (intentional; F168 owns); concurrent UPSERT LWW (acceptable); `.strict()` breaking `z.infer` (verified); AC4 partial impl (F168 owns); tRPC procedure + component tests (F169 owns).
+
+### Change Log
+
+- 2026-05-22 — Code review round 2. **4 patches applied (R2-P226/P227/P228/P229), 1 documented-no-change (R2-P230), 4 deferred (F173–F176), 6 dismissed.** The HIGH fix closed the round-1 regression: the worker's fail-open catch is now narrowed to db/network-shaped errors so programmer bugs (TypeError, etc.) surface instead of silently muting the gate. Med fixes: read-side validation in `getNotificationPreferences`, `query.isError` UX on both screens, exported `NOTIFICATION_KIND_TO_PREFERENCE` as documented source-of-truth + snapshot test pinning the worker switch behavior. **191 unit tests green** (+1: R2-P229 snapshot test). Typecheck, lint, format all green.

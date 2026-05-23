@@ -157,6 +157,19 @@ export async function isPreferenceMuted(
       LIMIT 1
     `;
   } catch (err) {
+    // R2-P226 — narrow fail-open to db/network-shaped errors so
+    // programmer errors (TypeError, ReferenceError) still surface.
+    // PG driver errors carry a `code` (SQLSTATE) or come from
+    // `postgres`'s `PostgresError`; transient network errors match
+    // the regex below.
+    const isInfraFault =
+      err instanceof TypeError === false &&
+      err instanceof ReferenceError === false &&
+      err instanceof SyntaxError === false &&
+      err instanceof Error &&
+      (("code" in err && typeof err.code === "string") ||
+        /ECONN|ENETDOWN|ETIMEDOUT|timeout|connection/i.test(err.message));
+    if (!isInfraFault) throw err;
     console.warn(
       `[notification.send] notification_preferences_lookup_failed patientId=${patientId} kind=${kind} — fail-open`,
       err,
@@ -165,6 +178,10 @@ export async function isPreferenceMuted(
   }
   const row = rows[0];
   if (!row) return false; // No row → all-true defaults; never muted.
+  // R2-P229 — the mapping below must stay in sync with
+  // `NOTIFICATION_KIND_TO_PREFERENCE` in `@healthtracker/validators`.
+  // A snapshot test in `__tests__/notifications.test.ts` pins both
+  // surfaces so a new kind can't silently desynchronize.
   switch (kind) {
     case "complete":
     case "failed":

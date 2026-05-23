@@ -60,6 +60,25 @@ export function NotificacoesClient() {
     mutation.mutate(updated);
   }
 
+  // R2-P228 — surface load failure with a retry; the prior code
+  // collapsed `isLoading` + `prefs === null` so a query error
+  // looked indistinguishable from a slow initial load.
+  if (query.isError) {
+    return (
+      <section className="space-y-3">
+        <p role="alert" className="text-sm text-red-700">
+          {NOTIF_PREF_ERROR_PT_BR}
+        </p>
+        <button
+          type="button"
+          onClick={() => void query.refetch()}
+          className="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm"
+        >
+          {NOTIF_PREF_LOADING_PT_BR}
+        </button>
+      </section>
+    );
+  }
   if (query.isLoading || prefs === null) {
     return <p className="text-stone-700">{NOTIF_PREF_LOADING_PT_BR}</p>;
   }
