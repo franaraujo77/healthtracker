@@ -1,10 +1,21 @@
 import * as path from "node:path";
+import type { Linter } from "eslint";
 import { includeIgnoreFile } from "@eslint/compat";
 import eslint from "@eslint/js";
 import importPlugin from "eslint-plugin-import";
 import turboPlugin from "eslint-plugin-turbo";
 import { defineConfig } from "eslint/config";
 import tseslint from "typescript-eslint";
+
+// eslint-plugin-turbo@2.9 widened the d.ts of `configs` to
+// `Record<string, ConfigData> | undefined`, so `configs.recommended.rules`
+// is no longer narrowable at the type level. Runtime shape is unchanged.
+const turboRecommendedRules =
+  (
+    turboPlugin.configs?.recommended as
+      | { rules?: Linter.RulesRecord }
+      | undefined
+  )?.rules ?? {};
 
 /**
  * All packages that leverage t3-env should use this rule
@@ -53,7 +64,7 @@ export const baseConfig = defineConfig(
       ...tseslint.configs.stylisticTypeChecked,
     ],
     rules: {
-      ...turboPlugin.configs.recommended.rules,
+      ...turboRecommendedRules,
       "@typescript-eslint/no-unused-vars": [
         "error",
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
