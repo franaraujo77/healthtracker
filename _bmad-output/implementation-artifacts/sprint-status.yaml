@@ -103,7 +103,7 @@ development_status:
   # R2-P194 offlineRows in allDismissed, R2-P195 whenPatientReady race
   # fix, R2-P196 AppState short-circuit, R2-P197 enqueue preserves
   # enqueuedAt. R2-P198 flagged not applied (low-priority UX nit).
-  2-7-patient-manually-enters-bioimpedance-bia-measurements: backlog
+  2-7-patient-manually-enters-bioimpedance-bia-measurements: ready-for-dev
   2-8-patient-manages-push-notification-preferences: backlog
   epic-2-retrospective: optional
 
