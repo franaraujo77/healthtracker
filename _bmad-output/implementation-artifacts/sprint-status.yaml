@@ -65,7 +65,7 @@ development_status:
   epic-1-retrospective: done
 
   # Epic 2: Patient Can Upload and Review Blood Test Results
-  epic-2: in-progress
+  epic-2: done
   2-1-patient-uploads-a-pdf-blood-test-result: done
   2-2-patient-uploads-a-photo-of-a-blood-test-result-from-camera-roll-or-camera: done
   2-3-system-extracts-and-normalizes-biomarker-values-from-uploaded-documents: done
@@ -128,7 +128,7 @@ development_status:
   # (HIGH regression), R2-P227 read-side row validation, R2-P228
   # query.isError UX on both screens, R2-P229 NOTIFICATION_KIND_TO_
   # PREFERENCE + snapshot test. R2-P230 documented no-change.
-  epic-2-retrospective: optional
+  epic-2-retrospective: done
 
   # Epic 3: Patient Can See Their Health Fingerprint Over Time
   epic-3: backlog
