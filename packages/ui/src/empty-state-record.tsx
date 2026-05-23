@@ -16,18 +16,30 @@ import { Button } from "./button";
 export type EmptyStateRecordVariant = "full-page" | "inline";
 
 /**
- * UX-DR10 names three states (cold-start / partial / filtered-empty)
- * × two variants (full-page / inline). Only `variant` ships in Story 1.2
- * because the single consumer (Início cold-start) doesn't distinguish
- * states yet; restore the `state` prop when a consumer needs different
- * visuals per state.
+ * Story 3.2 — UX-DR10 names three states (cold-start / partial /
+ * filtered-empty). Story 3.2 ships `cold-start` (default; unchanged
+ * from Story 1.2) and `partial` (Fingerprint at draw 1 — secondary
+ * surface beneath the chart). `filtered-empty` is **NOT** in scope
+ * until search/filter ships.
+ *
+ * The `partial` state changes tone and emphasis only, not layout:
+ * smaller headline + tighter vertical padding so it stacks cleanly
+ * under the chart without competing for attention.
  */
+export type EmptyStateRecordState = "cold-start" | "partial";
+
 export interface EmptyStateRecordProps {
   headline: string;
   description?: string;
   ctaLabel: string;
   onCtaPress: () => void;
   variant?: EmptyStateRecordVariant;
+  /**
+   * Story 3.2 — tone variant. Default `cold-start` is byte-for-byte
+   * identical to Story 1.2 (existing call sites omit this prop and
+   * must render unchanged — visual regression guard).
+   */
+  state?: EmptyStateRecordState;
   /**
    * Optional illustration slot. Wrapped in `aria-hidden` because all
    * meaning lives in the text. Pass an Image, an SVG, or null.
@@ -41,16 +53,41 @@ export function EmptyStateRecord({
   ctaLabel,
   onCtaPress,
   variant = "full-page",
+  state = "cold-start",
   illustration,
 }: EmptyStateRecordProps) {
   const isFullPage = variant === "full-page";
+  const isPartial = state === "partial";
+  // Story 3.2 Task 2.2 — `partial` × `inline` tightens vertical padding
+  // so the empty state docks under the FingerprintChart without a
+  // floating gap. `full-page` × `partial` is not a documented
+  // combination, but preserve the full-page padding if it ever shows
+  // up (defensive default).
+  let paddingVertical: "$3" | "$4" | "$8";
+  if (isFullPage) {
+    paddingVertical = "$8";
+  } else if (isPartial) {
+    paddingVertical = "$3";
+  } else {
+    paddingVertical = "$4";
+  }
+  // Cold-start wants a loud welcome ("$7" full-page, "$6" inline);
+  // partial wants to whisper "there's more coming" ("$5").
+  let headlineFontSize: "$5" | "$6" | "$7";
+  if (isPartial) {
+    headlineFontSize = "$5";
+  } else if (isFullPage) {
+    headlineFontSize = "$7";
+  } else {
+    headlineFontSize = "$6";
+  }
   return (
     <YStack
       gap="$4"
       alignItems="center"
       justifyContent="center"
       paddingHorizontal="$4"
-      paddingVertical={isFullPage ? "$8" : "$4"}
+      paddingVertical={paddingVertical}
       flex={isFullPage ? 1 : undefined}
     >
       {illustration ? (
@@ -64,7 +101,7 @@ export function EmptyStateRecord({
       ) : null}
       <Text
         fontFamily="$body"
-        fontSize={isFullPage ? "$7" : "$6"}
+        fontSize={headlineFontSize}
         fontWeight="700"
         color="$textPrimary"
         textAlign="center"

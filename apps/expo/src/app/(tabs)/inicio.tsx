@@ -2,14 +2,23 @@ import { useEffect, useRef, useState } from "react";
 import { AccessibilityInfo } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, Stack, useLocalSearchParams } from "expo-router";
+import { useQuery } from "@tanstack/react-query";
 import { Button, Text, YStack } from "tamagui";
 
-import { EmptyStateRecord, ExtractionPulse } from "@healthtracker/ui";
+import {
+  EmptyStateRecord,
+  ExtractionPulse,
+  FingerprintChart,
+} from "@healthtracker/ui";
 import { UploadSourceSheet } from "@healthtracker/ui/upload-source-sheet";
 import {
+  FINGERPRINT_PARTIAL_EMPTY_CTA_PT_BR,
+  FINGERPRINT_PARTIAL_EMPTY_HEADLINE_PT_BR,
   HISTORICO_OFFLINE_QUEUED_HINT_PT_BR,
   INICIO_ADD_MEASUREMENT_CTA_PT_BR,
+  INICIO_CTA_DRAW_ONE_PT_BR,
   INICIO_CTA_PT_BR,
+  INICIO_HEADLINE_DRAW_ONE_PT_BR,
   INICIO_HEADLINE_PT_BR,
   MANUAL_BIA_ROUTE,
   UPLOAD_ALLOWED_MIME_TYPES,
@@ -18,6 +27,7 @@ import {
 
 import { useImportFiles } from "~/hooks/use-import-files";
 import { useOfflineQueue } from "~/hooks/use-offline-queue";
+import { trpc } from "~/utils/api";
 
 // SafeAreaView is native and can't read Tamagui tokens — mirror
 // colorTokens.backgroundPrimary.light.
@@ -47,6 +57,18 @@ export default function Inicio() {
     source: "post_onboarding",
     pickDocumentsAccept: PDF_ONLY_ACCEPT,
   });
+
+  // Story 3.2 — mirror the Histórico → Resultados options (staleTime
+  // 0 + refetchOnWindowFocus) so a freshly-published draw surfaces on
+  // Início without a pull-to-refresh. AC6: this is the EXISTING
+  // `getRecord` procedure — Story 3.2 adds no new tRPC surface and no
+  // new audit event kind.
+  const recordQuery = useQuery(
+    trpc.observations.getRecord.queryOptions(undefined, {
+      staleTime: 0,
+      refetchOnWindowFocus: true,
+    }),
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -173,6 +195,49 @@ export default function Inicio() {
   const offlineRows = useOfflineQueue();
   const hasOfflineQueued = offlineRows.length > 0;
 
+  // Story 3.2 — render-gating AC5. The Fingerprint cold-start-1
+  // surfaces render ONLY at exactly `drawCount === 1`. `0` falls
+  // back to today's cold-start landing; `>= 2` is Story 3.3's
+  // domain. Loading + error states both render the existing shell
+  // unchanged (AC5: layout shift on resolve is acceptable; Task
+  // 3.7: error must NOT interrupt the upload affordance).
+  const drawCount = recordQuery.data?.drawCount ?? 0;
+  const showFingerprintColdStart1 = drawCount === 1;
+  // The single draw is `draws[0]` because the API helper sorts
+  // `desc(collectedAt)` and there is exactly one. Map to the chart's
+  // narrow prop shape (pass-through; the helper already coerced
+  // numeric strings to `number` at the API boundary).
+  const fingerprintBiomarkers = (
+    recordQuery.data?.draws[0]?.observations ?? []
+  ).map((o) => ({
+    biomarkerName: o.biomarkerName,
+    valueNumeric: o.valueNumeric,
+    unitUcum: o.unitUcum,
+    referenceRangeLow: o.referenceRangeLow,
+    referenceRangeHigh: o.referenceRangeHigh,
+  }));
+
+  // Story 3.2 Task 3.7 — error surfaces a console.warn only (no red
+  // banner). Use a ref so we don't spam the log on every re-render.
+  const warnedErrorRef = useRef<unknown>(null);
+  useEffect(() => {
+    if (recordQuery.isError && warnedErrorRef.current !== recordQuery.error) {
+      warnedErrorRef.current = recordQuery.error;
+      console.warn("[inicio] getRecord error", recordQuery.error);
+    }
+  }, [recordQuery.isError, recordQuery.error]);
+
+  // Story 3.2 Task 3.6 — swap the primary `EmptyStateRecord` copy at
+  // `drawCount === 1` so the headline + CTA reflect "continue
+  // building" instead of "start". At `drawCount === 0` (and on
+  // loading/error) the existing copy is byte-for-byte preserved.
+  const primaryHeadline = showFingerprintColdStart1
+    ? INICIO_HEADLINE_DRAW_ONE_PT_BR
+    : INICIO_HEADLINE_PT_BR;
+  const primaryCtaLabel = showFingerprintColdStart1
+    ? INICIO_CTA_DRAW_ONE_PT_BR
+    : INICIO_CTA_PT_BR;
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: BACKGROUND_PRIMARY }}>
       <Stack.Screen options={{ title: "Início" }} />
@@ -204,9 +269,25 @@ export default function Inicio() {
             </Text>
           </YStack>
         ) : null}
+        {showFingerprintColdStart1 ? (
+          <>
+            <FingerprintChart
+              state="cold-start-1"
+              biomarkers={fingerprintBiomarkers}
+              reducedMotion={reducedMotion}
+            />
+            <EmptyStateRecord
+              headline={FINGERPRINT_PARTIAL_EMPTY_HEADLINE_PT_BR}
+              ctaLabel={FINGERPRINT_PARTIAL_EMPTY_CTA_PT_BR}
+              onCtaPress={() => setSheetOpen(true)}
+              variant="inline"
+              state="partial"
+            />
+          </>
+        ) : null}
         <EmptyStateRecord
-          headline={INICIO_HEADLINE_PT_BR}
-          ctaLabel={INICIO_CTA_PT_BR}
+          headline={primaryHeadline}
+          ctaLabel={primaryCtaLabel}
           // Story 2.1 — the empty-state CTA opens the post-onboarding
           // upload-source sheet. Story 1.5's recovery path
           // (`/onboarding/import` URL) is still reachable directly; the

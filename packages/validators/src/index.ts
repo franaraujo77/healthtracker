@@ -229,6 +229,8 @@ export type NotificationKindForPreferences =
   keyof typeof NOTIFICATION_KIND_TO_PREFERENCE;
 
 // Story 2.5 — Histórico tab + push-notification copy.
+// (Legacy alias — actual Expo route is `/historico/resultados` after
+// Story 3.1's two-tab restructure. Grep before importing.)
 export const HISTORICO_ROUTE = "/inicio/historico";
 export const HISTORICO_TITLE_PT_BR = "Histórico";
 export const HISTORICO_TAB_LABEL_PT_BR = "Histórico";
@@ -958,3 +960,138 @@ export async function countPdfPages(
   });
   return doc.getPageCount();
 }
+
+// =============================================================================
+// Story 3.1 — Longitudinal biomarker record (Histórico → Resultados)
+// =============================================================================
+
+/** pt-BR labels for the two Histórico subtabs (Resultados / Envios). */
+export const HISTORICO_RESULTS_TAB_LABEL_PT_BR = "Resultados";
+export const HISTORICO_UPLOADS_TAB_LABEL_PT_BR = "Envios";
+
+/** Empty-state copy for the Resultados subtab (AC6). */
+export const HISTORICO_RESULTS_EMPTY_HEADLINE_PT_BR =
+  "Sem exames publicados ainda";
+export const HISTORICO_RESULTS_EMPTY_CTA_PT_BR = "Enviar resultado";
+
+/** Loading + error copy for the Resultados subtab. */
+export const HISTORICO_RESULTS_LOADING_PT_BR = "Carregando…";
+export const HISTORICO_RESULTS_ERROR_PT_BR =
+  "Não foi possível carregar seu histórico.";
+/**
+ * R1-P241 — distinct copy for a deep-link / stale-link that points at
+ * a draw not present in the latest `getRecord` payload (e.g. the user
+ * soft-deleted the BIA row between list view and detail tap). The
+ * previous code reused `HISTORICO_RESULTS_ERROR_PT_BR`, which implied
+ * a fetch failure when the fetch actually succeeded.
+ */
+export const HISTORICO_DRAW_NOT_FOUND_PT_BR =
+  "Este exame não está mais disponível.";
+
+/**
+ * R2-P245 — pt-BR "back" label for the draw-detail screen. Lifted from
+ * a hardcoded literal to centralise pt-BR copy per repository
+ * convention (all surface strings live in validators so a copy review
+ * is grep-able).
+ */
+export const HISTORICO_DRAW_DETAIL_BACK_PT_BR = "← Voltar";
+
+/** pt-BR fallback when an extracted draw has no lab name (AC1). */
+export const HISTORICO_LAB_NAME_FALLBACK_PT_BR = "Laboratório não informado";
+
+/** "12 biomarcadores" / "1 biomarcador" — pluralized summary on draw rows. */
+export function historicoDrawBiomarkerCountPtBr(n: number): string {
+  return `${n} ${n === 1 ? "biomarcador" : "biomarcadores"}`;
+}
+
+/** Reference-range + deviation labels for `BiomarkerCard` (AC2, AC3, AC7). */
+export const BIOMARKER_REFERENCE_LABEL_PT_BR = "Referência";
+export const BIOMARKER_OUT_OF_RANGE_LABEL_PT_BR = "fora da faixa de referência";
+export const BIOMARKER_WITHIN_RANGE_LABEL_PT_BR =
+  "dentro da faixa de referência";
+export const BIOMARKER_REFERENCE_UNAVAILABLE_PT_BR =
+  "sem faixa de referência disponível";
+
+/**
+ * Story 3.1 — placeholder accessibility hint for `BiomarkerCard`. The tap
+ * is a no-op today; Story 4.3 wires the detail sheet. Setting the hint
+ * now keeps the audio cue stable across stories (UX-DR19).
+ */
+export const BIOMARKER_CARD_A11Y_HINT_PT_BR =
+  "Toque duas vezes para ver o histórico completo";
+
+/**
+ * Story 3.1 — Histórico draw detail route. Composed as
+ * `/historico/{collectedAt}?labName=…` so the dynamic route file at
+ * `apps/expo/src/app/(tabs)/historico/[collectedAt].tsx` can read both
+ * params via `useLocalSearchParams`. The `labName` query param is the
+ * grouping discriminator — its consumer MUST read it (Epic 2 retro
+ * action item §3, query-param coupling).
+ *
+ * Pass the raw lab name (or an empty string when null); the helper
+ * URL-encodes it. Empty-string `labName` is a sentinel for "no lab
+ * recorded" (extracted rows with `lab_name IS NULL` and grouped
+ * accordingly in the API helper).
+ */
+export function historicoDrawDetailRoute(
+  collectedAt: string,
+  labName: string,
+): string {
+  return `/historico/${collectedAt}?labName=${encodeURIComponent(labName)}`;
+}
+
+/**
+ * R3-P246 — format a `yyyy-mm-dd` date-only string as `dd/mm/yyyy`
+ * (pt-BR) without invoking `new Date(...)`. The naive `new
+ * Date('2024-03-15').toLocaleDateString('pt-BR')` parses the input as
+ * UTC midnight, which shifts to the previous calendar day in every
+ * Brazilian timezone (UTC-3 / UTC-4 / UTC-5) — Story 3.1 AC1
+ * requires the **collection date**, not "the day before in the
+ * patient's local clock". Use this helper for any `collected_at`
+ * coming back from `observations`. Returns the input unchanged if it
+ * doesn't match `yyyy-mm-dd`.
+ */
+export function formatCollectedAtPtBr(collectedAt: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(collectedAt);
+  if (!match) return collectedAt;
+  return `${match[3]}/${match[2]}/${match[1]}`;
+}
+
+/**
+ * Story 3.2 — Fingerprint cold-start-1 surface strings (UX spec lines
+ * 848–866, 1187; epics.md lines 909–940). All copy is greppable here
+ * per the Story 0.2 / Epic 2 retro discipline (no hardcoded surface
+ * strings in component code).
+ */
+export const FINGERPRINT_COLD_START_LABEL_PT_BR =
+  "Sua linha de base pessoal cresce com cada novo exame";
+
+export const FINGERPRINT_PARTIAL_EMPTY_HEADLINE_PT_BR =
+  "Com 2 ou mais exames, você verá seu padrão pessoal";
+
+export const FINGERPRINT_PARTIAL_EMPTY_CTA_PT_BR = "Enviar resultado anterior";
+
+/**
+ * AC7 — composite accessibilityLabel for the `FingerprintChart` in
+ * `cold-start-1`. Singular/plural agreement on "biomarcador" /
+ * "biomarcadores" — only `count === 1` takes the singular form.
+ */
+export function FINGERPRINT_COLD_START_A11Y_LABEL_PT_BR(count: number): string {
+  const noun = count === 1 ? "biomarcador" : "biomarcadores";
+  return `Fingerprint em construção. ${count} ${noun} deste primeiro exame. Sua linha de base pessoal cresce com cada novo exame.`;
+}
+
+export const FINGERPRINT_REFERENCE_RANGE_UNAVAILABLE_A11Y_PT_BR =
+  "Sem faixa de referência populacional disponível";
+
+/**
+ * Task 3.6 — Início primary `EmptyStateRecord` copy when the patient
+ * has exactly one draw. The default `INICIO_HEADLINE_PT_BR` ("Sua
+ * história de saúde começa aqui") is factually wrong at `drawCount ===
+ * 1` because the patient already has a result; swap in continuation
+ * framing instead.
+ */
+export const INICIO_HEADLINE_DRAW_ONE_PT_BR =
+  "Continue construindo seu Fingerprint";
+
+export const INICIO_CTA_DRAW_ONE_PT_BR = "Enviar próximo exame";
