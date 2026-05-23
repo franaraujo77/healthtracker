@@ -5,6 +5,15 @@
     {
       "matchPackagePatterns": ["^@healthtracker/"],
       "enabled": false
+    },
+    {
+      "groupName": "turborepo",
+      "matchPackageNames": [
+        "turbo",
+        "@turbo/gen",
+        "eslint-plugin-turbo",
+        "eslint-config-turbo"
+      ]
     }
   ],
   "updateInternalDeps": true,

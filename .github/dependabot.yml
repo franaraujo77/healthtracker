@@ -1,0 +1,28 @@
+# Dependabot config — this repo uses Renovate as the primary dependency
+# tool (see .github/renovate.json). Dependabot is kept enabled only for
+# GitHub-Actions ecosystem updates and for security advisories that
+# Renovate doesn't surface (e.g. GHSA bumps with `security-updates` flow).
+#
+# The `groups` block below ensures that when Dependabot opens a turbo
+# bump it includes ALL turbo-family packages in one PR. Without this,
+# bumping `turbo` alone leaves `@turbo/gen` and `eslint-plugin-turbo`
+# behind, and Turborepo 2.9+'s `unsync-similar-dependencies` postinstall
+# check fails every CI job (see PR #6 root cause).
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      turborepo:
+        patterns:
+          - "turbo"
+          - "@turbo/*"
+          - "eslint-plugin-turbo"
+          - "eslint-config-turbo"
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
