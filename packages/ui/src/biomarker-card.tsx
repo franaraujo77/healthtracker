@@ -4,9 +4,12 @@ import { Text, XStack, YStack } from "tamagui";
 
 import {
   BIOMARKER_CARD_A11Y_HINT_PT_BR,
+  BIOMARKER_NOTABLE_LABEL_PT_BR,
   BIOMARKER_OUT_OF_RANGE_LABEL_PT_BR,
+  BIOMARKER_PERSONAL_BASELINE_NARRATION_PT_BR,
   BIOMARKER_REFERENCE_LABEL_PT_BR,
   BIOMARKER_REFERENCE_UNAVAILABLE_PT_BR,
+  BIOMARKER_WATCHING_LABEL_PT_BR,
   BIOMARKER_WITHIN_RANGE_LABEL_PT_BR,
   formatBrazilianDecimal,
 } from "@healthtracker/validators";
@@ -52,6 +55,19 @@ export interface BiomarkerCardProps {
   variant?: BiomarkerCardVariant;
   state?: BiomarkerCardState;
   onPress?: () => void;
+  /**
+   * Story 3.3 — personal-baseline z-score for the latest value.
+   *   - finite number → resolves to `watching` / `notable` per `|z|`
+   *     thresholds (AC2) and overrides the population-range state.
+   *   - `null` → personal baseline exists but `stddev === 0` (AC2
+   *     degenerate) — resolves to `within-band`, no chip rendered.
+   *   - `undefined` → no personal baseline (Story 3.1 / 3.2 caller);
+   *     fall back to population-range `deviationStateForValue`.
+   */
+  zScore?: number | null;
+  /** Story 3.3 — personal baseline metadata for the narration. */
+  personalBaselineMean?: number;
+  personalBaselineStddev?: number;
 }
 
 /** Pure helper — exported for tests / future consumers. */
@@ -70,13 +86,49 @@ function formatRange(low: number | null, high: number | null): string | null {
   return `${formatBrazilianDecimal(low)} – ${formatBrazilianDecimal(high)}`;
 }
 
+/**
+ * Story 3.3 — resolve the deviation state from an explicit personal-
+ * baseline z-score. Mirrors AC2 thresholds:
+ *   |z| >= 1.5 → notable
+ *   1.0 <= |z| < 1.5 → watching
+ *   |z| < 1.0 → within-band
+ * `zScore === null` (degenerate stddev=0) → within-band (no chip).
+ * Pure function — exported for tests.
+ */
+export function deviationStateForZScore(
+  zScore: number | null,
+): BiomarkerCardState {
+  if (zScore === null || !Number.isFinite(zScore)) return "within-band";
+  const abs = Math.abs(zScore);
+  if (abs >= 1.5) return "notable";
+  if (abs >= 1.0) return "watching";
+  return "within-band";
+}
+
 function buildAccessibilityLabel(
   biomarkerName: string,
   valueNumeric: number,
   unitUcum: string,
   state: BiomarkerCardState,
+  zScore: number | null | undefined,
 ): string {
   const valuePart = `${formatBrazilianDecimal(valueNumeric)} ${unitUcum}`;
+  // Story 3.3 — personal-baseline narration takes precedence over
+  // population-range narration when the caller supplied a finite z
+  // (AC3). `zScore === null` falls through to the existing within-
+  // band / cold-start path.
+  if (
+    typeof zScore === "number" &&
+    Number.isFinite(zScore) &&
+    (state === "watching" || state === "notable")
+  ) {
+    const direction: "above" | "below" = zScore < 0 ? "below" : "above";
+    const narration = BIOMARKER_PERSONAL_BASELINE_NARRATION_PT_BR({
+      zScore,
+      direction,
+    });
+    return `${biomarkerName}, ${valuePart}, ${narration}.`;
+  }
   let narration: string;
   switch (state) {
     case "watching":
@@ -103,10 +155,26 @@ export function BiomarkerCard({
   variant: _variant = "standard",
   state,
   onPress,
+  zScore,
+  personalBaselineMean: _personalBaselineMean,
+  personalBaselineStddev: _personalBaselineStddev,
 }: BiomarkerCardProps) {
+  // State resolution priority:
+  //   1. explicit `state` prop (test / caller override),
+  //   2. Story 3.3 personal-baseline z-score (when provided),
+  //   3. Story 3.1 population-range fallback.
+  // `zScore === null` resolves via the z-score path to `within-band`
+  // (AC2 degenerate stddev=0); only `undefined` falls through to
+  // population range — preserves Story 3.1 / 3.2 caller behaviour.
   const resolvedState =
     state ??
-    deviationStateForValue(valueNumeric, referenceRangeLow, referenceRangeHigh);
+    (zScore !== undefined
+      ? deviationStateForZScore(zScore)
+      : deviationStateForValue(
+          valueNumeric,
+          referenceRangeLow,
+          referenceRangeHigh,
+        ));
   const isDeviation =
     resolvedState === "watching" || resolvedState === "notable";
   const rangeText = formatRange(referenceRangeLow, referenceRangeHigh);
@@ -115,7 +183,25 @@ export function BiomarkerCard({
     valueNumeric,
     unitUcum,
     resolvedState,
+    zScore,
   );
+  // Story 3.3 — chip copy maps:
+  //   watching → "acompanhando"
+  //   notable  → "vale conversar"
+  // Story 3.1 population-range path keeps the original
+  // "fora da faixa de referência" copy (AC3 — when zScore is
+  // undefined, this is the population-range surface).
+  const isPersonalBaselineDeviation =
+    typeof zScore === "number" &&
+    Number.isFinite(zScore) &&
+    (resolvedState === "watching" || resolvedState === "notable");
+  let chipLabel = BIOMARKER_OUT_OF_RANGE_LABEL_PT_BR;
+  if (isPersonalBaselineDeviation) {
+    chipLabel =
+      resolvedState === "notable"
+        ? BIOMARKER_NOTABLE_LABEL_PT_BR
+        : BIOMARKER_WATCHING_LABEL_PT_BR;
+  }
 
   return (
     <YStack
@@ -194,7 +280,7 @@ export function BiomarkerCard({
             fontWeight="600"
             color="$biomarkerDeviation"
           >
-            {BIOMARKER_OUT_OF_RANGE_LABEL_PT_BR}
+            {chipLabel}
           </Text>
         </XStack>
       ) : null}

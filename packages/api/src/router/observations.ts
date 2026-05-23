@@ -3,6 +3,7 @@ import type { TRPCRouterRecord } from "@trpc/server";
 import { BiaSubmissionSchema } from "@healthtracker/validators";
 
 import { writeBiaObservations } from "../observations";
+import { getPersonalBaselineForPatient } from "../observations-baseline";
 import { getRecordForPatient } from "../observations-record";
 import { protectedProcedure } from "../trpc";
 
@@ -17,6 +18,18 @@ export const observationsRouter = {
    */
   getRecord: protectedProcedure.query(async ({ ctx }) => {
     return getRecordForPatient(ctx.db, ctx.session.user.id);
+  }),
+
+  /**
+   * Story 3.3 — read the patient's personal baseline (per-biomarker
+   * mean / stddev / latest / z-score) across their full
+   * observation history. Single SQL aggregate; soft-delete-filtered;
+   * appends one `observation.baseline.read` audit row in the same
+   * `protectedProcedure` transaction (AC6). No input — `patientId`
+   * is derived from `ctx.session.user.id` (only safe source).
+   */
+  getPersonalBaseline: protectedProcedure.query(async ({ ctx }) => {
+    return getPersonalBaselineForPatient(ctx.db, ctx.session.user.id);
   }),
 
   /**

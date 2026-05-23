@@ -12,6 +12,7 @@ import {
   formatBrazilianDecimal,
 } from "@healthtracker/validators";
 
+import type { FingerprintChartBaselineBiomarker } from "./fingerprint-chart-baseline";
 /**
  * Story 3.2 — `FingerprintChart` (UX spec lines 848–866).
  *
@@ -43,7 +44,9 @@ import {
  * biomarker's narration).
  */
 
-export type FingerprintChartState = "cold-start-1";
+import { FingerprintBaselineChart } from "./fingerprint-chart-baseline";
+
+export type FingerprintChartState = "cold-start-1" | "baseline-established";
 
 export interface FingerprintChartBiomarker {
   biomarkerName: string;
@@ -53,16 +56,23 @@ export interface FingerprintChartBiomarker {
   referenceRangeHigh: number | null;
 }
 
-export interface FingerprintChartProps {
-  state: FingerprintChartState;
-  biomarkers: FingerprintChartBiomarker[];
-  /**
-   * When true, suppresses the pulse animation. Caller-supplied so
-   * each platform owns its own reduced-motion detection (matches
-   * `ExtractionPulse`).
-   */
-  reducedMotion?: boolean;
-}
+/**
+ * Discriminated `FingerprintChartProps`. `cold-start-1` keeps the
+ * Story 3.2 shape (`biomarkers` carrying population-range data).
+ * `baseline-established` (Story 3.3) carries time-series + baseline
+ * stats per biomarker via `baselines`.
+ */
+export type FingerprintChartProps =
+  | {
+      state: "cold-start-1";
+      biomarkers: FingerprintChartBiomarker[];
+      reducedMotion?: boolean;
+    }
+  | {
+      state: "baseline-established";
+      baselines: FingerprintChartBaselineBiomarker[];
+      reducedMotion?: boolean;
+    };
 
 const PULSE_PERIOD_MS = 2000;
 const DOT_SIZE = 12;
@@ -225,17 +235,32 @@ function BiomarkerRow({ biomarker, opacity }: BiomarkerRowProps) {
   );
 }
 
-export function FingerprintChart({
-  state,
+export function FingerprintChart(props: FingerprintChartProps) {
+  // Story 3.3 — proper `switch` on the discriminator replaces the
+  // Story 3.2 `void state;` stub. `baseline-established` routes to a
+  // separate module so `cold-start-1` rendering stays byte-for-byte
+  // identical (Story 3.2 regression guard — R2-P244 lesson).
+  switch (props.state) {
+    case "baseline-established":
+      return (
+        <FingerprintBaselineChart
+          biomarkers={props.baselines}
+          reducedMotion={props.reducedMotion}
+        />
+      );
+    case "cold-start-1":
+      return <ColdStart1Chart {...props} />;
+  }
+}
+
+function ColdStart1Chart({
   biomarkers,
   reducedMotion,
-}: FingerprintChartProps) {
+}: {
+  biomarkers: FingerprintChartBiomarker[];
+  reducedMotion?: boolean;
+}) {
   // AC4 — `reducedMotion === true` means no interval is scheduled.
-  // The `state` discriminator only has `cold-start-1` today; Story
-  // 3.3 widens it to `| 'cold-start-2' | 'baseline-established'` and
-  // will gate the animation per-state then. Reference `state` so the
-  // discriminator is observable in render even before Story 3.3.
-  void state;
   const animating = !reducedMotion;
   const opacity = usePulseOpacity(animating);
 

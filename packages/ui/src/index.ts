@@ -1,9 +1,21 @@
-export { BiomarkerCard, deviationStateForValue } from "./biomarker-card";
+export {
+  BiomarkerCard,
+  deviationStateForValue,
+  deviationStateForZScore,
+} from "./biomarker-card";
 export type {
   BiomarkerCardProps,
   BiomarkerCardState,
   BiomarkerCardVariant,
 } from "./biomarker-card";
+export {
+  computeTrend,
+  FingerprintBaselineChart,
+} from "./fingerprint-chart-baseline";
+export type {
+  FingerprintBaselineChartProps,
+  FingerprintChartBaselineBiomarker,
+} from "./fingerprint-chart-baseline";
 export { Button } from "./button";
 export { DropdownMenu, DropdownMenuItem } from "./dropdown-menu";
 export { EmptyStateRecord } from "./empty-state-record";

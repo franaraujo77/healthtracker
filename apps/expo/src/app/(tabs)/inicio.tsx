@@ -1,11 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AccessibilityInfo } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { Button, Text, YStack } from "tamagui";
 
+import type { FingerprintChartBaselineBiomarker } from "@healthtracker/ui";
 import {
+  BiomarkerCard,
   EmptyStateRecord,
   ExtractionPulse,
   FingerprintChart,
@@ -18,6 +20,8 @@ import {
   INICIO_ADD_MEASUREMENT_CTA_PT_BR,
   INICIO_CTA_DRAW_ONE_PT_BR,
   INICIO_CTA_PT_BR,
+  INICIO_FINGERPRINT_ERROR_PT_BR,
+  INICIO_FINGERPRINT_LOADING_PT_BR,
   INICIO_HEADLINE_DRAW_ONE_PT_BR,
   INICIO_HEADLINE_PT_BR,
   MANUAL_BIA_ROUTE,
@@ -67,6 +71,18 @@ export default function Inicio() {
     trpc.observations.getRecord.queryOptions(undefined, {
       staleTime: 0,
       refetchOnWindowFocus: true,
+    }),
+  );
+
+  // Story 3.3 — second query for the personal baseline. `enabled`
+  // gates on `drawCount >= 2` so we don't emit a spurious
+  // `observation.baseline.read` audit row at draw 0 / 1 (AC6).
+  const drawCountFromRecord = recordQuery.data?.drawCount ?? 0;
+  const baselineQuery = useQuery(
+    trpc.observations.getPersonalBaseline.queryOptions(undefined, {
+      staleTime: 0,
+      refetchOnWindowFocus: true,
+      enabled: drawCountFromRecord >= 2,
     }),
   );
 
@@ -203,6 +219,11 @@ export default function Inicio() {
   // 3.7: error must NOT interrupt the upload affordance).
   const drawCount = recordQuery.data?.drawCount ?? 0;
   const showFingerprintColdStart1 = drawCount === 1;
+  // Story 3.3 AC5 — render-gating uses `drawCount` from `getRecord`
+  // ONLY (single source of truth — Task 4.9 dead-code guard). The
+  // baseline query can race; the chart prop layer handles the
+  // empty-baselines case.
+  const showFingerprintBaseline = drawCount >= 2;
   // The single draw is `draws[0]` because the API helper sorts
   // `desc(collectedAt)` and there is exactly one. Map to the chart's
   // narrow prop shape (pass-through; the helper already coerced
@@ -217,6 +238,140 @@ export default function Inicio() {
     referenceRangeHigh: o.referenceRangeHigh,
   }));
 
+  // Story 3.3 Task 4.3 — merge baseline rows + per-biomarker history
+  // sourced from `recordQuery.data.draws[].observations[]`. Tiny
+  // dataset (≤ ~1000 rows; Epic 2 retro) so a single linear pass per
+  // baseline row is fine. Memo on both query data refs so the work
+  // only recomputes when either query resolves.
+  const baselineChartBiomarkers: FingerprintChartBaselineBiomarker[] =
+    useMemo(() => {
+      const baselines = baselineQuery.data?.baselines ?? [];
+      const draws = recordQuery.data?.draws ?? [];
+      if (baselines.length === 0) return [];
+      return baselines.map((b) => {
+        // Build chronological history by walking all draws and
+        // collecting observations that match by LOINC (when set) or
+        // by (biomarkerName, unitUcum) fallback. Reverse-chrono in
+        // `draws` is the helper's contract — reverse to chronological
+        // for the chart.
+        const matching: { collectedAt: string; valueNumeric: number }[] = [];
+        for (const draw of draws) {
+          for (const obs of draw.observations) {
+            const sameGroup =
+              b.loincCode !== null
+                ? obs.loincCode === b.loincCode
+                : obs.loincCode === null &&
+                  obs.biomarkerName === b.biomarkerName &&
+                  obs.unitUcum === b.unitUcum;
+            if (sameGroup) {
+              matching.push({
+                collectedAt: obs.collectedAt,
+                valueNumeric: obs.valueNumeric,
+              });
+            }
+          }
+        }
+        // `draws` is reverse-chrono → reverse to chronological for
+        // line/scatter direction.
+        matching.reverse();
+        return {
+          loincCode: b.loincCode,
+          biomarkerName: b.biomarkerName,
+          unitUcum: b.unitUcum,
+          history: matching,
+          baseline: {
+            mean: b.mean,
+            stddev: b.stddev,
+            sampleSize: b.sampleSize,
+          },
+          latestValue: b.latestValue,
+          zScore: b.zScore,
+        };
+      });
+    }, [baselineQuery.data, recordQuery.data]);
+
+  // Story 3.3 AC3 — cold-start fallback per biomarker. Biomarkers
+  // present in the latest draw but absent from `baselines` (single
+  // historical sample) render as `BiomarkerCard` `cold-start`.
+  const baselineKeys = useMemo(() => {
+    const set = new Set<string>();
+    for (const b of baselineQuery.data?.baselines ?? []) {
+      set.add(
+        b.loincCode !== null
+          ? `loinc:${b.loincCode}`
+          : `name:${b.biomarkerName}|${b.unitUcum}`,
+      );
+    }
+    return set;
+  }, [baselineQuery.data]);
+
+  // Build the BiomarkerCard list: one card per baseline row +
+  // one cold-start card per biomarker in the latest draw without
+  // a baseline entry.
+  const baselineCards = useMemo(() => {
+    if (!showFingerprintBaseline) return [];
+    const baselines = baselineQuery.data?.baselines ?? [];
+    const latestObs = recordQuery.data?.draws[0]?.observations ?? [];
+    const cards: {
+      key: string;
+      biomarkerName: string;
+      valueNumeric: number;
+      unitUcum: string;
+      referenceRangeLow: number | null;
+      referenceRangeHigh: number | null;
+      zScore?: number | null;
+      personalBaselineMean?: number;
+      personalBaselineStddev?: number;
+    }[] = [];
+    baselines.forEach((b, idx) => {
+      // Look up the latest population reference range from the most-
+      // recent observation in the matching group.
+      const refSource = latestObs.find((o) =>
+        b.loincCode !== null
+          ? o.loincCode === b.loincCode
+          : o.loincCode === null &&
+            o.biomarkerName === b.biomarkerName &&
+            o.unitUcum === b.unitUcum,
+      );
+      cards.push({
+        key: `bl-${b.loincCode ?? b.biomarkerName}-${b.unitUcum}-${idx}`,
+        biomarkerName: b.biomarkerName,
+        valueNumeric: b.latestValue,
+        unitUcum: b.unitUcum,
+        referenceRangeLow: refSource?.referenceRangeLow ?? null,
+        referenceRangeHigh: refSource?.referenceRangeHigh ?? null,
+        zScore: b.zScore,
+        personalBaselineMean: b.mean,
+        personalBaselineStddev: b.stddev,
+      });
+    });
+    // Cold-start fallback for single-history biomarkers in the
+    // latest draw.
+    latestObs.forEach((o, idx) => {
+      const key =
+        o.loincCode !== null
+          ? `loinc:${o.loincCode}`
+          : `name:${o.biomarkerName}|${o.unitUcum}`;
+      if (baselineKeys.has(key)) return;
+      cards.push({
+        key: `cs-${o.id}-${idx}`,
+        biomarkerName: o.biomarkerName,
+        valueNumeric: o.valueNumeric,
+        unitUcum: o.unitUcum,
+        referenceRangeLow: o.referenceRangeLow,
+        referenceRangeHigh: o.referenceRangeHigh,
+        // `zScore` undefined → BiomarkerCard falls back to
+        // population-range state (AC3 fallback contract).
+      });
+    });
+    return cards;
+  }, [
+    showFingerprintBaseline,
+    baselineQuery.data,
+    recordQuery.data,
+    baselineKeys,
+  ]);
+
   // Story 3.2 Task 3.7 — error surfaces a console.warn only (no red
   // banner). Use a ref so we don't spam the log on every re-render.
   const warnedErrorRef = useRef<unknown>(null);
@@ -226,6 +381,18 @@ export default function Inicio() {
       console.warn("[inicio] getRecord error", recordQuery.error);
     }
   }, [recordQuery.isError, recordQuery.error]);
+  // Story 3.3 Task 4.6 — baseline query errors warn-only; the UI
+  // shows a calm amber text instead of a red banner.
+  const warnedBaselineErrorRef = useRef<unknown>(null);
+  useEffect(() => {
+    if (
+      baselineQuery.isError &&
+      warnedBaselineErrorRef.current !== baselineQuery.error
+    ) {
+      warnedBaselineErrorRef.current = baselineQuery.error;
+      console.warn("[inicio] getPersonalBaseline error", baselineQuery.error);
+    }
+  }, [baselineQuery.isError, baselineQuery.error]);
 
   // Story 3.2 Task 3.6 — swap the primary `EmptyStateRecord` copy at
   // `drawCount === 1` so the headline + CTA reflect "continue
@@ -285,24 +452,73 @@ export default function Inicio() {
             />
           </>
         ) : null}
-        <EmptyStateRecord
-          headline={primaryHeadline}
-          ctaLabel={primaryCtaLabel}
-          // Story 2.1 — the empty-state CTA opens the post-onboarding
-          // upload-source sheet. Story 1.5's recovery path
-          // (`/onboarding/import` URL) is still reachable directly; the
-          // CTA no longer routes to it.
-          onCtaPress={() => setSheetOpen(true)}
-        />
-        {/* Story 2.7 — secondary "Adicionar medição" CTA opens the
-            manual BIA form. Spec Task 7 collapses the picker sheet
-            since only one option exists today; the button label
-            spells out the option for clarity. */}
-        <YStack paddingHorizontal="$3" paddingBottom="$3">
-          <Button onPress={() => router.push(MANUAL_BIA_ROUTE)}>
-            {INICIO_ADD_MEASUREMENT_CTA_PT_BR}
-          </Button>
-        </YStack>
+        {showFingerprintBaseline ? (
+          <>
+            {baselineQuery.isPending ? (
+              <YStack padding="$4" margin="$3">
+                <Text color="$textSecondary" fontFamily="$body" fontSize={14}>
+                  {INICIO_FINGERPRINT_LOADING_PT_BR}
+                </Text>
+              </YStack>
+            ) : baselineQuery.isError ? (
+              <YStack padding="$4" margin="$3">
+                <Text
+                  color="$biomarkerDeviation"
+                  fontFamily="$body"
+                  fontSize={14}
+                >
+                  {INICIO_FINGERPRINT_ERROR_PT_BR}
+                </Text>
+              </YStack>
+            ) : (
+              <>
+                <FingerprintChart
+                  state="baseline-established"
+                  baselines={baselineChartBiomarkers}
+                  reducedMotion={reducedMotion}
+                />
+                <YStack gap="$2" paddingHorizontal="$3" paddingBottom="$3">
+                  {baselineCards.map((c) => (
+                    <BiomarkerCard
+                      key={c.key}
+                      biomarkerName={c.biomarkerName}
+                      valueNumeric={c.valueNumeric}
+                      unitUcum={c.unitUcum}
+                      referenceRangeLow={c.referenceRangeLow}
+                      referenceRangeHigh={c.referenceRangeHigh}
+                      zScore={c.zScore}
+                      personalBaselineMean={c.personalBaselineMean}
+                      personalBaselineStddev={c.personalBaselineStddev}
+                    />
+                  ))}
+                </YStack>
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            <EmptyStateRecord
+              headline={primaryHeadline}
+              ctaLabel={primaryCtaLabel}
+              // Story 2.1 — the empty-state CTA opens the post-
+              // onboarding upload-source sheet. Story 1.5's recovery
+              // path (`/onboarding/import` URL) is still reachable
+              // directly; the CTA no longer routes to it.
+              onCtaPress={() => setSheetOpen(true)}
+            />
+            {/* Story 2.7 — secondary "Adicionar medição" CTA opens
+                the manual BIA form. Story 3.3 AC5 suppresses both
+                this and the primary EmptyStateRecord at drawCount>=2
+                (the patient with a Fingerprint should see their
+                Fingerprint, not an upload prompt; uploads remain
+                reachable via Histórico). */}
+            <YStack paddingHorizontal="$3" paddingBottom="$3">
+              <Button onPress={() => router.push(MANUAL_BIA_ROUTE)}>
+                {INICIO_ADD_MEASUREMENT_CTA_PT_BR}
+              </Button>
+            </YStack>
+          </>
+        )}
         <UploadSourceSheet
           open={sheetOpen}
           onOpenChange={setSheetOpen}

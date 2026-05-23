@@ -1,5 +1,7 @@
 import { z } from "zod/v4";
 
+import { formatBrazilianDecimal } from "./decimal";
+
 export { formatBrazilianDecimal, parseBrazilianDecimal } from "./decimal";
 export { parseCollectedAt } from "./collected-at";
 
@@ -1095,3 +1097,76 @@ export const INICIO_HEADLINE_DRAW_ONE_PT_BR =
   "Continue construindo seu Fingerprint";
 
 export const INICIO_CTA_DRAW_ONE_PT_BR = "Enviar próximo exame";
+
+/**
+ * Story 3.3 — `BiomarkerCard` chip copy for personal-baseline
+ * deviation states (epics.md lines 929–953, UX spec 832–844).
+ * `watching` (1.0 ≤ |z| < 1.5) and `notable` (|z| ≥ 1.5) replace the
+ * Story 3.1 population-range narration when a personal baseline is
+ * available (AC2/AC3).
+ */
+export const BIOMARKER_WATCHING_LABEL_PT_BR = "acompanhando";
+export const BIOMARKER_NOTABLE_LABEL_PT_BR = "vale conversar";
+
+/**
+ * Story 3.3 — narration suffix for `BiomarkerCard` personal-baseline
+ * states (AC2/AC7). Returns the trailing portion of the composite
+ * accessibilityLabel; the caller prefixes `"{name}, {value} {unit}, "`.
+ */
+export function BIOMARKER_PERSONAL_BASELINE_NARRATION_PT_BR(args: {
+  zScore: number;
+  direction: "above" | "below";
+}): string {
+  const directionPt = args.direction === "below" ? "abaixo" : "acima";
+  const absZ = Math.abs(args.zScore);
+  const magnitude = formatBrazilianDecimal(absZ);
+  // R2-P268 — pt-BR singular/plural agreement on "desvio". When
+  // `|z| === 1` exactly (boundary), "1 desvios" is ungrammatical;
+  // any other magnitude (1,1 / 1,5 / 2,3 / etc.) takes the plural.
+  const noun = absZ === 1 ? "desvio" : "desvios";
+  return `${magnitude} ${noun} ${directionPt} da sua linha de base pessoal`;
+}
+
+/**
+ * Story 3.3 — trend labels for the `FingerprintChart`
+ * `baseline-established` composite accessibilityLabel (AC7).
+ */
+export const FINGERPRINT_BASELINE_TREND_ASCENDING_PT_BR = "ascendente";
+export const FINGERPRINT_BASELINE_TREND_DESCENDING_PT_BR = "descendente";
+export const FINGERPRINT_BASELINE_TREND_FLAT_PT_BR = "estável";
+
+export type FingerprintBaselineTrend = "ascendente" | "descendente" | "estável";
+
+/**
+ * Story 3.3 — composite a11y label for the chart in
+ * `baseline-established`. epics.md line 951:
+ * "Ferritina: 3 medições. Tendência descendente. Valor atual 2,1
+ *  desvios abaixo da sua linha de base pessoal."
+ * Singular/plural agreement on "medição" / "medições".
+ * When `zScore` is `null` (degenerate stddev=0), the closing
+ * sentence is replaced by "Sem variação na sua linha de base
+ * pessoal." — no spurious z-score is announced (AC2 fallback).
+ */
+export function FINGERPRINT_BASELINE_A11Y_LABEL_PT_BR(args: {
+  biomarkerName: string;
+  sampleSize: number;
+  trend: FingerprintBaselineTrend;
+  zScore: number | null;
+}): string {
+  const noun = args.sampleSize === 1 ? "medição" : "medições";
+  if (args.zScore === null) {
+    return `${args.biomarkerName}: ${args.sampleSize} ${noun}. Tendência ${args.trend}. Sem variação na sua linha de base pessoal.`;
+  }
+  const direction = args.zScore < 0 ? "abaixo" : "acima";
+  const absZ = Math.abs(args.zScore);
+  const magnitude = formatBrazilianDecimal(absZ);
+  // R2-P268 — pt-BR singular/plural agreement on "desvio" (boundary
+  // case at `|z| === 1` exactly).
+  const desvioNoun = absZ === 1 ? "desvio" : "desvios";
+  return `${args.biomarkerName}: ${args.sampleSize} ${noun}. Tendência ${args.trend}. Valor atual ${magnitude} ${desvioNoun} ${direction} da sua linha de base pessoal.`;
+}
+
+/** Story 3.3 — Início loading / error copy at drawCount >= 2. */
+export const INICIO_FINGERPRINT_LOADING_PT_BR = "Carregando seu Fingerprint…";
+export const INICIO_FINGERPRINT_ERROR_PT_BR =
+  "Não conseguimos carregar seu Fingerprint agora. Tente novamente em instantes.";

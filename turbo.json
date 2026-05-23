@@ -75,7 +75,9 @@
     "EXPO_PUBLIC_SENTRY_DSN",
     "NEXT_RUNTIME",
     "EXTRACTION_ADAPTER",
-    "EXPO_PUSH_ACCESS_TOKEN"
+    "EXPO_PUSH_ACCESS_TOKEN",
+    "NFR_SC4_FULL",
+    "SKIP_NFR_SC4"
   ],
   "globalPassThroughEnv": [
     "NODE_ENV",
