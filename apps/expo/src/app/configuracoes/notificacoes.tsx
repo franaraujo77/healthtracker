@@ -7,7 +7,7 @@ import { Button, Text, XStack, YStack } from "tamagui";
 
 import type { NotificationPreferencesInput } from "@healthtracker/validators";
 import {
-  NOTIF_OS_DENIED_BANNER_PT_BR,
+  NOTIF_OPEN_SYSTEM_SETTINGS_CTA_PT_BR,
   NOTIF_OS_DENIED_HINT_PT_BR,
   NOTIF_PREF_ERROR_PT_BR,
   NOTIF_PREF_LETTERS_READY_PT_BR,
@@ -93,8 +93,13 @@ export default function NotificacoesScreen() {
         {query.isLoading ? <Text>{NOTIF_PREF_LOADING_PT_BR}</Text> : null}
         {prefs !== null ? (
           <YStack gap="$3">
+            {/* R1-P220 — the always-visible button uses neutral copy.
+                The OS-denied banner (`NOTIF_OS_DENIED_BANNER_PT_BR`)
+                ships with F135 once `expo-notifications` is in deps
+                and we can check `Notifications.getPermissionsAsync()`
+                to conditionally render the alarmist copy. */}
             <Button onPress={openSystemSettings}>
-              {NOTIF_OS_DENIED_BANNER_PT_BR}
+              {NOTIF_OPEN_SYSTEM_SETTINGS_CTA_PT_BR}
             </Button>
             {TOGGLES.map(({ key, label }) => (
               <XStack

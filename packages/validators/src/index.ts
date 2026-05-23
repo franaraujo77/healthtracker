@@ -166,12 +166,16 @@ export const INICIO_ADD_MEASUREMENT_CTA_PT_BR =
  * at the API helper's synthetic-default fallback for first-time
  * patients with no row.
  */
-export const NotificationPreferencesSchema = z.object({
-  resultsReady: z.boolean(),
-  lettersReady: z.boolean(),
-  recordAccess: z.boolean(),
-  reviewRequired: z.boolean(),
-});
+export const NotificationPreferencesSchema = z
+  .object({
+    resultsReady: z.boolean(),
+    lettersReady: z.boolean(),
+    recordAccess: z.boolean(),
+    reviewRequired: z.boolean(),
+  })
+  // R1-P221 — reject extra keys so a buggy client can't slip
+  // unknown fields past the boundary.
+  .strict();
 export type NotificationPreferencesInput = z.infer<
   typeof NotificationPreferencesSchema
 >;
@@ -189,6 +193,13 @@ export const NOTIF_PREF_ERROR_PT_BR =
 export const NOTIF_OS_DENIED_BANNER_PT_BR =
   "As notificações estão desativadas no sistema. Toque para ativar nas configurações do dispositivo.";
 export const NOTIF_OS_DENIED_HINT_PT_BR = "(desativado no sistema)";
+// R1-P220 — neutral label for the always-visible "open OS settings"
+// button when permissions are granted. Story 2.8 spec said the
+// banner is the ONLY UX when OS permission is denied; with permission
+// granted, the button is a quiet escape hatch into device settings
+// for the patient.
+export const NOTIF_OPEN_SYSTEM_SETTINGS_CTA_PT_BR =
+  "Abrir configurações do sistema";
 
 export const NOTIFICATIONS_SETTINGS_LINK_LABEL_PT_BR = "Notificações";
 

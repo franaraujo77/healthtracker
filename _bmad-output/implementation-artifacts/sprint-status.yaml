@@ -118,7 +118,12 @@ development_status:
   # shared-mock backing store for two-device test (theatre fix),
   # R2-P216 explicit date-parts narrowing. R2-P213/P215/P217
   # documented; F161–F166 deferred.
-  2-8-patient-manages-push-notification-preferences: review
+  2-8-patient-manages-push-notification-preferences: done
+  # round-1 patches applied: R1-P218 worker fail-open on missing table
+  # (HIGH infra), R1-P219 frozen + spread defaults (HIGH correctness),
+  # R1-P220 neutral OS-settings CTA copy (HIGH UX), R1-P221 .strict()
+  # schema, R1-P225 array-form UPSERT target. R1-P222/P223/P224
+  # deferred to F171/F172/F169.
   epic-2-retrospective: optional
 
   # Epic 3: Patient Can See Their Health Fingerprint Over Time

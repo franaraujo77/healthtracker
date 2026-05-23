@@ -136,12 +136,18 @@ export async function revokePushTokenByDevice(
  * defense-in-depth — the worker's `getNotificationPreferences` path
  * never has to know about the schema column defaults.
  */
-export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferencesInput = {
-  resultsReady: true,
-  lettersReady: true,
-  recordAccess: true,
-  reviewRequired: true,
-};
+// R1-P219 — `Object.freeze` so a caller that mutates the return value
+// of `getNotificationPreferences()` can't corrupt subsequent
+// default-reads across the process. The read path also returns a
+// fresh spread copy (defense-in-depth against a future caller
+// removing the freeze).
+export const DEFAULT_NOTIFICATION_PREFERENCES: Readonly<NotificationPreferencesInput> =
+  Object.freeze({
+    resultsReady: true,
+    lettersReady: true,
+    recordAccess: true,
+    reviewRequired: true,
+  });
 
 /**
  * Story 2.8 — read the patient's notification preferences. Returns
@@ -161,7 +167,8 @@ export async function getNotificationPreferences(
     .from(NotificationPreferences)
     .where(eq(NotificationPreferences.patientId, patientId))
     .limit(1);
-  return row ?? DEFAULT_NOTIFICATION_PREFERENCES;
+  // Return a fresh copy so callers can safely mutate the result.
+  return row ?? { ...DEFAULT_NOTIFICATION_PREFERENCES };
 }
 
 /**
@@ -185,7 +192,8 @@ export async function writeNotificationPreferences(
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({
-      target: NotificationPreferences.patientId,
+      // R1-P225 — array form for codebase consistency.
+      target: [NotificationPreferences.patientId],
       set: {
         resultsReady: prefs.resultsReady,
         lettersReady: prefs.lettersReady,

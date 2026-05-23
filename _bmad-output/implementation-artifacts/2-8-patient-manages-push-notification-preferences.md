@@ -1,6 +1,6 @@
 # Story 2.8: Patient manages push notification preferences
 
-Status: review
+Status: done
 
 ## Story
 
@@ -193,3 +193,27 @@ claude-opus-4-7[1m]
 - `services/extraction/src/consumers/notifications.ts` — `isPreferenceMuted` + preference gate at the top of the handler.
 - `services/extraction/__tests__/notifications.test.ts` — 4 new tests + updated existing handler tests for the new preference-SELECT call ordering.
 - `apps/expo/src/app/(tabs)/configuracoes.tsx` — Notificações row now active.
+
+### Review Findings (code review round 1 — 2026-05-22)
+
+3-layer adversarial round-1. **3 HIGH (fail-open worker SQL, frozen defaults, misleading banner copy) + 3 Med + 1 Low.** 5 patches applied (R1-P218, R1-P219, R1-P220, R1-P221, R1-P225); 2 deferred (R1-P222 debounce → F172, R1-P223 partial UPSERT → F171, R1-P224 procedure tests → F169); 6 F-items deferred (F167–F172); 7 dismissed.
+
+**`patch` (must fix before done):**
+
+- [x] [Review][Patch] **R1-P218 [HIGH Infra]: Worker SQL throws on missing table → pg-boss infinite retry** [`services/extraction/src/consumers/notifications.ts`] — Fix: try/catch around the preference SELECT; on error log `notification_preferences_lookup_failed` and return `false` (fail-open). Muting the gate is worse than over-delivering.
+- [x] [Review][Patch] **R1-P219 [HIGH Correctness]: `DEFAULT_NOTIFICATION_PREFERENCES` was a mutable shared object** [`packages/api/src/notifications.ts`] — A caller mutating the return value would corrupt every subsequent default-read. Fix: `Object.freeze` the constant + typed `Readonly<...>`; `getNotificationPreferences` returns a fresh `{ ...DEFAULT_NOTIFICATION_PREFERENCES }` spread copy.
+- [x] [Review][Patch] **R1-P220 [HIGH UX]: Expo banner showed denied copy even when permissions were granted** [`apps/expo/src/app/configuracoes/notificacoes.tsx`] — Without F135's `expo-notifications` dep we can't check `getPermissionsAsync()`. Fix: introduced a neutral `NOTIF_OPEN_SYSTEM_SETTINGS_CTA_PT_BR` constant ("Abrir configurações do sistema") for the always-visible button; the alarmist denied-banner copy is reserved for when F135 lands and we can gate it on actual permission status.
+- [x] [Review][Patch] **R1-P221 [Med Defense-in-depth]: `NotificationPreferencesSchema` accepted unknown keys** [`packages/validators/src/index.ts`] — Fix: `.strict()` on the Zod object.
+- [x] [Review][Patch] **R1-P222 [Med UX]: No debounce on toggle mutations** — Deferred as F172.
+- [x] [Review][Patch] **R1-P223 [Med Correctness]: Multi-tab lost-update on `updatePreferences`** — Deferred as F171 (acceptable for single-tab UX today).
+- [x] [Review][Patch] **R1-P224 [Med Coverage]: No tRPC procedure tests for `getPreferences`/`updatePreferences`** — Deferred as F169 (helper tests cover the core paths; procedure-layer tests follow Story 2.7's F166 deferral pattern).
+- [x] [Review][Patch] **R1-P225 [Low Hygiene]: `onConflictDoUpdate.target` should use array form for consistency** [`packages/api/src/notifications.ts`] — Fix: `target: [NotificationPreferences.patientId]`.
+
+**`defer` (added to deferred-work.md):** F167 (record_access end-to-end), F168 (auto-detect OS permission status), F169 (component tests), F170 (no-row debug log), F171 (partial UPSERT), F172 (debounce).
+
+**Dismissed (~7):** worker gate ordering before upload SELECT (correct); raw SQL injection risk (template tag parameterizes); Switch double-tap net-zero (benign); web checkbox visually flips on revert (intended optimistic-rollback); return shape missing patientId (YAGNI); exhaustiveness never check correctly placed; RLS policy revokes follow Story 2.5 pattern.
+
+### Change Log
+
+- 2026-05-22 — Code review round 1. **5 patches applied (R1-P218/P219/P220/P221/P225), 3 deferred to F-items (R1-P222/P223/P224), 6 F-items deferred (F167–F172), 7 dismissed.** Three HIGH fixes closed: R1-P218 wrapped the worker preference SELECT in try/catch with fail-open semantics so a missing table doesn't pg-boss-retry-forever; R1-P219 froze `DEFAULT_NOTIFICATION_PREFERENCES` and returned a spread copy from `getNotificationPreferences`; R1-P220 swapped the always-visible Expo button copy to a neutral CTA so AC4's alarmist banner doesn't render with granted permissions. Med + Low: R1-P221 `.strict()` schema, R1-P225 array form on UPSERT target. **190 unit tests green** (no test count change — the existing helper tests cover the freeze behavior via "returns synthetic default when no row"). Typecheck, lint, format all green.
+- 2026-05-22 — Story 2.8 implemented (dev-story). 190 unit tests green (+9 this story).

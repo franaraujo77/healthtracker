@@ -132,19 +132,37 @@ export async function isPreferenceMuted(
   patientId: string,
   kind: NotificationKind,
 ): Promise<boolean> {
-  const rows = await sql<
-    {
-      results_ready: boolean;
-      letters_ready: boolean;
-      record_access: boolean;
-      review_required: boolean;
-    }[]
-  >`
-    SELECT results_ready, letters_ready, record_access, review_required
-    FROM notification_preferences
-    WHERE patient_id = ${patientId}::uuid
-    LIMIT 1
-  `;
+  // R1-P218 — fail-open on infra fault (table doesn't exist in some
+  // env, column drift, transient DB blip). Without this guard the
+  // throw bubbles to the handler's outer catch and pg-boss retries
+  // forever; muting the gate is worse than over-delivering.
+  let rows: {
+    results_ready: boolean;
+    letters_ready: boolean;
+    record_access: boolean;
+    review_required: boolean;
+  }[];
+  try {
+    rows = await sql<
+      {
+        results_ready: boolean;
+        letters_ready: boolean;
+        record_access: boolean;
+        review_required: boolean;
+      }[]
+    >`
+      SELECT results_ready, letters_ready, record_access, review_required
+      FROM notification_preferences
+      WHERE patient_id = ${patientId}::uuid
+      LIMIT 1
+    `;
+  } catch (err) {
+    console.warn(
+      `[notification.send] notification_preferences_lookup_failed patientId=${patientId} kind=${kind} — fail-open`,
+      err,
+    );
+    return false;
+  }
   const row = rows[0];
   if (!row) return false; // No row → all-true defaults; never muted.
   switch (kind) {

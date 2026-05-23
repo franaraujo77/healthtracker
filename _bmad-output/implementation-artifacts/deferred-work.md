@@ -324,3 +324,13 @@
 - **F164** Document `.for("update")` lock semantics — empty SELECT acquires no lock; the BIA partial unique index is the real concurrency guard (R2-P211 covers the 23505 surface).
 - **F165** Audit `resourceId = observationIds[0]` becomes stale after a future overwrite — replace with an audit-group concept in a later per-observation fan-out story.
 - **F166** Drizzle `db:push` ergonomics for altering partial-index WHERE clauses (broader tooling/devops concern; tracked separately).
+
+
+## Story 2.8 — round-1 review deferrals (F167–F170)
+
+- **F167** `record_access` notification kind end-to-end — toggle is forward-compat scaffolding; the emitter ships in Story 5.3 (doctor-views-record audit).
+- **F168** Auto-detect OS permission status to drive the banner copy reactively. Currently a static neutral CTA; full reactivity ships with F135.
+- **F169** Web/Expo component tests for the Notificações screens.
+- **F170** Structured log when worker preference lookup returns no row for a present `patientId` (debug observability).
+- **F171** Partial UPSERT for `updatePreferences` — today the helper writes all 4 fields; multi-tab / multi-device toggles can lose updates. Switch to `.partial()` schema + dynamic SET when telemetry shows it matters.
+- **F172** Debounce (300 ms) on the optimistic toggle clients — concurrent mutations race today; defer until field data shows it matters.
