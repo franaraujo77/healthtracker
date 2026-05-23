@@ -128,6 +128,8 @@ describe("uploads.requestImport", () => {
       originalFilename: "exam.pdf",
       mimeType: "application/pdf",
       sizeBytes: 1024,
+      source: "onboarding_import",
+      pageCount: 3,
     });
 
     expect(result.idempotencyKey).toMatch(
@@ -138,6 +140,52 @@ describe("uploads.requestImport", () => {
     expect(result.uploadUrl).toContain("/storage/v1/object/upload/sign/");
   });
 
+  it("Story 2.6 — uses the client-provided idempotencyKey when present", async () => {
+    const { caller } = makeCaller();
+    // Valid v4 UUID — Zod's `.uuid()` enforces the version + variant bits.
+    const clientKey = "11111111-2222-4333-8444-555555555555";
+
+    const result = await caller.uploads.requestImport({
+      originalFilename: "offline.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 1024,
+      source: "post_onboarding",
+      pageCount: 2,
+      clientIdempotencyKey: clientKey,
+    });
+
+    // The server must echo the client key verbatim so the offline
+    // queue's `idempotency_key UNIQUE` dedup works across kill +
+    // relaunch retries.
+    expect(result.idempotencyKey).toBe(clientKey);
+    // The storage path is keyed on the client UUID — that's the
+    // dedup seam for repeated PUTs of the same file.
+    expect(result.storagePath).toContain(clientKey);
+  });
+
+  it("Story 2.6 — generates a server-side UUID when clientIdempotencyKey is omitted", async () => {
+    const { caller } = makeCaller();
+    const r1 = await caller.uploads.requestImport({
+      originalFilename: "online-1.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 1024,
+      source: "onboarding_import",
+      pageCount: 1,
+    });
+    const r2 = await caller.uploads.requestImport({
+      originalFilename: "online-2.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 1024,
+      source: "onboarding_import",
+      pageCount: 1,
+    });
+    // Two server-generated keys must differ.
+    expect(r1.idempotencyKey).not.toBe(r2.idempotencyKey);
+    expect(r1.idempotencyKey).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    );
+  });
+
   it("sanitizes the filename — strips path separators before signing", async () => {
     const { caller } = makeCaller();
 
@@ -145,6 +193,8 @@ describe("uploads.requestImport", () => {
       originalFilename: "../../etc/passwd",
       mimeType: "application/pdf",
       sizeBytes: 512,
+      source: "onboarding_import",
+      pageCount: 3,
     });
 
     // The sanitized filename must not contain path separators.
@@ -160,6 +210,8 @@ describe("uploads.requestImport", () => {
         originalFilename: "huge.pdf",
         mimeType: "application/pdf",
         sizeBytes: 10 * 1024 * 1024,
+        source: "onboarding_import",
+        pageCount: 3,
       }),
     ).rejects.toThrow();
   });
@@ -173,6 +225,7 @@ describe("uploads.requestImport", () => {
         mimeType:
           "application/vnd.openxmlformats-officedocument.wordprocessingml.document" as never,
         sizeBytes: 1024,
+        source: "onboarding_import",
       }),
     ).rejects.toThrow();
   });
@@ -189,6 +242,8 @@ describe("uploads.confirmImport", () => {
       originalFilename: "exam.pdf",
       mimeType: "application/pdf",
       sizeBytes: 2048,
+      source: "onboarding_import",
+      pageCount: 3,
     });
 
     expect(result).toEqual({ uploadId: "upload-1", created: true });
@@ -241,6 +296,8 @@ describe("uploads.confirmImport", () => {
       originalFilename: "exam.pdf",
       mimeType: "application/pdf",
       sizeBytes: 2048,
+      source: "onboarding_import",
+      pageCount: 3,
     });
 
     expect(result).toEqual({ uploadId: null, created: false });
@@ -264,6 +321,8 @@ describe("uploads.confirmImport", () => {
           originalFilename: "exam.pdf",
           mimeType: "application/pdf",
           sizeBytes: 2048,
+          source: "onboarding_import",
+          pageCount: 3,
         }),
       ).rejects.toMatchObject({
         code: "NOT_FOUND",
@@ -298,6 +357,8 @@ describe("uploads.confirmImport", () => {
           originalFilename: "exam.pdf",
           mimeType: "application/pdf",
           sizeBytes: 1024,
+          source: "onboarding_import",
+          pageCount: 3,
         }),
       ).rejects.toMatchObject({
         code: "PAYLOAD_TOO_LARGE",
@@ -329,6 +390,8 @@ describe("uploads.confirmImport", () => {
           originalFilename: "exam.pdf",
           mimeType: "application/pdf",
           sizeBytes: 2048,
+          source: "onboarding_import",
+          pageCount: 3,
         }),
       ).rejects.toMatchObject({
         code: "BAD_REQUEST",
@@ -338,6 +401,146 @@ describe("uploads.confirmImport", () => {
     } finally {
       storageListHandler.current = previous;
     }
+  });
+});
+
+describe("uploads — Story 2.1 source + pageCount", () => {
+  it("flows source: 'post_onboarding' through to writeUpload and the audit metadata", async () => {
+    const { caller, uploadChain, auditValues } = makeCaller();
+
+    await caller.uploads.confirmImport({
+      idempotencyKey: IDEMPOTENCY_KEY,
+      originalFilename: "exam.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 2048,
+      source: "post_onboarding",
+      pageCount: 3,
+    });
+
+    expect(uploadChain.values).toHaveBeenCalledWith(
+      expect.objectContaining({ source: "post_onboarding" }),
+    );
+    // Pull the audit arg directly to avoid the @typescript-eslint
+    // unsafe-assignment lint that nested expect.objectContaining trips.
+    expect(auditValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        // The audit-log entry's `metadata.source` must reflect the
+        // input source. We assert the inner property via a typed
+        // `match` predicate to dodge `expect.objectContaining`'s
+        // `any`-typed return value (which trips the unsafe-assignment
+        // lint when nested).
+        metadata: expect.objectContaining({ source: "post_onboarding" }) as {
+          source: string;
+        },
+      }),
+    );
+  });
+
+  it("requestImport accepts an optional pageCount and stays under the cap", async () => {
+    const { caller } = makeCaller();
+
+    await expect(
+      caller.uploads.requestImport({
+        originalFilename: "exam.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 1024,
+        source: "post_onboarding",
+        pageCount: 5,
+      }),
+    ).resolves.toBeDefined();
+  });
+
+  it("requestImport rejects PDFs with pageCount > UPLOAD_MAX_PDF_PAGES", async () => {
+    const { caller } = makeCaller();
+
+    await expect(
+      caller.uploads.requestImport({
+        originalFilename: "exam.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 1024,
+        source: "post_onboarding",
+        pageCount: 11,
+      }),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "UPLOAD_PDF_TOO_MANY_PAGES",
+    });
+  });
+
+  it("confirmImport rejects PDFs with pageCount > UPLOAD_MAX_PDF_PAGES (defense-in-depth)", async () => {
+    const { caller, insert } = makeCaller();
+
+    await expect(
+      caller.uploads.confirmImport({
+        idempotencyKey: IDEMPOTENCY_KEY,
+        originalFilename: "exam.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 2048,
+        source: "post_onboarding",
+        pageCount: 11,
+      }),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "UPLOAD_PDF_TOO_MANY_PAGES",
+    });
+    expect(insert).not.toHaveBeenCalledWith(Uploads);
+  });
+
+  it("confirmImport rejects mime mismatch — client claims JPEG but storage reports PDF (round-2 R2-P70)", async () => {
+    const { caller, insert } = makeCaller();
+    // Round-2 R2-P70 — mime-mismatch bypass: request as image/jpeg
+    // (no pageCount required by the request schema), PUT PDF bytes
+    // to the signed URL, then confirm. Storage reports
+    // `application/pdf`; the server must reject because the client's
+    // claimed mime doesn't match the stored content type.
+    const previous = storageListHandler.current;
+    // Override the storage mock to return a PDF object at the JPEG
+    // filename (simulating: client requested JPEG, PUT PDF bytes,
+    // storage detected PDF on the server side).
+    storageListHandler.current = () =>
+      Promise.resolve({
+        data: [
+          {
+            name: "exam.jpg",
+            metadata: { size: 2048, mimetype: "application/pdf" },
+          },
+        ],
+        error: null,
+      });
+    try {
+      await expect(
+        caller.uploads.confirmImport({
+          idempotencyKey: IDEMPOTENCY_KEY,
+          originalFilename: "exam.jpg",
+          mimeType: "image/jpeg",
+          sizeBytes: 2048,
+          source: "post_onboarding",
+          // No pageCount because client claimed JPEG.
+        }),
+      ).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+        message: "UPLOAD_MIME_MISMATCH",
+      });
+      expect(insert).not.toHaveBeenCalledWith(Uploads);
+    } finally {
+      storageListHandler.current = previous;
+    }
+  });
+
+  it("requestImport does NOT apply the page-count cap to non-PDF mime types", async () => {
+    const { caller } = makeCaller();
+
+    // 11 pages would fail the PDF gate; but for a JPEG the field is
+    // ignored. (Real-world: cameras don't send pageCount for images.)
+    await expect(
+      caller.uploads.requestImport({
+        originalFilename: "x-ray.jpg",
+        mimeType: "image/jpeg",
+        sizeBytes: 1024,
+        source: "post_onboarding",
+        pageCount: 11,
+      }),
+    ).resolves.toBeDefined();
   });
 });
 

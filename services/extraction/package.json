@@ -10,17 +10,21 @@
     "dev": "node --experimental-strip-types --watch src/index.ts",
     "start": "node --experimental-strip-types src/index.ts",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src"
+    "lint": "eslint src",
+    "test:unit": "vitest run"
   },
   "dependencies": {
     "@healthtracker/types": "workspace:*",
+    "@supabase/supabase-js": "catalog:",
     "pg-boss": "^12.18.2",
     "postgres": "catalog:"
   },
   "devDependencies": {
+    "@healthtracker/api": "workspace:*",
     "@healthtracker/eslint-config": "workspace:*",
     "@types/node": "catalog:",
     "eslint": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

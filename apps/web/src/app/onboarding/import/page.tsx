@@ -6,7 +6,7 @@ import { ImportFlow } from "./import-flow";
 export default function ImportPage() {
   return (
     <main className="container mx-auto max-w-2xl px-6 py-12">
-      <ImportFlow />
+      <ImportFlow source="onboarding_import" />
     </main>
   );
 }

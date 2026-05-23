@@ -1,10 +1,14 @@
 import type { TRPCRouterRecord } from "@trpc/server";
 import { TRPCError } from "@trpc/server";
+import { z } from "zod/v4";
 
+import { and, desc, eq, lt, sql } from "@healthtracker/db";
+import { Uploads } from "@healthtracker/db/schema";
 import {
   isUploadMimeType,
   sanitizeFilename,
   UPLOAD_MAX_BYTES,
+  UPLOAD_MAX_PDF_PAGES,
   UploadImportConfirmSchema,
   UploadImportRequestSchema,
 } from "@healthtracker/validators";
@@ -17,6 +21,10 @@ import {
 } from "../storage";
 import { protectedProcedure } from "../trpc";
 import { enqueueExtractDocument, writeUpload } from "../uploads";
+import {
+  confirmReviewFieldAsPatient,
+  getUploadDetailForPatient,
+} from "../uploads-review";
 
 export const uploadsRouter = {
   /**
@@ -34,8 +42,26 @@ export const uploadsRouter = {
   requestImport: protectedProcedure
     .input(UploadImportRequestSchema)
     .mutation(async ({ ctx, input }) => {
+      // Story 2.1 AC4 + Round-2 R2-P72 — server-side defense-in-depth
+      // for PDF page count. The Zod refinement (P52) now guarantees
+      // `pageCount` is defined whenever `mimeType === 'application/pdf'`,
+      // so this is purely belt-and-suspenders against schema drift.
+      if (
+        input.mimeType === "application/pdf" &&
+        (input.pageCount ?? 0) > UPLOAD_MAX_PDF_PAGES
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "UPLOAD_PDF_TOO_MANY_PAGES",
+        });
+      }
       const patientId = ctx.session.user.id;
-      const idempotencyKey = crypto.randomUUID();
+      // Story 2.6 — offline-queue flows pre-generate the idempotency
+      // key at pick time so the same value survives kill + relaunch
+      // and the server-side UNIQUE constraint dedups on drain retry.
+      // When the client omits it, the regular online flow gets a
+      // server-generated UUID (preserves Story 1.5 behavior).
+      const idempotencyKey = input.clientIdempotencyKey ?? crypto.randomUUID();
       const sanitizedFilename = sanitizeFilename(input.originalFilename);
       const storagePath = buildLabUploadStoragePath({
         patientId,
@@ -118,6 +144,39 @@ export const uploadsRouter = {
       }
       const storedContentType = stored.contentType;
 
+      // Round-2 R2-P70 — close the mime-mismatch bypass: a hostile
+      // client could `requestImport({mimeType: 'image/jpeg'})` (so
+      // `pageCount` was never required by the request schema), PUT
+      // PDF bytes to the signed URL, and `confirmImport` would see
+      // `storedContentType === 'application/pdf'` but
+      // `input.pageCount === undefined` — defeating the page-cap
+      // gate. We reject this asymmetry up front; the client must
+      // re-request with the correct mime.
+      if (
+        storedContentType === "application/pdf" &&
+        input.mimeType !== "application/pdf"
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "UPLOAD_MIME_MISMATCH",
+        });
+      }
+
+      // Story 2.1 AC4 + Round-2 R2-P72 — server-side defense-in-depth
+      // for PDF page count at confirm time (belt-and-suspenders; the
+      // Zod refinement makes `pageCount` required for PDFs and the
+      // request-time gate catches over-cap submissions before signed
+      // URL minting).
+      if (
+        storedContentType === "application/pdf" &&
+        (input.pageCount ?? 0) > UPLOAD_MAX_PDF_PAGES
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "UPLOAD_PDF_TOO_MANY_PAGES",
+        });
+      }
+
       const insertedRow = await writeUpload(ctx.db, {
         patientId,
         idempotencyKey: input.idempotencyKey,
@@ -125,7 +184,11 @@ export const uploadsRouter = {
         mimeType: storedContentType,
         sizeBytes: stored.sizeBytes,
         originalFilename: input.originalFilename,
-        source: "onboarding_import",
+        // Story 2.1 — source flows through from the client (Story 1.5
+        // hard-coded "onboarding_import"). The Início post-onboarding
+        // entry sends "post_onboarding"; the onboarding `/onboarding/import`
+        // screen sends "onboarding_import".
+        source: input.source,
       });
 
       if (!insertedRow) {
@@ -151,7 +214,8 @@ export const uploadsRouter = {
         resourceId: insertedRow.id,
         resourceType: "upload",
         metadata: {
-          source: "onboarding_import",
+          // Story 2.1 — source flows through from the client.
+          source: input.source,
           mimeType: storedContentType,
           sizeBytes: stored.sizeBytes,
           actor: "self",
@@ -159,5 +223,104 @@ export const uploadsRouter = {
       });
 
       return { uploadId: insertedRow.id, created: true as const };
+    }),
+
+  /**
+   * Story 2.5 — paginated list of the patient's uploads (most recent
+   * first). Returns the fields the Histórico tab needs: id, original
+   * filename, status, timestamps, and (if `failed`) the failure
+   * reason extracted from the upload's metadata jsonb.
+   *
+   * Cursor pagination keyed on `created_at` so newly-arriving uploads
+   * don't shuffle existing pages. Page size capped at 50 by Zod.
+   */
+  listUploadsForPatient: protectedProcedure
+    .input(
+      z.object({
+        cursor: z.string().datetime().optional(),
+        limit: z.number().int().min(1).max(50).default(20),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const patientId = ctx.session.user.id;
+      // R1-P159 — defend against Zod-internals leaking on bad cursors.
+      // Zod already enforces ISO format; this guard catches Date
+      // parsing edge cases (e.g. years > 275760) without surfacing the
+      // raw Error message.
+      let cursorDate: Date | null = null;
+      if (input.cursor) {
+        const parsed = new Date(input.cursor);
+        if (Number.isNaN(parsed.getTime())) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "INVALID_CURSOR",
+          });
+        }
+        cursorDate = parsed;
+      }
+      const rows = await ctx.db
+        .select({
+          id: Uploads.id,
+          originalFilename: Uploads.originalFilename,
+          status: Uploads.status,
+          createdAt: Uploads.createdAt,
+          processingStartedAt: Uploads.processingStartedAt,
+          processingCompletedAt: Uploads.processingCompletedAt,
+          // Drizzle exposes jsonb extracts via `sql<T>` template; the
+          // generic T flows through the row type below.
+          failureReason: sql<string | null>`${Uploads.metadata}->>'reason'`,
+        })
+        .from(Uploads)
+        .where(
+          and(
+            eq(Uploads.patientId, patientId),
+            cursorDate !== null ? lt(Uploads.createdAt, cursorDate) : undefined,
+          ),
+        )
+        .orderBy(desc(Uploads.createdAt))
+        .limit(input.limit + 1);
+
+      const hasNext = rows.length > input.limit;
+      const trimmed = hasNext ? rows.slice(0, input.limit) : rows;
+      const last = trimmed[trimmed.length - 1];
+
+      return {
+        rows: trimmed,
+        nextCursor: hasNext && last ? last.createdAt.toISOString() : null,
+      };
+    }),
+
+  /**
+   * Story 2.4 — read the upload detail view used by the patient's
+   * review screen. RLS scopes the response to the calling patient.
+   */
+  getUploadDetail: protectedProcedure
+    .input(z.object({ uploadId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const patientId = ctx.session.user.id;
+      return getUploadDetailForPatient(ctx.db, patientId, input.uploadId);
+    }),
+
+  /**
+   * Story 2.4 — confirm OR correct a single `low_confidence` review
+   * row. When omitted, `patientValueNumeric` triggers a confirm-as-is
+   * (the original `valueText` is parsed). When provided, the patient
+   * has edited the value and the helper records the correction in the
+   * review row's `correction_metadata` jsonb column.
+   *
+   * Returns the new `observationId` (null on idempotent retry that
+   * hit ON CONFLICT), the post-call `uploadStatus`, and the count of
+   * still-pending review rows visible to the patient.
+   */
+  confirmReviewField: protectedProcedure
+    .input(
+      z.object({
+        reviewQueueId: z.string().uuid(),
+        patientValueNumeric: z.number().finite().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const patientId = ctx.session.user.id;
+      return confirmReviewFieldAsPatient(ctx.db, patientId, input);
     }),
 } satisfies TRPCRouterRecord;

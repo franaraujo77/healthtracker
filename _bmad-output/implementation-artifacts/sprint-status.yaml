@@ -35,7 +35,36 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-05-15
-last_updated: 2026-05-21
+last_updated: 2026-05-23
+# Story 3.4 spec created → ready-for-dev. Final story of Epic 3.
+# Adds offline-cached Fingerprint via `@tanstack/react-query-persist-client`
+# v5 + `@tanstack/query-async-storage-persister` (NEW deps, version-aligned
+# to TanStack Query catalog ^5.90.8). Per-patient namespaced AsyncStorage
+# (mirrors Story 2.6 offline-upload-queue pattern). Whitelisted dehydrate
+# to `observations.getRecord` + `observations.getPersonalBaseline` only
+# (LGPD hygiene). 24h stale threshold via new
+# `FINGERPRINT_CACHE_STALE_THRESHOLD_MS` constant; amber treatment on
+# the "Última atualização" label (NEVER red — UX spec line 1079).
+# Auto-refetch on NetInfo rising-edge mirrors Story 2.6 R2-P196 dedup
+# pattern. NEW hooks: `use-net-info`, `use-cache-refetch-on-online`,
+# `use-query-cache-lifecycle`. NEW lib: `query-cache-persister.ts`.
+# No new API / no new audit kinds / no DB changes. Strict client-only.
+# After Story 3.4 done → `epic-3-retrospective` slot becomes available.
+# Story 3.3 implementation complete → review. NEW tRPC procedure
+# `getPersonalBaseline` (single SQL aggregate; soft-delete-filtered;
+# emits `observation.baseline.read` audit). `FingerprintChart` extended
+# with `baseline-established` state via Victory Native v41 (CartesianChart
+# + transformState pan/pinch locked to x-axis; web fallback). `BiomarkerCard`
+# accepts `zScore` for `watching` (1.0≤|z|<1.5) / `notable` (|z|≥1.5) states
+# with personal-baseline a11y narration. Início wired with second query
+# (enabled at drawCount>=2); primary EmptyStateRecord + manual-BIA CTA
+# suppressed at drawCount>=2. 7 new API unit tests pass; integration fixture
+# shipped (F167 — Docker unavailable). F168/F169 still deferred.
+# Story 3.2 spec created → ready-for-dev. Reuses Story 3.1's `getRecord`
+# procedure (no new tRPC surface; no new audit event). Adds new
+# `FingerprintChart` component (cold-start-1 only; Victory Native
+# deferred to Story 3.3) + `EmptyStateRecord.state="partial"` and
+# wires both into Início at `drawCount === 1`.
 project: healthtracker
 project_key: NOKEY
 tracking_system: file-system
@@ -65,24 +94,151 @@ development_status:
   epic-1-retrospective: done
 
   # Epic 2: Patient Can Upload and Review Blood Test Results
-  epic-2: backlog
-  2-1-patient-uploads-a-pdf-blood-test-result: backlog
-  2-2-patient-uploads-a-photo-of-a-blood-test-result-from-camera-roll-or-camera: backlog
-  2-3-system-extracts-and-normalizes-biomarker-values-from-uploaded-documents: backlog
-  2-4-patient-reviews-and-confirms-low-confidence-extracted-values: backlog
-  2-5-patient-views-upload-status-and-receives-push-notifications: backlog
-  2-6-patient-queues-an-upload-while-offline: backlog
-  2-7-patient-manually-enters-bioimpedance-bia-measurements: backlog
-  2-8-patient-manages-push-notification-preferences: backlog
-  epic-2-retrospective: optional
+  epic-2: done
+  2-1-patient-uploads-a-pdf-blood-test-result: done
+  2-2-patient-uploads-a-photo-of-a-blood-test-result-from-camera-roll-or-camera: done
+  2-3-system-extracts-and-normalizes-biomarker-values-from-uploaded-documents: done
+  2-4-patient-reviews-and-confirms-low-confidence-extracted-values: done
+  # round-1 patches applied: P130 audit resourceId on ON-CONFLICT (HIGH AC),
+  # P131 numeric isDirty (HIGH AC), P132 page-level auth gate (HIGH privacy),
+  # P133 confidence numeric coerce, P134 REVOKE anon/PUBLIC, P135–P142.
+  # round-2 patches applied: R2-P143 dropped dead-code cross-upload guard
+  # (HIGH regression), R2-P144 UTC-midnight normalize for re-SELECT probe
+  # (HIGH), R2-P146 patientId+resolvedAt predicate on review UPDATE +
+  # returning rowcount (HIGH race), R2-P147 staleTime:0 for focus refetch,
+  # R2-P148 ON-CONFLICT + completion-audit test coverage, R2-P149
+  # unconditional notification.upload_complete emission.
+  2-5-patient-views-upload-status-and-receives-push-notifications: done
+  # round-1 patches applied: P150/P151 atomicity (HIGH AC), P152 audit-log
+  # double-fire guard (HIGH), P153 source-aware recovery routes (HIGH AC),
+  # P154 canonical UPLOAD_DETAIL_ROUTE on Expo (HIGH), P156 lab_name in
+  # push body (HIGH AC), P157 Expo Push chunking >100 (HIGH), P159-P170
+  # smaller cleanups. P166/P167 dismissed.
+  # round-2 patches applied: R2-P171 ?source= query param now consumed by
+  # Início pages (HIGH AC), R2-P172 partial unique index on
+  # audit_log(resource_id, event) closes TOCTOU race (HIGH), R2-P173
+  # chunk-progress in thrown error, R2-P174 tightened ExpoPushToken
+  # regex, R2-P175 status-label fallback through Record cast,
+  # R2-P176 dropped dead Pular button, R2-P178 handler tests.
+  2-6-patient-queues-an-upload-while-offline: done
+  # round-1 patches applied: R1-P179 pick→enqueue branch in useImportFiles
+  # (HIGH AC), R1-P180 patient-namespaced queue + auth-state binding
+  # (HIGH privacy), R1-P181 per-item attemptCount + drop semantics (HIGH),
+  # R1-P182 session-gated drain (HIGH), R1-P183 disk-then-cache write
+  # order, R1-P185/P186 enum-drift load-time filter, R1-P187 soft cap.
+  # round-2 patches applied: R2-P190 Início offline-queue surface (HIGH AC),
+  # R2-P191 chainMutation serializes queue writes (HIGH race), R2-P192
+  # enqueue-time isValidItem, R2-P193 programmer-error narrow-catch,
+  # R2-P194 offlineRows in allDismissed, R2-P195 whenPatientReady race
+  # fix, R2-P196 AppState short-circuit, R2-P197 enqueue preserves
+  # enqueuedAt. R2-P198 flagged not applied (low-priority UX nit).
+  2-7-patient-manually-enters-bioimpedance-bia-measurements: done
+  # round-1 patches applied: R1-P199 multi-device partial index split
+  # (HIGH AC), R1-P200 server-side date refinement (HIGH AC),
+  # R1-P201 onConflictDoNothing.where for partial index targeting
+  # (HIGH), R1-P202 SELECT FOR UPDATE concurrency lock, R1-P203 trim
+  # min on device strings, R1-P204 web Adicionar medição CTA,
+  # R1-P205 useEffect-scoped redirect timer, R1-P206 clear error on
+  # success, R1-P207 cancelable: false Expo Alert, R1-P208 ON-CONFLICT
+  # + two-device test coverage.
+  # round-2 patches applied: R2-P211 catch 23505 from BIA partial
+  # index → duplicate response (HIGH regression), R2-P212 replaced
+  # R1-P208 dead-code test with real 23505-path coverage, R2-P214
+  # shared-mock backing store for two-device test (theatre fix),
+  # R2-P216 explicit date-parts narrowing. R2-P213/P215/P217
+  # documented; F161–F166 deferred.
+  2-8-patient-manages-push-notification-preferences: done
+  # round-1 patches applied: R1-P218 worker fail-open on missing table
+  # (HIGH infra), R1-P219 frozen + spread defaults (HIGH correctness),
+  # R1-P220 neutral OS-settings CTA copy (HIGH UX), R1-P221 .strict()
+  # schema, R1-P225 array-form UPSERT target. R1-P222/P223/P224
+  # deferred to F171/F172/F169.
+  # round-2 patches applied: R2-P226 narrow worker fail-open catch
+  # (HIGH regression), R2-P227 read-side row validation, R2-P228
+  # query.isError UX on both screens, R2-P229 NOTIFICATION_KIND_TO_
+  # PREFERENCE + snapshot test. R2-P230 documented no-change.
+  epic-2-retrospective: done
 
   # Epic 3: Patient Can See Their Health Fingerprint Over Time
-  epic-3: backlog
-  3-1-patient-views-their-complete-longitudinal-biomarker-record: backlog
-  3-2-patient-views-the-fingerprint-at-draw-1-with-baseline-building-context: backlog
-  3-3-patient-views-the-fingerprint-at-draw-2-with-personal-baseline-band: backlog
-  3-4-patient-views-cached-fingerprint-data-while-offline: backlog
-  epic-3-retrospective: optional
+  epic-3: in-progress
+  # round-1 patches applied: R1-P231 wire `historicoDrawDetailRoute`
+  # producer (query-param coupling), R1-P234 degrade bad
+  # confidenceScore to 0 instead of dropping the row, R1-P236 RN
+  # accessibility attrs on deviation glyph, R1-P241 distinct
+  # draw-not-found copy. R1-P232/P233/P235/P237/P238/P239/P240/P242/
+  # P243 dismissed or deferred F-item.
+  # round-2 patches applied: R2-P244 restore Story 2.5's
+  # "Enviar primeiro exame" CTA on the Envios subtab (verbatim-move
+  # regression), R2-P245 move "← Voltar" hardcoded literal into
+  # validators.
+  # round-3 patches applied: R3-P246 fix off-by-one date display —
+  # `new Date('yyyy-mm-dd').toLocaleDateString('pt-BR')` shifts to
+  # the previous calendar day in every Brazilian timezone (AC1
+  # regression); new `formatCollectedAtPtBr` helper in validators.
+  3-1-patient-views-their-complete-longitudinal-biomarker-record: done
+  # round-1 patches applied: R1-P247 BiomarkerRow key index for keyed-list
+  # reconciliation (Low), R1-P248 dot-positioning inner-track inset so the
+  # dot stays tangent to the band edges at x=0/x=1 (Med AC1 visual
+  # encoding), R1-P249 per-row composite accessibilityLabel —
+  # spec assumed BiomarkerCards alongside the chart, but Inicio renders
+  # the chart alone, so VoiceOver had no per-biomarker narration (Med AC7).
+  # round-2 patches applied: R2-P250 replace hardcoded "Referência" literal
+  # in `rowAccessibilityLabel` with the canonical
+  # `BIOMARKER_REFERENCE_LABEL_PT_BR` (Low AC8 greppable-copy regression
+  # introduced by R1-P249).
+  3-2-patient-views-the-fingerprint-at-draw-1-with-baseline-building-context: done
+  # Story 3.3 spec created → ready-for-dev. Introduces NEW tRPC procedure
+  # `getPersonalBaseline` (aggregate SELECT on `observations` with mean +
+  # stddev_samp per LOINC group; NFR-SC4 budget p95<500ms at 10M rows
+  # verified via testcontainer fixture). Extends `FingerprintChart` with
+  # the `baseline-established` state (Victory Native introduced here per
+  # architecture doc 486–491; pinch-zoom/pan x-axis only). Extends
+  # `BiomarkerCard` with personal-baseline z-score narration for the
+  # `watching` (1.0≤|z|<1.5) / `notable` (|z|≥1.5) states. Wires Início
+  # to render baseline-established at drawCount>=2; Story 3.2's
+  # cold-start-1 + drawCount===1 copy swap preserved byte-for-byte.
+  # round-1 patches applied: R1-P251 reducer-based min/max replaces
+  # `Math.min/max(...values)` spread + empty-array guard (HIGH latent
+  # call-stack/Infinity hazard), R1-P253 inline rationale documenting
+  # `BaselineView.drawCount` (DISTINCT collected_at) vs
+  # `RecordView.drawCount` (collected_at,lab_name) semantic divergence
+  # (MED audit-trail forensics), R1-P258 accepted forward-compat
+  # `personalBaselineMean`/`personalBaselineStddev` BiomarkerCard props.
+  # R1-P252/R1-P254/R1-P255/R1-P256/R1-P257/R1-P259/R1-P260/R1-P261/
+  # R1-P262 dismissed with rationale.
+  # round-2 patches applied: R2-P263 Victory Native v41 Area → AreaRange
+  # band switch (HIGH AC1 regression — the original `Area` with `y0`+`y1`
+  # silently dropped `y1`, so the rendered band filled mean−stddev → data
+  # line instead of the [mean−stddev, mean+stddev] band AC1 requires),
+  # R2-P264 dropped unsupported `chartBounds` prop on Area, R2-P268
+  # pt-BR singular/plural agreement on "desvio" at |z|=1 exactly
+  # (boundary narration "1 desvios" → "1 desvio"). R2-P265/R2-P266
+  # dismissed; no R1 dismissals reversed.
+  # round-3 patches applied: R3-P269 strengthened NFR-SC4 EXPLAIN plan
+  # assertion to require the `observations_patient_collected_idx` index
+  # name (in addition to the existing `not Seq Scan` check) — Dev Notes
+  # § "Load fixture scaling" mandated the index name check and the prior
+  # looser assertion could green-pass if the planner picked an unrelated
+  # partial unique index whose WHERE predicate doesn't match the
+  # aggregate's filter. No other R3 findings; no R1/R2 dismissals reversed.
+  3-3-patient-views-the-fingerprint-at-draw-2-with-personal-baseline-band: done
+  # round-1 patches applied: R1-P270 fix tRPC query-key shape — TanStack v5
+  # keys queries as `[['<router>','<procedure>'], { input?, type? }]` not as
+  # a dotted string (CRITICAL — `shouldPersistQuery` returned false for
+  # everything → AC5/AC6/AC7 silent no-ops; `FINGERPRINT_CACHE_QUERY_KEYS`
+  # missed every live query → AC4 auto-refetch was a no-op), R1-P271 add
+  # `bootstrapped` gate to `useQueryCacheLifecycle` so the `<Stack>` subtree
+  # waits for the persister to bind before Início's `useQuery` runs (HIGH
+  # AC7 hydration race). R1-P272/P273/P274 declined or informational.
+  # round-2 patches applied: R2-P275 wipe in-memory `observations.getRecord`
+  # / `observations.getPersonalBaseline` on SIGNED_OUT — `invalidateQueries`
+  # marks stale but does NOT remove data, and persister restore MERGES into
+  # cache → cross-patient leak on household-shared device (HIGH; R1
+  # "Cross-patient cache leak" cross-cutting dismissal REVERSED), R2-P276
+  # defensive 2 s timeout on bootstrap gate so a hung `getSession()` can't
+  # leave the whole RootLayout subtree permanently blank (MED).
+  3-4-patient-views-cached-fingerprint-data-while-offline: done
+  epic-3-retrospective: done
 
   # Epic 4: Patient Receives a Personal Health Narrative
   epic-4: backlog

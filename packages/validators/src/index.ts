@@ -1,5 +1,276 @@
 import { z } from "zod/v4";
 
+import { formatBrazilianDecimal } from "./decimal";
+
+export { formatBrazilianDecimal, parseBrazilianDecimal } from "./decimal";
+export { parseCollectedAt } from "./collected-at";
+
+/**
+ * Story 2.4 — pt-BR copy + route constants for the upload detail
+ * review surface. The UI uses `formatBrazilianDecimal` to render
+ * numeric pre-fills with decimal-comma (UX-DR12).
+ */
+export const UPLOAD_DETAIL_ROUTE = (uploadId: string) =>
+  `/inicio/uploads/${uploadId}`;
+
+export const UPLOAD_DETAIL_REVIEW_HEADER_PT_BR = "Confirme este valor";
+export const UPLOAD_DETAIL_CONFIRM_CTA_PT_BR = "Confirmar";
+export const UPLOAD_DETAIL_SAVE_CTA_PT_BR = "Salvar";
+export const UPLOAD_DETAIL_WAITING_TEAM_PT_BR = "Aguardando revisão da equipe";
+export const UPLOAD_DETAIL_ALL_DONE_PT_BR = "Tudo certo, resultados publicados";
+export const UPLOAD_DETAIL_LOADING_PT_BR = "Carregando…";
+export const UPLOAD_DETAIL_ERROR_PT_BR =
+  "Não conseguimos abrir este upload. Tente novamente em instantes.";
+export const UPLOAD_DETAIL_VALUE_INVALID_PT_BR =
+  "Use um número válido — por exemplo, 14,2.";
+export const UPLOAD_DETAIL_SAVE_ERROR_PT_BR =
+  "Não conseguimos salvar — tente novamente.";
+export const UPLOAD_DETAIL_TITLE_PT_BR = "Resultado do upload";
+export const UPLOAD_DETAIL_VALUE_LABEL_PT_BR = "Valor";
+export const UPLOAD_DETAIL_EXTRACTED_VALUE_PT_BR = "Valor extraído";
+
+export const UPLOAD_STATUS_LABELS_PT_BR: Record<
+  | "queued"
+  | "processing"
+  | "pending_review"
+  | "complete"
+  | "failed"
+  | "offline_queued",
+  string
+> = {
+  queued: "Na fila",
+  processing: "Processando",
+  pending_review: "Aguardando confirmação",
+  complete: "Publicado",
+  failed: "Falhou",
+  // Story 2.6 — virtual status; rows in this state are local-only
+  // (haven't been submitted to the server yet) and will drain as
+  // soon as connectivity is restored.
+  offline_queued: "Aguardando conexão",
+};
+
+export const HISTORICO_OFFLINE_QUEUED_HINT_PT_BR =
+  "Vamos enviar assim que sua conexão voltar.";
+
+// =============================================================================
+// Story 2.7 — Manual BIA (bioimpedance) entry
+// =============================================================================
+
+export const BIA_DEVICE_NAMES = ["InBody", "Tanita", "Outro"] as const;
+export type BiaDeviceName = (typeof BIA_DEVICE_NAMES)[number];
+
+/**
+ * Story 2.7 — input schema for `observations.submitBia`. The form
+ * collects 3 numeric biomarkers + a collection date (ISO yyyy-mm-dd,
+ * formatted client-side from a dd/mm/yyyy input) + a device name
+ * (with optional custom label when 'Outro') + optional `deviceModel`.
+ * `overwrite` is set by the duplicate-modal Substituir CTA on
+ * re-submit; default `false`.
+ */
+export const BiaSubmissionSchema = z
+  .object({
+    visceralFatAreaCm2: z.number().positive().max(500),
+    skeletalMuscleMassKg: z.number().positive().max(200),
+    bodyFatPercentage: z.number().min(0).max(100),
+    collectedAt: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "BIA_COLLECTED_AT_INVALID")
+      // R1-P200 — the regex accepts "2024-02-30" / "2024-13-45". Round-
+      // trip through UTC to catch invalid month/day combinations
+      // (server-side defense-in-depth — the client already does this).
+      .refine(
+        (s) => {
+          // R2-P216 — explicit narrowing of the regex-matched parts.
+          // `noUncheckedIndexedAccess` makes `split` results typed
+          // `string | undefined`; without the early-return the
+          // `Number(undefined) === NaN` path was correct only by
+          // accident (NaN compares false everywhere).
+          const parts = s.split("-");
+          const yStr = parts[0];
+          const mStr = parts[1];
+          const dStr = parts[2];
+          if (yStr === undefined || mStr === undefined || dStr === undefined) {
+            return false;
+          }
+          const y = Number(yStr);
+          const m = Number(mStr);
+          const d = Number(dStr);
+          if (y < 1900 || y > 2100) return false;
+          if (m < 1 || m > 12) return false;
+          if (d < 1 || d > 31) return false;
+          const dt = new Date(Date.UTC(y, m - 1, d));
+          return (
+            dt.getUTCFullYear() === y &&
+            dt.getUTCMonth() === m - 1 &&
+            dt.getUTCDate() === d
+          );
+        },
+        { message: "BIA_COLLECTED_AT_NOT_A_REAL_DATE" },
+      ),
+    deviceName: z.enum(BIA_DEVICE_NAMES),
+    // R1-P203 — `.trim().min(1)` so non-form clients can't slip
+    // empty/whitespace strings past defense-in-depth.
+    deviceCustomName: z.string().trim().min(1).max(80).optional(),
+    deviceModel: z.string().trim().min(1).max(80).optional(),
+    overwrite: z.boolean().optional(),
+  })
+  .refine(
+    (d) =>
+      d.deviceName !== "Outro" ||
+      (d.deviceCustomName !== undefined &&
+        d.deviceCustomName.trim().length > 0),
+    {
+      message: "BIA_DEVICE_CUSTOM_NAME_REQUIRED",
+      path: ["deviceCustomName"],
+    },
+  );
+export type BiaSubmissionInput = z.infer<typeof BiaSubmissionSchema>;
+
+export const MANUAL_BIA_ROUTE = "/inicio/medicao/bia";
+
+export const BIA_FORM_TITLE_PT_BR = "Bioimpedância";
+export const BIA_FIELD_VISCERAL_FAT_PT_BR = "Área de gordura visceral (cm²)";
+export const BIA_FIELD_SKELETAL_MUSCLE_PT_BR =
+  "Massa muscular esquelética (kg)";
+export const BIA_FIELD_BODY_FAT_PT_BR = "Percentual de gordura corporal (%)";
+export const BIA_FIELD_COLLECTED_AT_PT_BR = "Data da medição (dd/mm/aaaa)";
+export const BIA_FIELD_DEVICE_NAME_PT_BR = "Aparelho";
+export const BIA_FIELD_DEVICE_CUSTOM_NAME_PT_BR = "Nome do aparelho";
+export const BIA_FIELD_DEVICE_MODEL_PT_BR = "Modelo (opcional)";
+export const BIA_FIELD_REQUIRED_PT_BR = "Este campo é obrigatório.";
+export const BIA_FIELD_NUMBER_INVALID_PT_BR =
+  "Use um número válido — por exemplo, 14,2.";
+export const BIA_FIELD_DATE_INVALID_PT_BR =
+  "Use uma data válida no formato dd/mm/aaaa.";
+export const BIA_SUBMIT_CTA_PT_BR = "Salvar";
+export const BIA_SUBMIT_SUCCESS_PT_BR = "Medição salva.";
+export const BIA_SUBMIT_ERROR_PT_BR =
+  "Não conseguimos salvar — tente novamente.";
+
+export const BIA_DUPLICATE_MODAL_TITLE_PT_BR =
+  "Já existe uma medição com este dispositivo para esta data. Deseja substituir?";
+export const BIA_DUPLICATE_MODAL_CONFIRM_PT_BR = "Substituir";
+export const BIA_DUPLICATE_MODAL_CANCEL_PT_BR = "Cancelar";
+
+export const INICIO_ADD_MEASUREMENT_CTA_PT_BR =
+  "Adicionar medição (Bioimpedância)";
+
+// =============================================================================
+// Story 2.8 — Push notification preferences
+// =============================================================================
+
+/**
+ * Story 2.8 — patient preferences for the 4 notification event
+ * families. The worker (`services/extraction/src/consumers/
+ * notifications.ts`) reads the row at dispatch time and skips the
+ * Expo Push POST when the relevant column is `false`. Defaults are
+ * all `true` (opt-out model) — both at the column-default layer and
+ * at the API helper's synthetic-default fallback for first-time
+ * patients with no row.
+ */
+export const NotificationPreferencesSchema = z
+  .object({
+    resultsReady: z.boolean(),
+    lettersReady: z.boolean(),
+    recordAccess: z.boolean(),
+    reviewRequired: z.boolean(),
+  })
+  // R1-P221 — reject extra keys so a buggy client can't slip
+  // unknown fields past the boundary.
+  .strict();
+export type NotificationPreferencesInput = z.infer<
+  typeof NotificationPreferencesSchema
+>;
+
+export const NOTIFICATIONS_SETTINGS_ROUTE = "/configuracoes/notificacoes";
+
+export const NOTIFICATIONS_SETTINGS_TITLE_PT_BR = "Notificações";
+export const NOTIF_PREF_RESULTS_READY_PT_BR = "Resultados prontos";
+export const NOTIF_PREF_LETTERS_READY_PT_BR = "Cartas prontas";
+export const NOTIF_PREF_RECORD_ACCESS_PT_BR = "Acesso ao histórico";
+export const NOTIF_PREF_REVIEW_REQUIRED_PT_BR = "Confirmação necessária";
+export const NOTIF_PREF_LOADING_PT_BR = "Carregando…";
+export const NOTIF_PREF_ERROR_PT_BR =
+  "Não conseguimos salvar — tente novamente.";
+export const NOTIF_OS_DENIED_BANNER_PT_BR =
+  "As notificações estão desativadas no sistema. Toque para ativar nas configurações do dispositivo.";
+export const NOTIF_OS_DENIED_HINT_PT_BR = "(desativado no sistema)";
+// R1-P220 — neutral label for the always-visible "open OS settings"
+// button when permissions are granted. Story 2.8 spec said the
+// banner is the ONLY UX when OS permission is denied; with permission
+// granted, the button is a quiet escape hatch into device settings
+// for the patient.
+export const NOTIF_OPEN_SYSTEM_SETTINGS_CTA_PT_BR =
+  "Abrir configurações do sistema";
+// R3-P231 — `NOTIF_PREF_LOADING_PT_BR` is a status string, not a CTA;
+// recovery buttons need an explicit retry label so the patient
+// recognizes them as actionable.
+export const NOTIF_PREF_RETRY_PT_BR = "Tentar novamente";
+
+export const NOTIFICATIONS_SETTINGS_LINK_LABEL_PT_BR = "Notificações";
+
+/**
+ * R2-P229 — single source of truth for the notification-kind →
+ * preference-column mapping. The worker (`isPreferenceMuted`) and
+ * any future API consumer reference this map so a new kind can't
+ * silently desynchronize from the preference columns.
+ *
+ * `failed` folds into `results_ready` per Story 2.8 Clarification #1
+ * (the patient who muted "Resultados prontos" doesn't want to hear
+ * about failed extractions either).
+ */
+export const NOTIFICATION_KIND_TO_PREFERENCE = {
+  complete: "resultsReady",
+  pending_review: "reviewRequired",
+  failed: "resultsReady",
+} as const satisfies Record<
+  "complete" | "pending_review" | "failed",
+  keyof NotificationPreferencesInput
+>;
+export type NotificationKindForPreferences =
+  keyof typeof NOTIFICATION_KIND_TO_PREFERENCE;
+
+// Story 2.5 — Histórico tab + push-notification copy.
+// (Legacy alias — actual Expo route is `/historico/resultados` after
+// Story 3.1's two-tab restructure. Grep before importing.)
+export const HISTORICO_ROUTE = "/inicio/historico";
+export const HISTORICO_TITLE_PT_BR = "Histórico";
+export const HISTORICO_TAB_LABEL_PT_BR = "Histórico";
+export const HISTORICO_EMPTY_HEADLINE_PT_BR =
+  "Você ainda não enviou nenhum exame";
+export const HISTORICO_EMPTY_CTA_PT_BR = "Enviar primeiro exame";
+export const HISTORICO_LOAD_MORE_PT_BR = "Carregar mais";
+export const HISTORICO_LOADING_PT_BR = "Carregando…";
+export const HISTORICO_ERROR_PT_BR =
+  "Não conseguimos carregar seu histórico. Tente novamente em instantes.";
+export const HISTORICO_RECOVERY_RESEND_PT_BR = "Enviar novamente";
+export const HISTORICO_RECOVERY_PHOTO_PT_BR = "Enviar uma foto";
+export const HISTORICO_RECOVERY_SKIP_PT_BR = "Pular este resultado";
+
+// R1-P153 — failed-card recovery CTAs route here with a pre-selected
+// source so the import flow opens the right picker (file vs camera).
+// Story 1.5 / 2.2's `ImportFlow` accepts a `source` query param.
+export function postOnboardingImportRoute(
+  source: "file" | "photo" = "file",
+): string {
+  return `/inicio?source=${source === "photo" ? "post_onboarding_photo" : "post_onboarding"}`;
+}
+
+export const FAILURE_REASON_LABELS_PT_BR: Record<string, string> = {
+  retries_exhausted: "Tentamos várias vezes mas algo deu errado.",
+  no_publishable_fields: "Os valores extraídos não puderam ser publicados.",
+  storage_unavailable: "O arquivo não está acessível no momento.",
+  no_readable_text: "Não conseguimos ler nenhum valor neste arquivo.",
+};
+
+const FAILURE_REASON_DEFAULT_PT_BR =
+  "Tentamos várias vezes mas algo deu errado.";
+
+export function failureReasonLabel(reason: string | null): string {
+  if (!reason) return "Algo deu errado durante o processamento.";
+  return FAILURE_REASON_LABELS_PT_BR[reason] ?? FAILURE_REASON_DEFAULT_PT_BR;
+}
+
 /**
  * Patient registration input (Story 1.1).
  *
@@ -424,6 +695,11 @@ export const UPLOAD_ALLOWED_MIME_TYPES = [
   "image/jpeg",
   "image/png",
   "image/heic",
+  // Story 2.2 round-1 P81 — iOS Safari sometimes labels HEIC photos
+  // as `image/heif`; legit iPhone HEIC uploads via web were rejected
+  // as unsupported. Server-side: Supabase Storage echoes whatever the
+  // browser sends for the PUT; the allowlist must accept it.
+  "image/heif",
 ] as const;
 export type UploadMimeType = (typeof UPLOAD_ALLOWED_MIME_TYPES)[number];
 
@@ -447,11 +723,58 @@ export function sanitizeFilename(name: string): string {
   return fallback.slice(0, 128);
 }
 
-export const UploadImportRequestSchema = z.object({
-  originalFilename: z.string().min(1).max(256),
-  mimeType: z.enum(UPLOAD_ALLOWED_MIME_TYPES),
-  sizeBytes: z.number().int().positive().max(UPLOAD_MAX_BYTES),
-});
+/**
+ * Story 2.1 — the upload `source` distinguishes onboarding imports
+ * (Story 1.5 entry surface) from post-onboarding uploads (Story 2.1+
+ * entry surfaces on Início). Audit / analytics use this to tell where
+ * in the funnel a row came from. Story 1.5 P46 removed the DB-column
+ * default to force every writer to be explicit — match that intent at
+ * every layer.
+ */
+export const UPLOAD_SOURCES = ["onboarding_import", "post_onboarding"] as const;
+export type UploadSource = (typeof UPLOAD_SOURCES)[number];
+
+export function isUploadSource(value: string): value is UploadSource {
+  return (UPLOAD_SOURCES as readonly string[]).includes(value);
+}
+
+/** Max PDF pages accepted in the upload flow (Story 2.1 AC4). */
+export const UPLOAD_MAX_PDF_PAGES = 10;
+
+/**
+ * Story 2.1 P52 + P61 — `pageCount` is REQUIRED when `mimeType` is
+ * `application/pdf` (so a hostile client can't bypass the cap by
+ * omitting the field) and uses `.nonnegative()` (so a legal 0-page
+ * PDF trips the friendly pt-BR copy via the page-count gate rather
+ * than a Zod error). For non-PDF mime types, `pageCount` is ignored.
+ */
+const uploadPageCountRefinement = (data: {
+  mimeType: string;
+  pageCount?: number;
+}): boolean =>
+  data.mimeType !== "application/pdf" || data.pageCount !== undefined;
+
+export const UploadImportRequestSchema = z
+  .object({
+    originalFilename: z.string().min(1).max(256),
+    mimeType: z.enum(UPLOAD_ALLOWED_MIME_TYPES),
+    sizeBytes: z.number().int().positive().max(UPLOAD_MAX_BYTES),
+    source: z.enum(UPLOAD_SOURCES),
+    pageCount: z.number().int().nonnegative().optional(),
+    /**
+     * Story 2.6 — offline-queue flow generates the `idempotency_key`
+     * client-side at pick time so the same key persists across kill +
+     * relaunch. The server echoes it back when provided; the existing
+     * `uploads_patient_idempotency_unique` index on `(patient_id,
+     * idempotency_key)` enforces dedup. When omitted (the regular
+     * online flow), the server generates a UUID.
+     */
+    clientIdempotencyKey: z.uuid().optional(),
+  })
+  .refine(uploadPageCountRefinement, {
+    message: "PDF uploads require pageCount",
+    path: ["pageCount"],
+  });
 export type UploadImportRequest = z.infer<typeof UploadImportRequestSchema>;
 
 /**
@@ -463,12 +786,20 @@ export type UploadImportRequest = z.infer<typeof UploadImportRequestSchema>;
  * the server re-validates them against the actually-uploaded object
  * (P39 + P42).
  */
-export const UploadImportConfirmSchema = z.object({
-  idempotencyKey: z.uuid(),
-  originalFilename: z.string().min(1).max(256),
-  mimeType: z.enum(UPLOAD_ALLOWED_MIME_TYPES),
-  sizeBytes: z.number().int().positive().max(UPLOAD_MAX_BYTES),
-});
+export const UploadImportConfirmSchema = z
+  .object({
+    idempotencyKey: z.uuid(),
+    originalFilename: z.string().min(1).max(256),
+    mimeType: z.enum(UPLOAD_ALLOWED_MIME_TYPES),
+    sizeBytes: z.number().int().positive().max(UPLOAD_MAX_BYTES),
+    source: z.enum(UPLOAD_SOURCES),
+    /** Story 2.1 — see UploadImportRequestSchema.pageCount. */
+    pageCount: z.number().int().nonnegative().optional(),
+  })
+  .refine(uploadPageCountRefinement, {
+    message: "PDF uploads require pageCount",
+    path: ["pageCount"],
+  });
 export type UploadImportConfirm = z.infer<typeof UploadImportConfirmSchema>;
 
 /** Onboarding import-screen route. */
@@ -497,3 +828,405 @@ export const UPLOAD_QUEUED_BADGE_PT_BR = "Enviado";
 /** iOS Photo Library permission string (used in app.config.ts). */
 export const PHOTO_LIBRARY_PERMISSION_PT_BR =
   "Permita o acesso à sua biblioteca de fotos para enviar resultados de exames.";
+
+// =============================================================================
+// Story 2.1 — Post-onboarding PDF upload + ExtractionPulse + upload sheet
+// =============================================================================
+
+/** Error message for PDFs that exceed the page cap (AC4). */
+export const UPLOAD_PDF_TOO_MANY_PAGES_PT_BR =
+  "Este PDF tem mais de 10 páginas. Envie um exame por vez.";
+
+/**
+ * Story 2.1 P54 — surfaced when the PDF can't be parsed (encrypted,
+ * corrupt, or a network failure on the fetch+arrayBuffer round-trip).
+ * The previous behaviour was to surface UPLOAD_PDF_TOO_MANY_PAGES even
+ * for unparseable input, which blamed the patient for the wrong cause.
+ */
+export const UPLOAD_PDF_UNREADABLE_PT_BR =
+  "Não conseguimos ler este PDF. Tente outro arquivo.";
+
+/**
+ * pt-BR labels for the upload `source` enum — used by future status
+ * surfaces (Story 2.5) and any debug copy.
+ */
+export const UPLOAD_SOURCE_PT_BR_LABELS: Record<UploadSource, string> = {
+  onboarding_import: "Importar do onboarding",
+  post_onboarding: "Enviado depois do onboarding",
+};
+
+/** Upload-source bottom-sheet copy (Início post-onboarding entry). */
+export const UPLOAD_SHEET_TITLE_PT_BR = "Como deseja enviar?";
+export const UPLOAD_SHEET_PDF_LABEL_PT_BR = "Arquivo PDF";
+/**
+ * Story 2.2 — three active rows (PDF / Library / Camera). The single
+ * `UPLOAD_SHEET_PHOTO_LABEL_PT_BR` that Story 2.1 shipped as a
+ * disabled "Em breve" stub is removed; consumers now pick library
+ * vs camera explicitly.
+ */
+export const UPLOAD_SHEET_PHOTO_LIBRARY_LABEL_PT_BR = "Foto da galeria";
+export const UPLOAD_SHEET_PHOTO_CAMERA_LABEL_PT_BR = "Tirar foto";
+export const UPLOAD_SHEET_PHOTO_LIBRARY_HINT_PT_BR =
+  "Abre o seletor de fotos do dispositivo";
+export const UPLOAD_SHEET_PHOTO_CAMERA_HINT_PT_BR =
+  "Abre a câmera para fotografar um exame";
+export const UPLOAD_SHEET_PHOTO_CAMERA_HINT_WEB_PT_BR =
+  "Abre a câmera no celular, ou o seletor de arquivos no desktop";
+export const UPLOAD_SHEET_CANCEL_PT_BR = "Cancelar";
+
+/** Story 2.2 — camera permission denial copy (mirrors PHOTO_LIBRARY_PERMISSION_PT_BR). */
+export const CAMERA_PERMISSION_PT_BR =
+  "Permita o acesso à câmera para fotografar o seu exame.";
+
+/** Story 2.2 — image OCR failure surface + 3 recovery options (AC4). */
+export const UPLOAD_IMAGE_OCR_FAILED_PT_BR =
+  "Não conseguimos ler este exame. Tente uma destas opções abaixo.";
+export const UPLOAD_RECOVERY_RETAKE_PT_BR = "Tirar nova foto";
+export const UPLOAD_RECOVERY_UPLOAD_PDF_PT_BR = "Enviar PDF";
+export const UPLOAD_RECOVERY_MANUAL_PT_BR = "Inserir manualmente";
+
+/**
+ * Story 2.2 round-2 R2-P86 — fallback line rendered by ExtractionPulse
+ * when state is `failed` and no recovery callbacks are wired. Every
+ * other pt-BR string in the upload surface lives here per
+ * Story 2.1 / 2.2 Task 8 invariant.
+ */
+export const UPLOAD_FAILED_GENERIC_RETRY_PT_BR =
+  "Tente novamente em alguns instantes.";
+
+/**
+ * Story 2.2 — explicit picker source for `pickImages`. Library uses
+ * `launchImageLibraryAsync`; camera uses `launchCameraAsync` and
+ * requires `NSCameraUsageDescription` on iOS + the camera runtime
+ * permission via `requestCameraPermissionsAsync`.
+ */
+export const PICK_IMAGE_SOURCES = ["library", "camera"] as const;
+export type PickImageSource = (typeof PICK_IMAGE_SOURCES)[number];
+
+/**
+ * ExtractionPulse patience-pattern copy (UX-DR4, ux-design-specification.md
+ * L1090–1094). Keyed off elapsed milliseconds since the upload started.
+ */
+export const EXTRACTION_PULSE_COPY_0_10S_PT_BR = "Lendo seu exame…";
+export const EXTRACTION_PULSE_COPY_10_20S_PT_BR =
+  "Este está demorando um pouco — exames complexos pedem mais cuidado";
+export const EXTRACTION_PULSE_COPY_20_30S_PT_BR = "Ainda processando…";
+export const EXTRACTION_PULSE_COPY_30S_PLUS_PT_BR = "Ainda processando…";
+export const EXTRACTION_PULSE_REVIEW_NEEDED_PT_BR =
+  "Um resultado precisa da sua confirmação";
+export const EXTRACTION_PULSE_COMPLETE_PT_BR = "Pronto";
+export const EXTRACTION_PULSE_MANUAL_ENTRY_CTA_PT_BR = "Inserir manualmente";
+
+/**
+ * Pure-function mapping from elapsed-ms to the patience-pattern micro-copy.
+ * Lives in validators so the rendering surface (ExtractionPulse) and the
+ * unit tests share one source of truth.
+ *
+ * Thresholds: [0, 10s) / [10s, 20s) / [20s, 30s) / [30s, ∞). After 30s
+ * the copy stays the same as the 20–30s bucket; the 30s+ marker is
+ * carried separately so the renderer knows when to surface the
+ * "Inserir manualmente" escape hatch.
+ */
+export function extractionPulseCopyForElapsedMs(elapsedMs: number): string {
+  if (elapsedMs < 10_000) return EXTRACTION_PULSE_COPY_0_10S_PT_BR;
+  if (elapsedMs < 20_000) return EXTRACTION_PULSE_COPY_10_20S_PT_BR;
+  if (elapsedMs < 30_000) return EXTRACTION_PULSE_COPY_20_30S_PT_BR;
+  return EXTRACTION_PULSE_COPY_30S_PLUS_PT_BR;
+}
+
+/** Story 2.1 — true once the patience pattern's escape-hatch threshold passes. */
+export function extractionPulseShouldShowManualEntry(
+  elapsedMs: number,
+): boolean {
+  return elapsedMs >= 30_000;
+}
+
+/**
+ * Counts pages in a PDF. Uses `pdf-lib` (pure JS, RN + browser safe).
+ * Story 2.1 AC4: pre-transmission gate at `UPLOAD_MAX_PDF_PAGES = 10`.
+ *
+ * Memory: a 5 MB PDF buffer + pdf-lib's parsed object graph is well
+ * under typical RN/browser heap budgets.
+ */
+export async function countPdfPages(
+  bytes: ArrayBuffer | Uint8Array,
+): Promise<number> {
+  const { PDFDocument } = await import("pdf-lib");
+  const doc = await PDFDocument.load(bytes, {
+    updateMetadata: false,
+    // Story 2.1 P60 — `ignoreEncryption` lets encrypted PDFs report a
+    // page count instead of throwing `EncryptedPDFError`. The previous
+    // option (`throwOnInvalidObject`) is not in pdf-lib's `LoadOptions`
+    // and was silently ignored.
+    ignoreEncryption: true,
+  });
+  return doc.getPageCount();
+}
+
+// =============================================================================
+// Story 3.1 — Longitudinal biomarker record (Histórico → Resultados)
+// =============================================================================
+
+/** pt-BR labels for the two Histórico subtabs (Resultados / Envios). */
+export const HISTORICO_RESULTS_TAB_LABEL_PT_BR = "Resultados";
+export const HISTORICO_UPLOADS_TAB_LABEL_PT_BR = "Envios";
+
+/** Empty-state copy for the Resultados subtab (AC6). */
+export const HISTORICO_RESULTS_EMPTY_HEADLINE_PT_BR =
+  "Sem exames publicados ainda";
+export const HISTORICO_RESULTS_EMPTY_CTA_PT_BR = "Enviar resultado";
+
+/** Loading + error copy for the Resultados subtab. */
+export const HISTORICO_RESULTS_LOADING_PT_BR = "Carregando…";
+export const HISTORICO_RESULTS_ERROR_PT_BR =
+  "Não foi possível carregar seu histórico.";
+/**
+ * R1-P241 — distinct copy for a deep-link / stale-link that points at
+ * a draw not present in the latest `getRecord` payload (e.g. the user
+ * soft-deleted the BIA row between list view and detail tap). The
+ * previous code reused `HISTORICO_RESULTS_ERROR_PT_BR`, which implied
+ * a fetch failure when the fetch actually succeeded.
+ */
+export const HISTORICO_DRAW_NOT_FOUND_PT_BR =
+  "Este exame não está mais disponível.";
+
+/**
+ * R2-P245 — pt-BR "back" label for the draw-detail screen. Lifted from
+ * a hardcoded literal to centralise pt-BR copy per repository
+ * convention (all surface strings live in validators so a copy review
+ * is grep-able).
+ */
+export const HISTORICO_DRAW_DETAIL_BACK_PT_BR = "← Voltar";
+
+/** pt-BR fallback when an extracted draw has no lab name (AC1). */
+export const HISTORICO_LAB_NAME_FALLBACK_PT_BR = "Laboratório não informado";
+
+/** "12 biomarcadores" / "1 biomarcador" — pluralized summary on draw rows. */
+export function historicoDrawBiomarkerCountPtBr(n: number): string {
+  return `${n} ${n === 1 ? "biomarcador" : "biomarcadores"}`;
+}
+
+/** Reference-range + deviation labels for `BiomarkerCard` (AC2, AC3, AC7). */
+export const BIOMARKER_REFERENCE_LABEL_PT_BR = "Referência";
+export const BIOMARKER_OUT_OF_RANGE_LABEL_PT_BR = "fora da faixa de referência";
+export const BIOMARKER_WITHIN_RANGE_LABEL_PT_BR =
+  "dentro da faixa de referência";
+export const BIOMARKER_REFERENCE_UNAVAILABLE_PT_BR =
+  "sem faixa de referência disponível";
+
+/**
+ * Story 3.1 — placeholder accessibility hint for `BiomarkerCard`. The tap
+ * is a no-op today; Story 4.3 wires the detail sheet. Setting the hint
+ * now keeps the audio cue stable across stories (UX-DR19).
+ */
+export const BIOMARKER_CARD_A11Y_HINT_PT_BR =
+  "Toque duas vezes para ver o histórico completo";
+
+/**
+ * Story 3.1 — Histórico draw detail route. Composed as
+ * `/historico/{collectedAt}?labName=…` so the dynamic route file at
+ * `apps/expo/src/app/(tabs)/historico/[collectedAt].tsx` can read both
+ * params via `useLocalSearchParams`. The `labName` query param is the
+ * grouping discriminator — its consumer MUST read it (Epic 2 retro
+ * action item §3, query-param coupling).
+ *
+ * Pass the raw lab name (or an empty string when null); the helper
+ * URL-encodes it. Empty-string `labName` is a sentinel for "no lab
+ * recorded" (extracted rows with `lab_name IS NULL` and grouped
+ * accordingly in the API helper).
+ */
+export function historicoDrawDetailRoute(
+  collectedAt: string,
+  labName: string,
+): string {
+  return `/historico/${collectedAt}?labName=${encodeURIComponent(labName)}`;
+}
+
+/**
+ * R3-P246 — format a `yyyy-mm-dd` date-only string as `dd/mm/yyyy`
+ * (pt-BR) without invoking `new Date(...)`. The naive `new
+ * Date('2024-03-15').toLocaleDateString('pt-BR')` parses the input as
+ * UTC midnight, which shifts to the previous calendar day in every
+ * Brazilian timezone (UTC-3 / UTC-4 / UTC-5) — Story 3.1 AC1
+ * requires the **collection date**, not "the day before in the
+ * patient's local clock". Use this helper for any `collected_at`
+ * coming back from `observations`. Returns the input unchanged if it
+ * doesn't match `yyyy-mm-dd`.
+ */
+export function formatCollectedAtPtBr(collectedAt: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(collectedAt);
+  if (!match) return collectedAt;
+  return `${match[3]}/${match[2]}/${match[1]}`;
+}
+
+/**
+ * Story 3.2 — Fingerprint cold-start-1 surface strings (UX spec lines
+ * 848–866, 1187; epics.md lines 909–940). All copy is greppable here
+ * per the Story 0.2 / Epic 2 retro discipline (no hardcoded surface
+ * strings in component code).
+ */
+export const FINGERPRINT_COLD_START_LABEL_PT_BR =
+  "Sua linha de base pessoal cresce com cada novo exame";
+
+export const FINGERPRINT_PARTIAL_EMPTY_HEADLINE_PT_BR =
+  "Com 2 ou mais exames, você verá seu padrão pessoal";
+
+export const FINGERPRINT_PARTIAL_EMPTY_CTA_PT_BR = "Enviar resultado anterior";
+
+/**
+ * AC7 — composite accessibilityLabel for the `FingerprintChart` in
+ * `cold-start-1`. Singular/plural agreement on "biomarcador" /
+ * "biomarcadores" — only `count === 1` takes the singular form.
+ */
+export function FINGERPRINT_COLD_START_A11Y_LABEL_PT_BR(count: number): string {
+  const noun = count === 1 ? "biomarcador" : "biomarcadores";
+  return `Fingerprint em construção. ${count} ${noun} deste primeiro exame. Sua linha de base pessoal cresce com cada novo exame.`;
+}
+
+export const FINGERPRINT_REFERENCE_RANGE_UNAVAILABLE_A11Y_PT_BR =
+  "Sem faixa de referência populacional disponível";
+
+/**
+ * Task 3.6 — Início primary `EmptyStateRecord` copy when the patient
+ * has exactly one draw. The default `INICIO_HEADLINE_PT_BR` ("Sua
+ * história de saúde começa aqui") is factually wrong at `drawCount ===
+ * 1` because the patient already has a result; swap in continuation
+ * framing instead.
+ */
+export const INICIO_HEADLINE_DRAW_ONE_PT_BR =
+  "Continue construindo seu Fingerprint";
+
+export const INICIO_CTA_DRAW_ONE_PT_BR = "Enviar próximo exame";
+
+/**
+ * Story 3.3 — `BiomarkerCard` chip copy for personal-baseline
+ * deviation states (epics.md lines 929–953, UX spec 832–844).
+ * `watching` (1.0 ≤ |z| < 1.5) and `notable` (|z| ≥ 1.5) replace the
+ * Story 3.1 population-range narration when a personal baseline is
+ * available (AC2/AC3).
+ */
+export const BIOMARKER_WATCHING_LABEL_PT_BR = "acompanhando";
+export const BIOMARKER_NOTABLE_LABEL_PT_BR = "vale conversar";
+
+/**
+ * Story 3.3 — narration suffix for `BiomarkerCard` personal-baseline
+ * states (AC2/AC7). Returns the trailing portion of the composite
+ * accessibilityLabel; the caller prefixes `"{name}, {value} {unit}, "`.
+ */
+export function BIOMARKER_PERSONAL_BASELINE_NARRATION_PT_BR(args: {
+  zScore: number;
+  direction: "above" | "below";
+}): string {
+  const directionPt = args.direction === "below" ? "abaixo" : "acima";
+  const absZ = Math.abs(args.zScore);
+  const magnitude = formatBrazilianDecimal(absZ);
+  // R2-P268 — pt-BR singular/plural agreement on "desvio". When
+  // `|z| === 1` exactly (boundary), "1 desvios" is ungrammatical;
+  // any other magnitude (1,1 / 1,5 / 2,3 / etc.) takes the plural.
+  const noun = absZ === 1 ? "desvio" : "desvios";
+  return `${magnitude} ${noun} ${directionPt} da sua linha de base pessoal`;
+}
+
+/**
+ * Story 3.3 — trend labels for the `FingerprintChart`
+ * `baseline-established` composite accessibilityLabel (AC7).
+ */
+export const FINGERPRINT_BASELINE_TREND_ASCENDING_PT_BR = "ascendente";
+export const FINGERPRINT_BASELINE_TREND_DESCENDING_PT_BR = "descendente";
+export const FINGERPRINT_BASELINE_TREND_FLAT_PT_BR = "estável";
+
+export type FingerprintBaselineTrend = "ascendente" | "descendente" | "estável";
+
+/**
+ * Story 3.3 — composite a11y label for the chart in
+ * `baseline-established`. epics.md line 951:
+ * "Ferritina: 3 medições. Tendência descendente. Valor atual 2,1
+ *  desvios abaixo da sua linha de base pessoal."
+ * Singular/plural agreement on "medição" / "medições".
+ * When `zScore` is `null` (degenerate stddev=0), the closing
+ * sentence is replaced by "Sem variação na sua linha de base
+ * pessoal." — no spurious z-score is announced (AC2 fallback).
+ */
+export function FINGERPRINT_BASELINE_A11Y_LABEL_PT_BR(args: {
+  biomarkerName: string;
+  sampleSize: number;
+  trend: FingerprintBaselineTrend;
+  zScore: number | null;
+}): string {
+  const noun = args.sampleSize === 1 ? "medição" : "medições";
+  if (args.zScore === null) {
+    return `${args.biomarkerName}: ${args.sampleSize} ${noun}. Tendência ${args.trend}. Sem variação na sua linha de base pessoal.`;
+  }
+  const direction = args.zScore < 0 ? "abaixo" : "acima";
+  const absZ = Math.abs(args.zScore);
+  const magnitude = formatBrazilianDecimal(absZ);
+  // R2-P268 — pt-BR singular/plural agreement on "desvio" (boundary
+  // case at `|z| === 1` exactly).
+  const desvioNoun = absZ === 1 ? "desvio" : "desvios";
+  return `${args.biomarkerName}: ${args.sampleSize} ${noun}. Tendência ${args.trend}. Valor atual ${magnitude} ${desvioNoun} ${direction} da sua linha de base pessoal.`;
+}
+
+/** Story 3.3 — Início loading / error copy at drawCount >= 2. */
+export const INICIO_FINGERPRINT_LOADING_PT_BR = "Carregando seu Fingerprint…";
+export const INICIO_FINGERPRINT_ERROR_PT_BR =
+  "Não conseguimos carregar seu Fingerprint agora. Tente novamente em instantes.";
+
+// =============================================================================
+// Story 3.4 — Offline-cached Fingerprint surface
+// =============================================================================
+
+/**
+ * Story 3.4 AC3 — threshold at which the cached "Última atualização"
+ * label switches from `$textSecondary` to `$biomarkerDeviation` (amber).
+ * Single named constant — no magic numbers in the component.
+ */
+export const FINGERPRINT_CACHE_STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000;
+
+/** AC1 — pt-BR label prefix. Concatenated with `formatCachedUpdatedAtPtBr`. */
+export const FINGERPRINT_CACHE_UPDATED_AT_PREFIX_PT_BR = "Última atualização: ";
+
+/** AC3 — subtext rendered below the amber label when stale. */
+export const FINGERPRINT_CACHE_STALE_HINT_PT_BR =
+  "Pode não refletir seu exame mais recente.";
+
+/** AC3 — composite a11y label (fresh state). Colour is never the only signal (NFR-A4). */
+export function FINGERPRINT_CACHE_FRESH_A11Y_PT_BR(formatted: string): string {
+  return `Última atualização em ${formatted}.`;
+}
+
+/** AC3 — composite a11y label (stale state, > 24h). */
+export function FINGERPRINT_CACHE_STALE_A11Y_PT_BR(formatted: string): string {
+  return `Última atualização em ${formatted}. Há mais de 24 horas. Pode não refletir seu exame mais recente.`;
+}
+
+/** AC2 — disabled-state hint shown when the patient taps an upload CTA offline. */
+export const INICIO_OFFLINE_UPLOAD_DISABLED_PT_BR =
+  "Conecte-se à internet para enviar um novo exame.";
+
+/**
+ * AC1 — format an epoch millisecond timestamp as `DD/MM/AAAA HH:mm`
+ * (pt-BR, 24-hour clock). Unlike `formatCollectedAtPtBr` (which works
+ * on `yyyy-mm-dd` date-only strings and dodges the UTC-midnight
+ * off-by-one bug — see R3-P246), this helper takes a true `Date.now()`
+ * epoch value, so `new Date(epochMs)` is correct and timezone-aware
+ * by definition. Do NOT call this helper with a `yyyy-mm-dd` string;
+ * use `formatCollectedAtPtBr` for date-only collection dates.
+ */
+export function formatCachedUpdatedAtPtBr(epochMs: number): string {
+  // Guard against degenerate input — `dataUpdatedAt` can be `0` from
+  // TanStack Query when the query has never resolved. Surface as
+  // the i18n placeholder so the UI doesn't render "01/01/1970 00:00".
+  if (!Number.isFinite(epochMs) || epochMs <= 0) {
+    return UNKNOWN_DATE_PT_BR;
+  }
+  const d = new Date(epochMs);
+  if (Number.isNaN(d.getTime())) return UNKNOWN_DATE_PT_BR;
+  return d.toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}

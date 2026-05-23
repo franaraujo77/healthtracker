@@ -6,6 +6,10 @@
     ".": {
       "types": "./dist/src/index.d.ts",
       "default": "./src/index.ts"
+    },
+    "./upload-transitions": {
+      "types": "./dist/src/upload-transitions.d.ts",
+      "default": "./src/upload-transitions.ts"
     }
   },
   "license": "MIT",
@@ -33,6 +37,7 @@
     "@healthtracker/tsconfig": "workspace:*",
     "@vitest/coverage-v8": "catalog:",
     "eslint": "catalog:",
+    "pdf-lib": "^1.17.1",
     "prettier": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

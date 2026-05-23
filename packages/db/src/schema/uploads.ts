@@ -59,6 +59,15 @@ export const Uploads = pgTable(
     processingStartedAt: t.timestamp({ mode: "date", withTimezone: true }),
     processingCompletedAt: t.timestamp({ mode: "date", withTimezone: true }),
     metadata: t.jsonb().$type<Record<string, unknown>>().notNull().default({}),
+    // Epic 2 retro F141 — most-common lab name across this upload's
+    // published observations, populated by the extraction worker at
+    // dispatch time. Lets the push-notification consumer body the
+    // notification by lab name (AC2 of Story 2.5) via a direct
+    // `SELECT u.lab_name` instead of a correlated subquery on
+    // `observations`. Nullable: still NULL during `queued` /
+    // `processing` and for `failed` / `pending_review` uploads that
+    // never published a publishable extracted field.
+    labName: t.text(),
     createdAt: t
       .timestamp({ mode: "date", withTimezone: true })
       .defaultNow()

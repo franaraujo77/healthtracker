@@ -33,6 +33,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       // per UX-DR20.
       NSPhotoLibraryUsageDescription:
         "Permita o acesso à sua biblioteca de fotos para enviar resultados de exames.",
+      // Story 2.2 FR2 — required when the app calls
+      // `ImagePicker.launchCameraAsync` for direct camera capture
+      // (AC2). pt-BR per UX-DR20; names the action so App Store
+      // review sees context, not just "this app".
+      NSCameraUsageDescription:
+        "Permita o acesso à câmera para fotografar resultados de exames.",
     },
   },
   android: {
@@ -78,6 +84,18 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       },
     ],
     "expo-document-picker",
+    [
+      // Story 2.5 / F135 — push notifications. iOS APNs entitlements
+      // and Android FCM are wired by the config plugin; the runtime
+      // hook (`apps/expo/src/hooks/use-push-notifications.ts`) handles
+      // permission request + token registration. Real delivery
+      // requires an EAS project (set `extra.eas.projectId`).
+      "expo-notifications",
+      {
+        icon: "./assets/icon-light.png",
+        color: "#0D6E6E",
+      },
+    ],
     [
       "expo-splash-screen",
       {
