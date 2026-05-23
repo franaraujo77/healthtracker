@@ -9,9 +9,11 @@ import { EmptyStateRecord, ExtractionPulse } from "@healthtracker/ui";
 import { UploadSourceSheet } from "@healthtracker/ui/upload-source-sheet";
 import {
   countPdfPages,
+  INICIO_ADD_MEASUREMENT_CTA_PT_BR,
   INICIO_CTA_PT_BR,
   INICIO_HEADLINE_PT_BR,
   isUploadMimeType,
+  MANUAL_BIA_ROUTE,
   UPLOAD_EMPTY_FILE_PT_BR,
   UPLOAD_FILE_TOO_LARGE_PT_BR,
   UPLOAD_MAX_BYTES,
@@ -264,6 +266,16 @@ export function InicioEmptyState({
         ctaLabel={INICIO_CTA_PT_BR}
         onCtaPress={() => setSheetOpen(true)}
       />
+      {/* R1-P204 — secondary CTA for the manual BIA entry path so
+          AC1 ("I navigate to 'Adicionar medição'") works on web too.
+          A simple anchor link matches the existing styling surface
+          without pulling in another `<Button>` import here. */}
+      <a
+        href={MANUAL_BIA_ROUTE}
+        className="mt-2 inline-block text-sm text-stone-700 underline underline-offset-2 hover:text-stone-900"
+      >
+        {INICIO_ADD_MEASUREMENT_CTA_PT_BR}
+      </a>
       {lastOutcomes.length > 0 ? (
         <ul aria-live="polite" className="mt-4 space-y-1 text-xs">
           {lastOutcomes.map((o, idx) => (

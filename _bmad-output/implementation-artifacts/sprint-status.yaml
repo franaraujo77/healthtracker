@@ -103,7 +103,15 @@ development_status:
   # R2-P194 offlineRows in allDismissed, R2-P195 whenPatientReady race
   # fix, R2-P196 AppState short-circuit, R2-P197 enqueue preserves
   # enqueuedAt. R2-P198 flagged not applied (low-priority UX nit).
-  2-7-patient-manually-enters-bioimpedance-bia-measurements: review
+  2-7-patient-manually-enters-bioimpedance-bia-measurements: done
+  # round-1 patches applied: R1-P199 multi-device partial index split
+  # (HIGH AC), R1-P200 server-side date refinement (HIGH AC),
+  # R1-P201 onConflictDoNothing.where for partial index targeting
+  # (HIGH), R1-P202 SELECT FOR UPDATE concurrency lock, R1-P203 trim
+  # min on device strings, R1-P204 web Adicionar medição CTA,
+  # R1-P205 useEffect-scoped redirect timer, R1-P206 clear error on
+  # success, R1-P207 cancelable: false Expo Alert, R1-P208 ON-CONFLICT
+  # + two-device test coverage.
   2-8-patient-manages-push-notification-preferences: backlog
   epic-2-retrospective: optional
 

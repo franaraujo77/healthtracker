@@ -72,10 +72,33 @@ export const BiaSubmissionSchema = z
     bodyFatPercentage: z.number().min(0).max(100),
     collectedAt: z
       .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/, "BIA_COLLECTED_AT_INVALID"),
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "BIA_COLLECTED_AT_INVALID")
+      // R1-P200 — the regex accepts "2024-02-30" / "2024-13-45". Round-
+      // trip through UTC to catch invalid month/day combinations
+      // (server-side defense-in-depth — the client already does this).
+      .refine(
+        (s) => {
+          const [yStr, mStr, dStr] = s.split("-");
+          const y = Number(yStr);
+          const m = Number(mStr);
+          const d = Number(dStr);
+          if (y < 1900 || y > 2100) return false;
+          if (m < 1 || m > 12) return false;
+          if (d < 1 || d > 31) return false;
+          const dt = new Date(Date.UTC(y, m - 1, d));
+          return (
+            dt.getUTCFullYear() === y &&
+            dt.getUTCMonth() === m - 1 &&
+            dt.getUTCDate() === d
+          );
+        },
+        { message: "BIA_COLLECTED_AT_NOT_A_REAL_DATE" },
+      ),
     deviceName: z.enum(BIA_DEVICE_NAMES),
-    deviceCustomName: z.string().max(80).optional(),
-    deviceModel: z.string().max(80).optional(),
+    // R1-P203 — `.trim().min(1)` so non-form clients can't slip
+    // empty/whitespace strings past defense-in-depth.
+    deviceCustomName: z.string().trim().min(1).max(80).optional(),
+    deviceModel: z.string().trim().min(1).max(80).optional(),
     overwrite: z.boolean().optional(),
   })
   .refine(

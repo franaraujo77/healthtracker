@@ -68,11 +68,7 @@ function brDateToIso(br: string): string | null {
   const dayStr = m[1];
   const monthStr = m[2];
   const yearStr = m[3];
-  if (
-    dayStr === undefined ||
-    monthStr === undefined ||
-    yearStr === undefined
-  ) {
+  if (dayStr === undefined || monthStr === undefined || yearStr === undefined) {
     return null;
   }
   const day = Number(dayStr);
@@ -165,13 +161,22 @@ export default function BiaScreen() {
     trpc.observations.submitBia.mutationOptions({
       onSuccess: (data, variables) => {
         if (data.status === "duplicate" && !variables.overwrite) {
-          Alert.alert(BIA_DUPLICATE_MODAL_TITLE_PT_BR, undefined, [
-            { text: BIA_DUPLICATE_MODAL_CANCEL_PT_BR, style: "cancel" },
-            {
-              text: BIA_DUPLICATE_MODAL_CONFIRM_PT_BR,
-              onPress: () => mutation.mutate({ ...variables, overwrite: true }),
-            },
-          ]);
+          // R1-P207 — supply a body so the Alert renders with an
+          // unambiguous question; `cancelable: false` so an Android
+          // background tap doesn't silently dismiss the prompt.
+          Alert.alert(
+            BIA_DUPLICATE_MODAL_TITLE_PT_BR,
+            "Toque em Substituir para sobrescrever ou em Cancelar para revisar.",
+            [
+              { text: BIA_DUPLICATE_MODAL_CANCEL_PT_BR, style: "cancel" },
+              {
+                text: BIA_DUPLICATE_MODAL_CONFIRM_PT_BR,
+                onPress: () =>
+                  mutation.mutate({ ...variables, overwrite: true }),
+              },
+            ],
+            { cancelable: false },
+          );
           return;
         }
         router.back();

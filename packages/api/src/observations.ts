@@ -111,7 +111,15 @@ export async function writeObservation(
       confidenceScore: String(entry.confidenceScore),
       source: entry.source,
     })
+    // R1-P201 — explicit `where` so PG matches the partial unique
+    // index `WHERE deleted_at IS NULL AND source <> 'manual_bia'`.
+    // Without it, the planner can't disambiguate which partial index
+    // the ON CONFLICT targets when multiple cover the same columns.
+    // Manual BIA inserts never participate in this conflict (the
+    // partial WHERE excludes `source='manual_bia'`); they have their
+    // own application-level dedup in `writeBiaObservations`.
     .onConflictDoNothing({
+      where: sql`${Observations.deletedAt} IS NULL AND ${Observations.source} <> 'manual_bia'`,
       target: [
         Observations.patientId,
         Observations.uploadId,
@@ -175,6 +183,11 @@ export async function writeBiaObservations(
 
   // AC3 — duplicate detection. Scope: same patient + same date +
   // same `lab_name` + `source = 'manual_bia'` + not soft-deleted.
+  //
+  // R1-P202 — `.for("update")` row-locks the matched rows so a
+  // concurrent submission can't soft-delete them between this SELECT
+  // and the UPDATE below. The lock is held until commit (the outer
+  // `protectedProcedure` transaction).
   const existing = await database
     .select({ id: Observations.id })
     .from(Observations)
@@ -186,7 +199,8 @@ export async function writeBiaObservations(
         eq(Observations.source, "manual_bia"),
         isNull(Observations.deletedAt),
       ),
-    );
+    )
+    .for("update");
   const existingIds = existing.map((r) => r.id);
 
   if (existingIds.length > 0 && input.overwrite !== true) {

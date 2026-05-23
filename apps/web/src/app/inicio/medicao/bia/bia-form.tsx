@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
 
@@ -68,11 +68,7 @@ function brDateToIso(br: string): string | null {
   const dayStr = m[1];
   const monthStr = m[2];
   const yearStr = m[3];
-  if (
-    dayStr === undefined ||
-    monthStr === undefined ||
-    yearStr === undefined
-  ) {
+  if (dayStr === undefined || monthStr === undefined || yearStr === undefined) {
     return null;
   }
   const day = Number(dayStr);
@@ -164,6 +160,18 @@ export function BiaForm() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [duplicate, setDuplicate] = useState<BiaSubmissionInput | null>(null);
   const [successOpen, setSuccessOpen] = useState(false);
+  // R1-P205 — capture the success-redirect timer so unmount can
+  // clear it. Without this, navigating away within 800ms left a
+  // `router.push` firing against a torn-down tree.
+  // R1-P205 — `successOpen=true` schedules navigation in a useEffect
+  // whose cleanup clears the timer if the component unmounts first.
+  useEffect(() => {
+    if (!successOpen) return;
+    const timer = setTimeout(() => {
+      router.push(INICIO_ROUTE);
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [successOpen, router]);
 
   const mutation = useMutation(
     trpc.observations.submitBia.mutationOptions({
@@ -173,10 +181,9 @@ export function BiaForm() {
           setDuplicate(variables);
           return;
         }
+        // R1-P206 — clear any prior submit error from a failed retry.
+        setSubmitError(null);
         setSuccessOpen(true);
-        setTimeout(() => {
-          router.push(INICIO_ROUTE);
-        }, 800);
       },
       onError: () => {
         setSubmitError(BIA_SUBMIT_ERROR_PT_BR);

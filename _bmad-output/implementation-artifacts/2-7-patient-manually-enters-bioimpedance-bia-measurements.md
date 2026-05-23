@@ -1,6 +1,6 @@
 # Story 2.7: Patient manually enters bioimpedance (BIA) measurements
 
-Status: review
+Status: done
 
 ## Story
 
@@ -220,3 +220,31 @@ claude-opus-4-7[1m]
 - `packages/api/src/root.ts` — registers `observationsRouter`.
 - `packages/validators/src/index.ts` — `BiaSubmissionSchema`, pt-BR copy.
 - `apps/expo/src/app/(tabs)/inicio.tsx` — "Adicionar medição" CTA.
+
+### Review Findings (code review round 1 — 2026-05-22)
+
+3-layer adversarial round-1. **3 HIGH (multi-device collision + invalid-date server gap + ON-CONFLICT targeting) + 6 Med + 2 Low.** 11 patches applied (R1-P199–R1-P210), 5 deferred (F156–F160), 4 dismissed.
+
+**`patch` (must fix before done):**
+
+- [x] [Review][Patch] **R1-P199 [HIGH AC1/AC3]: Two-device-same-day collision broke the unique-index dedup** [`packages/db/src/schema/observations.ts`] — Every manual BIA shared `SENTINEL_UPLOAD_UUID`, so InBody + Tanita on the same date with the same LOINC collided. Fix: narrowed the existing `(patient, upload, loinc, date)` partial index to exclude `source='manual_bia'`; added a second partial index `(patient_id, collected_at, lab_name, loinc_code) WHERE source='manual_bia' AND deleted_at IS NULL`. Added a test asserting two devices same-day both succeed.
+- [x] [Review][Patch] **R1-P200 [HIGH AC4]: Server-side Zod accepted invalid dates (`'2024-02-30'`)** [`packages/validators/src/index.ts`] — Fix: `BiaSubmissionSchema.collectedAt` now `.refine`-validates the date by round-tripping through `Date.UTC(y, m-1, d)` — same logic the client's `brDateToIso` uses.
+- [x] [Review][Patch] **R1-P201 [HIGH Correctness]: `onConflictDoNothing` target needs `where` for the partial unique index** [`packages/api/src/observations.ts`] — Without `where`, PG can't disambiguate when multiple partial indexes cover the same columns. Fix: `.onConflictDoNothing({ where: sql\`deleted_at IS NULL AND source <> 'manual_bia'\`, target: [...] })`.
+- [x] [Review][Patch] **R1-P202 [HIGH Concurrency]: SELECT-then-UPDATE race in `writeBiaObservations`** [`packages/api/src/observations.ts`] — Fix: `.for("update")` row-locks the matched rows until the transaction commits.
+- [x] [Review][Patch] **R1-P203 [Med Defense-in-depth]: `deviceCustomName` / `deviceModel` accepted whitespace-only strings** — Fix: `z.string().trim().min(1).max(80).optional()`.
+- [x] [Review][Patch] **R1-P204 [Med AC1]: Web had no "Adicionar medição" CTA — route was unreachable from UI** [`apps/web/src/app/inicio/inicio-empty-state.tsx`] — Fix: inline anchor link to `MANUAL_BIA_ROUTE` below the upload empty-state CTA.
+- [x] [Review][Patch] **R1-P205 [Med Hygiene]: `setTimeout` navigation leaked on unmount** [`apps/web/src/app/inicio/medicao/bia/bia-form.tsx`] — Fix: scheduled navigation in a `useEffect` keyed off `successOpen` with proper cleanup.
+- [x] [Review][Patch] **R1-P206 [Med Hygiene]: `submitError` lingered after a successful retry** [`apps/web/.../bia-form.tsx`] — Fix: `setSubmitError(null)` in the `onSuccess` branch.
+- [x] [Review][Patch] **R1-P207 [Med UX]: Expo Alert background-tap dismiss without confirmation** [`apps/expo/src/app/medicao/bia.tsx`] — Fix: explicit body copy + `{ cancelable: false }` option.
+- [x] [Review][Patch] **R1-P208 [Med Coverage]: ON-CONFLICT-after-soft-delete branch was uncovered** — Fix: added a test that returns `null` from one of the writeObservation insertReturnings to exercise the throw path.
+- [x] [Review][Patch] **R1-P209 [Low]: Audit `resourceId` non-stable** — Accepted; no FK, downstream queries rely on `metadata.observationIds` array.
+- [x] [Review][Patch] **R1-P210 [Low]: iOS/Android decimal keyboard locale variance** — Documented; `parseBrazilianDecimal` accepts both `.` and `,`.
+
+**`defer` (added to deferred-work.md):** F156–F160.
+
+**Dismissed (~4):** sentinel UUID collision with random `uploads.id`; clinical caps on numeric ranges; `bodyFatPercentage min(0)`; 3 serial inserts in a loop (rolled back by protectedProcedure transaction on partial failure).
+
+### Change Log
+
+- 2026-05-22 — Code review round 1. **11 patches applied (R1-P199–R1-P210), 5 deferred (F156–F160), 4 dismissed.** Three HIGH fixes closed: R1-P199 (multi-device collision — partial index narrowed + dedicated BIA partial index with `lab_name`), R1-P200 (server-side date refinement), R1-P201 (`where` clause on `onConflictDoNothing`). Concurrency: R1-P202 added `.for("update")` to lock duplicate-detection rows. UX: R1-P204 inline web CTA, R1-P205 effect-scoped timer, R1-P206 clear error on success, R1-P207 cancelable: false Alert. Test coverage: R1-P208 ON-CONFLICT path + R1-P199 two-device test. **181 unit tests green (+2 BIA-specific from R1).** Typecheck, lint, format all green.
+- 2026-05-22 — Story 2.7 implemented (dev-story). 179 unit tests green (+6 this story).

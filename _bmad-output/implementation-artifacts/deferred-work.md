@@ -305,3 +305,12 @@
 - **F153** Telemetry on drain outcomes — attemptCount distribution, drop rate, time-to-drain (Sentry / Datadog metric).
 - **F154** Adaptive backoff on `recordAttempt` (currently event-driven via NetInfo / AppState; revisit if field data shows it's needed).
 - **F155** Hard cap (vs. soft warn) on `QUEUE_SOFT_CAP = 20` for multi-day offline scenarios.
+
+
+## Story 2.7 — round-1 review deferrals (F156–F160)
+
+- **F156** Make `observations.upload_id` nullable so manual BIA doesn't need `SENTINEL_UPLOAD_UUID`. Track after R1-P199's structural fix lands.
+- **F157** Web Adicionar medição CTA — landed inline anchor via R1-P204; revisit if PM wants a Tamagui Button styling instead.
+- **F158** SegmentedControl-style device picker on Expo (current impl is 3 styled Buttons).
+- **F159** Concurrency hardening (FOR UPDATE) across all observation-write paths — Story 2.3 `writeObservation` has the same race in theory.
+- **F160** Audit `resourceType: 'observation_submission'` so single-event-per-submission is semantically distinct from per-row writes elsewhere.

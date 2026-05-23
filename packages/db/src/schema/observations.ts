@@ -62,17 +62,30 @@ export const Observations = pgTable(
     deletedAt: t.timestamp({ mode: "date", withTimezone: true }),
   }),
   (table) => [
-    // Story 2.3 — dedupes re-processing of the same document. If the
-    // extraction worker re-runs (idempotency replay, dead-letter
-    // retry), the same (patient, upload, loinc, date) combination
-    // hits ON CONFLICT and the `writeObservation` helper returns null.
+    // Story 2.3 — dedupes re-processing of the same extraction document.
+    // R1-P199 — partial scope was widened to also exclude manual BIA
+    // rows: every manual BIA shares `SENTINEL_UPLOAD_UUID`, so two
+    // devices on the same day with the same LOINC (e.g. InBody + Tanita
+    // both reporting body-fat %) would collide on this index. Manual
+    // BIA has its own dedup (R1-P199's second index below) keyed on
+    // `lab_name`, so excluding `source='manual_bia'` here is safe.
     //
     // Story 2.7 — partial `WHERE deleted_at IS NULL` so a soft-deleted
-    // row (BIA overwrite) doesn't block the new insert on the same
-    // key. Documented in `packages/api/src/observations.ts`.
+    // row doesn't block the new insert on the same key.
     uniqueIndex("observations_patient_upload_loinc_date_unique")
       .on(table.patientId, table.uploadId, table.loincCode, table.collectedAt)
-      .where(sql`${table.deletedAt} IS NULL`),
+      .where(
+        sql`${table.deletedAt} IS NULL AND ${table.source} <> 'manual_bia'`,
+      ),
+    // R1-P199 — manual BIA dedup includes `lab_name` so two devices
+    // on the same date don't collide. `writeBiaObservations` enforces
+    // the same semantic at the application layer (SELECT-then-UPDATE);
+    // this index is defense-in-depth against direct INSERTs.
+    uniqueIndex("observations_manual_bia_patient_date_lab_loinc_unique")
+      .on(table.patientId, table.collectedAt, table.labName, table.loincCode)
+      .where(
+        sql`${table.deletedAt} IS NULL AND ${table.source} = 'manual_bia'`,
+      ),
     // Fingerprint query (Story 3.1+): "most recent observations per
     // patient, ordered by collection date desc".
     index("observations_patient_collected_idx").on(

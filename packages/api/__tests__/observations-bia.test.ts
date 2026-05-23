@@ -38,11 +38,19 @@ function makeDb(script: {
   ];
 
   // SELECT chain — used for the duplicate-detection query.
+  // R1-P202 — `.for("update")` is now part of the chain.
   const selectRows = existingIds.map((id) => ({ id }));
   const selectFn = vi.fn(() => {
     const chain: Record<string, unknown> = {};
+    const finalize = Promise.resolve(selectRows);
     chain.from = vi.fn(() => chain);
-    chain.where = vi.fn(() => Promise.resolve(selectRows));
+    chain.where = vi.fn(() => {
+      const inner: Record<string, unknown> = {};
+      inner.for = vi.fn(() => finalize);
+      inner.then = finalize.then.bind(finalize);
+      inner.catch = finalize.catch.bind(finalize);
+      return inner;
+    });
     return chain;
   });
 
@@ -227,5 +235,48 @@ describe("writeBiaObservations", () => {
         input: { ...BASE_INPUT, collectedAt: "not-a-date" },
       }),
     ).rejects.toThrow();
+  });
+
+  it("R1-P208 — throws when writeObservation returns null after a soft-delete (concurrent-write detection)", async () => {
+    const { db } = makeDb({
+      // No existing rows on the SELECT → helper goes straight to
+      // the INSERT path. The first INSERT returns null (simulating
+      // an ON CONFLICT from a concurrent writer that won the race).
+      insertReturnings: [null, { id: "obs-2" }, { id: "obs-3" }],
+    });
+    await expect(
+      writeBiaObservations(db, {
+        patientId: PATIENT_ID,
+        input: BASE_INPUT,
+      }),
+    ).rejects.toThrow(/concurrent write/i);
+  });
+
+  it("R1-P199 — two devices on the same date both succeed (different lab_name)", async () => {
+    // Both submissions for the same patient + date but different
+    // devices. Each call sees `existingIds: []` because the
+    // duplicate-detection scope includes `lab_name`. Both proceed
+    // to write 3 observations + 1 audit.
+    const inbody = makeDb({});
+    await writeBiaObservations(inbody.db, {
+      patientId: PATIENT_ID,
+      input: { ...BASE_INPUT, deviceName: "InBody", deviceModel: "770" },
+    });
+    const tanita = makeDb({});
+    const tanitaResult = await writeBiaObservations(tanita.db, {
+      patientId: PATIENT_ID,
+      input: { ...BASE_INPUT, deviceName: "Tanita", deviceModel: "BC-558" },
+    });
+    expect(tanitaResult.status).toBe("created");
+    // Each submission writes 4 inserts (3 observations + 1 audit).
+    expect(inbody.insertValuesArgs).toHaveLength(4);
+    expect(tanita.insertValuesArgs).toHaveLength(4);
+    // The two submissions use distinct labNames — the partial
+    // unique index `(patient_id, collected_at, lab_name, loinc_code)
+    // WHERE source = 'manual_bia'` keeps them disjoint.
+    expect(inbody.insertValuesArgs[0]).toMatchObject({ labName: "InBody 770" });
+    expect(tanita.insertValuesArgs[0]).toMatchObject({
+      labName: "Tanita BC-558",
+    });
   });
 });
