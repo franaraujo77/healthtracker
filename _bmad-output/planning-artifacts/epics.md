@@ -483,6 +483,28 @@ Initialize the monorepo, configure all infrastructure, and establish Sprint 0 no
 
 ---
 
+#### Story 0.8: Capture Epic 0 schema in baseline Supabase migration
+
+**As a** platform engineer,
+**I want** Epic 0's infrastructure schema (pg-boss tables under the `pgboss` schema, any Drizzle-managed setup tables) captured as Supabase migration SQL,
+**So that** a fresh Supabase project can be provisioned from version control without relying on `pnpm db:push`.
+
+**Note:** Epic 0 schema was applied via `pnpm db:push` and `pg-boss` self-bootstrap. The migration SQL for Epic 0 is consolidated into the baseline produced by **Story 3.5** (`0001_baseline_epics_0_to_3.sql`); no separate migration file is required. This story is tracked for traceability.
+
+**Acceptance Criteria:**
+
+**Given** Story 3.5 is `done`,
+**When** I inspect `supabase/migrations/0001_baseline_epics_0_to_3.sql`,
+**Then** the `pgboss` schema (tables, sequences, indexes) and any other Epic 0 setup objects are present and idempotently applicable to a fresh project.
+
+**Given** a fresh Supabase project is created,
+**When** the baseline migration is applied via `supabase db push`,
+**Then** `pg-boss` starts cleanly with no auto-bootstrap divergence from the migration definition.
+
+**Requirements:** AR6, AR7
+
+---
+
 ### Epic 1: Patient Can Create an Account and Their Health Record Begins
 
 A patient can register, give explicit LGPD-compliant consent per data type, enable biometric unlock, and optionally import prior lab results — so their longitudinal record starts on day one, not draw one.
@@ -631,6 +653,28 @@ A patient can register, give explicit LGPD-compliant consent per data type, enab
 **Then** onboarding completes and the import prompt is available from the Início tab empty state.
 
 **Requirements:** FR46, FR1, FR2, AR21, UX-DR10, UX-DR20
+
+---
+
+#### Story 1.6: Capture Epic 1 schema in baseline Supabase migration
+
+**As a** platform engineer,
+**I want** Epic 1's account-and-consent schema (`patients`, `consent_agreements`, `audit_log`, and their RLS policies) captured as Supabase migration SQL,
+**So that** the production database can be reproduced from version control rather than from `pnpm db:push` against a running project.
+
+**Note:** Epic 1 schema was applied via `pnpm db:push`. The migration SQL is consolidated into the baseline produced by **Story 3.5** (`0001_baseline_epics_0_to_3.sql`); no separate migration file is required. This story is tracked for traceability.
+
+**Acceptance Criteria:**
+
+**Given** Story 3.5 is `done`,
+**When** I inspect `supabase/migrations/0001_baseline_epics_0_to_3.sql`,
+**Then** the `patients`, `consent_agreements`, and `audit_log` tables, plus all indexes, triggers, and RLS policies introduced by Epic 1 stories (1.1–1.5), are present in the baseline SQL.
+
+**Given** the baseline is applied to a fresh project,
+**When** `pnpm db:push` runs against that project,
+**Then** Drizzle reports zero pending changes for Epic 1 tables.
+
+**Requirements:** AR6, AR10, NFR-S1
 
 ---
 
@@ -864,6 +908,32 @@ A patient can upload a PDF or camera-roll photo of any Brazilian lab report, wat
 
 ---
 
+#### Story 2.9: Capture Epic 2 schema in baseline Supabase migration
+
+**As a** platform engineer,
+**I want** Epic 2's upload-and-extraction schema (`uploads`, `observations`, `loinc_ref`, `extraction_review_queue`, `push_tokens`, `notification_preferences`, and their RLS policies, partial unique indexes, and triggers) captured as Supabase migration SQL,
+**So that** production schema state is reproducible from version control and the partial-unique-index hazards called out in the Epic 2 retro (Story 2.7 R2-P213) are documented as DDL.
+
+**Note:** Epic 2 schema was applied via `pnpm db:push`. The migration SQL is consolidated into the baseline produced by **Story 3.5** (`0001_baseline_epics_0_to_3.sql`); no separate migration file is required. This story is tracked for traceability.
+
+**Acceptance Criteria:**
+
+**Given** Story 3.5 is `done`,
+**When** I inspect `supabase/migrations/0001_baseline_epics_0_to_3.sql`,
+**Then** all Epic 2 tables, indexes (including partial unique indexes), triggers, and RLS policies introduced by stories 2.1–2.8 are present.
+
+**Given** the baseline contains partial unique indexes,
+**When** the SQL is reviewed,
+**Then** index DDL is written as `CREATE UNIQUE INDEX CONCURRENTLY` (per CLAUDE.md ops note) so future `WHERE`-clause modifications follow the safe pattern from the start.
+
+**Given** the baseline is applied to a fresh project,
+**When** `pnpm db:push` runs against that project,
+**Then** Drizzle reports zero pending changes for Epic 2 tables.
+
+**Requirements:** AR6, AR8, AR10, AR14, NFR-S2
+
+---
+
 ### Epic 3: Patient Can See Their Health Fingerprint Over Time
 
 A patient can view their complete longitudinal biomarker record plotted against their own personal baseline — not a population average — so they see their health as a trajectory rather than a single number.
@@ -982,6 +1052,42 @@ A patient can view their complete longitudinal biomarker record plotted against 
 
 ---
 
+#### Story 3.5: Generate baseline Supabase migration covering Epics 0–3 schema
+
+**As a** platform engineer,
+**I want** a single baseline Supabase migration file that captures every table, column, index, constraint, trigger, and RLS policy introduced by Epics 0, 1, 2, and 3 — schema that today exists only because of repeated `pnpm db:push` invocations against the linked project,
+**So that** the production database becomes reproducible from version control, the `supabase-deploy` GitHub Action stops being a no-op, and future epics (4–8) can add incremental migrations on top of a known baseline.
+
+**Acceptance Criteria:**
+
+**Given** Epics 0–2 are `done` and Epic 3 is `in-progress` with schema applied via `pnpm db:push`,
+**When** I run `supabase db diff --use-migra --linked -f 0001_baseline_epics_0_to_3` against the linked project,
+**Then** a single SQL file is committed at `supabase/migrations/0001_baseline_epics_0_to_3.sql` containing — at minimum — the `pgboss` schema (Epic 0); the `patients`, `consent_agreements`, and `audit_log` tables (Epic 1); the `uploads`, `observations`, `loinc_ref`, `extraction_review_queue`, `push_tokens`, and `notification_preferences` tables (Epic 2); and any Fingerprint-related tables, materialized views, or indexes introduced by Epic 3 stories (3.1–3.4) — each with its RLS policies, triggers, and partial unique indexes.
+
+**Given** the baseline migration is applied to a fresh Supabase project via `supabase db push`,
+**When** `pnpm db:push` is run immediately afterward against the same project,
+**Then** Drizzle reports zero pending changes — confirming end-to-end schema parity between Drizzle source-of-truth and the baseline migration.
+
+**Given** the baseline is merged to `main`,
+**When** the `supabase-deploy` workflow fires automatically (or via `workflow_dispatch`),
+**Then** `supabase db push` applies the baseline to the linked production project idempotently, with no destructive operations against existing tables and with `supabase migration list --linked` showing `0001_baseline_epics_0_to_3` as applied.
+
+**Given** the baseline contains partial unique indexes (per Story 2.7 R2-P213 retro) or any index touching a `WHERE` clause,
+**When** the SQL is reviewed,
+**Then** every `CREATE UNIQUE INDEX` and `DROP INDEX` is written with `CONCURRENTLY`, and the PR description documents the rollout plan and any required maintenance window per the CLAUDE.md ops note.
+
+**Given** the baseline lands,
+**When** subsequent epics (4–8) introduce schema,
+**Then** their respective migration stories (4.4, 5.7, 6.6, 7.5, 8.3) author incremental migration files (`0002_*.sql`, `0003_*.sql`, …) rather than re-baselining — and `pnpm db:push` is no longer used against the production project.
+
+**Given** the migration file is generated,
+**When** the round-2 reviewer audits it,
+**Then** every table in `packages/db/src/schema/*.ts` (excluding `auth-schema.ts`, which Supabase manages) maps to a `CREATE TABLE` statement in the baseline, and any column/index/policy present in Drizzle but missing from the baseline is flagged as a blocker.
+
+**Requirements:** AR6, AR10, AR13, AR14, NFR-S2
+
+---
+
 ### Epic 4: Patient Receives a Personal Health Narrative
 
 A patient receives a streamed, warm, ANVISA-compliant narrative after each draw that reflects their longitudinal patterns — and can tap any biomarker to get a calm, suggested question to raise with their specialist.
@@ -1069,6 +1175,30 @@ A patient receives a streamed, warm, ANVISA-compliant narrative after each draw 
 **Then** `writeAuditLog()` records `biomarker_suggestion.generated` with `patient_id`, `loinc_code`, and timestamp.
 
 **Requirements:** FR50 (Growth), AR9, AR10, AR11, AR12, NFR-S6, UX-DR20
+
+---
+
+#### Story 4.4: Author incremental Supabase migration for Epic 4 schema
+
+**As a** platform engineer,
+**I want** a versioned Supabase migration file that captures every net-new table, column, index, trigger, and RLS policy introduced by Epic 4 (Letter narratives — e.g. `letters`, related staging or cache tables, streaming-state tracking),
+**So that** Letter persistence reaches production through the `supabase-deploy` workflow and is not applied via ad-hoc `pnpm db:push`.
+
+**Acceptance Criteria:**
+
+**Given** Story 3.5 baseline is `done` and Epic 4 stories (4.1–4.3) have landed Drizzle schema for Letters,
+**When** I run `supabase db diff --use-migra --linked -f epic_4_letters` against the linked project,
+**Then** a single SQL file is committed under `supabase/migrations/` (next numeric prefix after the baseline) containing only Epic 4 net-new objects.
+
+**Given** the migration is merged to `main`,
+**When** `supabase-deploy` runs,
+**Then** `supabase db push` applies the migration cleanly and `pnpm db:push` against the linked project reports zero pending changes.
+
+**Given** any index or constraint affects partial uniqueness or hot tables,
+**When** the SQL is reviewed,
+**Then** index DDL uses `CONCURRENTLY` per the CLAUDE.md ops note.
+
+**Requirements:** AR6, AR10, AR11, NFR-S2
 
 ---
 
@@ -1246,6 +1376,30 @@ A patient can configure exactly which biomarkers each doctor sees, generate time
 
 ---
 
+#### Story 5.7: Author incremental Supabase migration for Epic 5 schema
+
+**As a** platform engineer,
+**I want** a versioned Supabase migration file that captures every net-new table, column, index, trigger, and RLS policy introduced by Epic 5 (sharing — `sharing_grants`, time-limited share links, access log entries, export/deletion bookkeeping),
+**So that** sharing and data-subject-rights schema reaches production through the `supabase-deploy` workflow with auditable history.
+
+**Acceptance Criteria:**
+
+**Given** the Story 3.5 baseline is `done` and Epic 5 stories (5.1–5.6) have landed Drizzle schema for sharing/access-log/export/deletion flows,
+**When** I run `supabase db diff --use-migra --linked -f epic_5_sharing` against the linked project,
+**Then** a single SQL file is committed under `supabase/migrations/` containing only Epic 5 net-new objects, including the RLS policies that gate doctor read access and pseudonymization triggers for deletion (per Story 5.6 AR20 ADR).
+
+**Given** the migration is merged to `main`,
+**When** `supabase-deploy` runs,
+**Then** `supabase db push` applies the migration cleanly and `pnpm db:push` against the linked project reports zero pending changes.
+
+**Given** any partial unique index or `WHERE`-clause modification is required,
+**When** the SQL is reviewed,
+**Then** index DDL uses `CONCURRENTLY` per the CLAUDE.md ops note and the rollout plan is documented in the PR.
+
+**Requirements:** AR6, AR10, AR15, AR16, AR20, NFR-S3
+
+---
+
 ### Epic 6: Doctor Can View a Patient's Conversation Starter
 
 A doctor can tap a WhatsApp link, authenticate in one step, and see a pre-generated Conversation Starter report — 3 discussion prompts and biomarker trend cards — within 90 seconds, without installing anything.
@@ -1392,6 +1546,30 @@ A doctor can tap a WhatsApp link, authenticate in one step, and see a pre-genera
 
 ---
 
+#### Story 6.6: Author incremental Supabase migration for Epic 6 schema
+
+**As a** platform engineer,
+**I want** a versioned Supabase migration file that captures every net-new table, column, index, trigger, and RLS policy introduced by Epic 6 (doctor accounts and Conversation Starter — professional account records, staleness threshold configs, doctor→patient invitation links),
+**So that** doctor-side schema reaches production through the `supabase-deploy` workflow.
+
+**Acceptance Criteria:**
+
+**Given** the Story 3.5 baseline is `done` and Epic 6 stories (6.1–6.5) have landed Drizzle schema for doctor accounts, invitations, and staleness configuration,
+**When** I run `supabase db diff --use-migra --linked -f epic_6_doctor_accounts` against the linked project,
+**Then** a single SQL file is committed under `supabase/migrations/` containing only Epic 6 net-new objects, including RLS policies that prevent doctors from reading patient data outside the scope of an active sharing grant.
+
+**Given** the migration is merged to `main`,
+**When** `supabase-deploy` runs,
+**Then** `supabase db push` applies the migration cleanly and `pnpm db:push` against the linked project reports zero pending changes.
+
+**Given** any partial unique index or constraint touches the patient-data path,
+**When** the SQL is reviewed,
+**Then** index DDL uses `CONCURRENTLY` per the CLAUDE.md ops note.
+
+**Requirements:** AR6, AR10, AR15, AR16
+
+---
+
 ### Epic 7: Patient Adds Personal Context to Their Record
 
 A patient can add life events to their Fingerprint timeline, capture their emotional state before and after results, and record a voice memo at upload — so the record reflects lived experience alongside biomarker data.
@@ -1510,6 +1688,30 @@ A patient can add life events to their Fingerprint timeline, capture their emoti
 
 ---
 
+#### Story 7.5: Author incremental Supabase migration for Epic 7 schema
+
+**As a** platform engineer,
+**I want** a versioned Supabase migration file that captures every net-new table, column, index, trigger, and RLS policy introduced by Epic 7 (personal context — life events on the Fingerprint timeline, emotional check-ins pre/post results, voice memo attachments),
+**So that** personal-context schema reaches production through the `supabase-deploy` workflow.
+
+**Acceptance Criteria:**
+
+**Given** the Story 3.5 baseline is `done` and Epic 7 stories (7.1–7.4) have landed Drizzle schema for life events, emotional check-ins, and voice memos,
+**When** I run `supabase db diff --use-migra --linked -f epic_7_personal_context` against the linked project,
+**Then** a single SQL file is committed under `supabase/migrations/` containing only Epic 7 net-new objects, including RLS policies that scope all rows to `auth.uid()` and any storage-bucket references required for voice memo attachments.
+
+**Given** the migration is merged to `main`,
+**When** `supabase-deploy` runs,
+**Then** `supabase db push` applies the migration cleanly and `pnpm db:push` against the linked project reports zero pending changes.
+
+**Given** any index or constraint affects partial uniqueness or hot tables,
+**When** the SQL is reviewed,
+**Then** index DDL uses `CONCURRENTLY` per the CLAUDE.md ops note.
+
+**Requirements:** AR6, AR10
+
+---
+
 ### Epic 8: Operator Can Manage Extraction Quality
 
 An operator can view a queue of low-confidence extraction results (anonymised), confirm or reject individual field values, and see results published to the patient's record — so the confidence gate operates at scale.
@@ -1569,3 +1771,27 @@ An operator can view a queue of low-confidence extraction results (anonymised), 
 **Then** the upload is published with the confirmed fields only; rejected fields are excluded from `observations` and the patient is notified which values need manual entry.
 
 **Requirements:** FR39, FR40, FR41, AR10, AR14, NFR-S7, UX-DR20
+
+---
+
+#### Story 8.3: Author incremental Supabase migration for Epic 8 schema
+
+**As a** platform engineer,
+**I want** a versioned Supabase migration file that captures every net-new table, column, index, trigger, and RLS policy introduced by Epic 8 (operator role for extraction quality — operator role definition, rejection-reason enums or lookup tables, any review-queue columns added beyond the Epic 2 baseline),
+**So that** operator-side schema and the strict anonymising RLS policies reach production through the `supabase-deploy` workflow.
+
+**Acceptance Criteria:**
+
+**Given** the Story 3.5 baseline is `done` and Epic 8 stories (8.1–8.2) have landed Drizzle schema for operator roles and extraction-review workflow extensions,
+**When** I run `supabase db diff --use-migra --linked -f epic_8_operator_review` against the linked project,
+**Then** a single SQL file is committed under `supabase/migrations/` containing only Epic 8 net-new objects, including RLS policies that prevent the operator role from reading `patients.email`, `patients.full_name`, or any personal identifier (per Story 8.1 acceptance criteria).
+
+**Given** the migration is merged to `main`,
+**When** `supabase-deploy` runs,
+**Then** `supabase db push` applies the migration cleanly and `pnpm db:push` against the linked project reports zero pending changes.
+
+**Given** any index or constraint affects partial uniqueness or hot tables,
+**When** the SQL is reviewed,
+**Then** index DDL uses `CONCURRENTLY` per the CLAUDE.md ops note and the rollout plan is documented in the PR.
+
+**Requirements:** AR6, AR10, AR14, NFR-S7
