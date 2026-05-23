@@ -69,6 +69,22 @@ export function useOfflineUploadFlow(): void {
         });
         return true;
       } catch (err) {
+        // R2-P193 — programmer errors (TypeError / ReferenceError /
+        // SyntaxError) are NOT transient and shouldn't burn an
+        // attemptCount. Re-throw so the caller treats them as a
+        // drain-level abort; the outer try/finally still clears the
+        // drainingRef.
+        if (
+          err instanceof TypeError ||
+          err instanceof ReferenceError ||
+          err instanceof SyntaxError
+        ) {
+          console.error(
+            `[offline-upload-flow] programmer error for ${item.clientIdempotencyKey} — aborting drain`,
+            err,
+          );
+          throw err;
+        }
         console.warn(
           `[offline-upload-flow] submit failed for ${item.clientIdempotencyKey}`,
           err,
@@ -150,6 +166,14 @@ export function useOfflineUploadFlow(): void {
 
     const appStateSub = AppState.addEventListener("change", (next) => {
       if (next !== "active") return;
+      // R2-P196 — if we believe we're online AND no drain is in flight,
+      // don't waste a NetInfo round-trip / spurious drain. The
+      // NetInfo listener is the authoritative source for connectivity
+      // changes; AppState is the belt-and-suspenders for "user came
+      // back from a long suspend".
+      if (lastConnectedRef.current === true && !drainingRef.current) {
+        return;
+      }
       void NetInfo.fetch().then((state) => {
         if (state.isConnected) void drain();
       });

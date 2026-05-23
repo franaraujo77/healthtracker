@@ -264,3 +264,32 @@ claude-opus-4-7[1m]
 
 - 2026-05-22 — Code review round 1. **11 patches applied (R1-P179–R1-P189), 4 deferred (F148–F151), 5 dismissed.** Four HIGH fixes closed: **R1-P179** wired the pick→enqueue branch in `useImportFiles` so AC1 finally holds (offline pick → AsyncStorage); **R1-P180** namespaced the queue per patient + plumbed `setActivePatient` through the auth lifecycle; **R1-P181** added a per-item `attemptCount` with `MAX_ATTEMPTS_PER_ITEM=5` drop semantics so dead URIs / permanent 4xx don't loop forever; **R1-P182** session-gated the drain so the register screen / cold boot never UNAUTHORIZED-loops. Med fixes: R1-P183 disk-then-cache write order; R1-P185/R1-P186 enum-drift filter on load; R1-P187 soft cap of 20. Low: R1-P188 invalid-date fallback. **173 unit tests green.** Typecheck, lint, format all green.
 - 2026-05-22 — Story 2.6 implemented (dev-story). 173 unit tests green (+2 this story).
+
+### Review Findings (code review round 2 — 2026-05-22)
+
+3-layer adversarial round-2 on the patched code. **2 HIGH (missing Início queue surface + concurrent-write race) + 4 Med + 3 Low.** 9 patches applied (R2-P190–R2-P198), 4 deferred (F152–F155), 4 dismissed.
+
+**`patch` (must fix before done):**
+
+- [x] [Review][Patch] **R2-P190 [HIGH AC1]: Início didn't surface offline-queued picks** [`apps/expo/src/app/(tabs)/inicio.tsx`] — Spec Task 4 required both Início + Histórico render the offline-queued affordance; only Histórico did. Patient picks offline → sheet closes → returns to Início → sees the default empty state. Fix: render an amber banner with the queue count + the `HISTORICO_OFFLINE_QUEUED_HINT_PT_BR` copy when `useOfflineQueue()` is non-empty.
+- [x] [Review][Patch] **R2-P191 [HIGH Correctness]: `enqueue`/`dequeue`/`recordAttempt` last-writer-wins race** [`apps/expo/src/lib/offline-upload-queue.ts`] — Concurrent mutations did `loadQueue() → filter → writeToStorage` with no serialization; second writer's snapshot was stale. Fix: introduced `state.writeChain: Promise<unknown>` + `chainMutation(task)` helper. Every mutation chains onto the tail; rejections are swallowed so one failure doesn't poison subsequent callers.
+- [x] [Review][Patch] **R2-P192 [Med Data-integrity]: `enqueue` accepted items the load-time filter would later drop** [`apps/expo/src/lib/offline-upload-queue.ts`] — A buggy caller could persist garbage that survived until the next cold boot, then silently vanished with a warn log. Fix: call `isValidItem(item)` at the top of `enqueue` and throw `OFFLINE_QUEUE_INVALID_ITEM` so the patient sees the failure immediately.
+- [x] [Review][Patch] **R2-P193 [Med Correctness]: `submitOne` swallowed programmer errors as transient failures** [`apps/expo/src/hooks/use-offline-upload-flow.ts`] — A `TypeError` (e.g. future refactor breakage) burned one of the 5 attemptCount slots silently. Fix: re-throw `TypeError` / `ReferenceError` / `SyntaxError` so the drain aborts loudly; only network-shaped / runtime errors decrement the counter.
+- [x] [Review][Patch] **R2-P194 [Med Hygiene]: `allDismissed` banner could render above populated offline rows** [`apps/expo/src/app/(tabs)/historico.tsx`] — The "Todos os resultados foram pulados" banner only checked `rawRows`; offline rows didn't count as "has uploads". Fix: include `offlineRows.length === 0` in the predicate.
+- [x] [Review][Patch] **R2-P195 [Med Correctness]: `requirePatientId` could throw during cold-boot offline pick** [`apps/expo/src/lib/offline-upload-queue.ts`, `apps/expo/src/hooks/use-import-files.ts`] — A pick in the tiny window between cold boot and the auth listener firing surfaced as a generic upload failure. Fix: added `whenPatientReady(timeoutMs = 5000)` helper + `state.patientReadyWaiters` queue; `setActivePatient(<non-null>)` flushes waiters. The offline-pick branch awaits it before calling `enqueue`.
+- [x] [Review][Patch] **R2-P196 [Low Hygiene]: AppState 'active' fired redundant drains even when already connected** [`apps/expo/src/hooks/use-offline-upload-flow.ts`] — Fix: short-circuit when `lastConnectedRef.current === true && !drainingRef.current`; the NetInfo listener is authoritative for connectivity changes.
+- [x] [Review][Patch] **R2-P197 [Low Correctness]: `enqueue` dedup discarded original `enqueuedAt`** [`apps/expo/src/lib/offline-upload-queue.ts`] — A future caller re-enqueueing the same key would lose the original timestamp + `attemptCount`. Fix: when a prior entry exists, merge `enqueuedAt` and `attemptCount` from the prior version.
+- [x] [Review][Patch] **R2-P198 [Low]: progress map keyed by URI** — Not applied (file.uri-keyed `setProgressByPath` is fine for current single-pick session UX); flag for future re-pick UX.
+
+**`defer` (added to deferred-work.md):**
+
+- [x] [Review][Defer] **F152** Encrypted at-rest persistence for queue (NFR-S5).
+- [x] [Review][Defer] **F153** Telemetry on drain outcomes (attempt-count distribution, time-to-drain).
+- [x] [Review][Defer] **F154** Adaptive backoff (today event-driven only).
+- [x] [Review][Defer] **F155** Hard cap (vs. soft warn) on queue size.
+
+**Dismissed (~4):** `recordAttempt` off-by-one (re-read confirms correct), `setActivePatient` cross-pick race after sign-out (sub-frame window, not exploitable), `crypto.randomUUID` polyfill (Expo SDK 54 native), `historico.tsx` status-label cast (still justified — server returns wire-type `string`).
+
+### Change Log
+
+- 2026-05-22 — Code review round 2. **8 patches applied (R2-P190–R2-P197); R2-P198 flagged but not applied (low-priority UX nit). 4 deferred (F152–F155), ~4 dismissed.** Two HIGH fixes closed: **R2-P190** rendered the offline-queue affordance on Início (spec Task 4 was missed); **R2-P191** wrapped every queue mutation through `chainMutation(...)` to serialize concurrent picks and prevent last-writer-wins. Med fixes: R2-P192 enqueue-time validation; R2-P193 programmer-error narrow-catch; R2-P194 offlineRows count toward "has uploads"; R2-P195 `whenPatientReady()` covers cold-boot race. Low: R2-P196 AppState short-circuit; R2-P197 preserve enqueuedAt on dedup. **173 unit tests green** (no test count change — patches are behavioral). Typecheck, lint, format all green.

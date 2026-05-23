@@ -2,17 +2,20 @@ import { useEffect, useRef, useState } from "react";
 import { AccessibilityInfo } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Stack, useLocalSearchParams } from "expo-router";
-import { YStack } from "tamagui";
+import { Text, YStack } from "tamagui";
 
 import { EmptyStateRecord, ExtractionPulse } from "@healthtracker/ui";
 import { UploadSourceSheet } from "@healthtracker/ui/upload-source-sheet";
 import {
+  HISTORICO_OFFLINE_QUEUED_HINT_PT_BR,
   INICIO_CTA_PT_BR,
   INICIO_HEADLINE_PT_BR,
   UPLOAD_ALLOWED_MIME_TYPES,
+  UPLOAD_STATUS_LABELS_PT_BR,
 } from "@healthtracker/validators";
 
 import { useImportFiles } from "~/hooks/use-import-files";
+import { useOfflineQueue } from "~/hooks/use-offline-queue";
 
 // SafeAreaView is native and can't read Tamagui tokens — mirror
 // colorTokens.backgroundPrimary.light.
@@ -160,6 +163,14 @@ export default function Inicio() {
   const elapsedMs =
     earliestStart !== undefined ? Math.max(0, nowTick - earliestStart) : 0;
 
+  // R2-P190 — spec Task 4: surface offline-queued picks on Início so
+  // the patient gets a signal that the pick was saved (the picker
+  // sheet just closes; without this banner Início renders the
+  // default empty state and the patient has no idea the queue
+  // captured their file).
+  const offlineRows = useOfflineQueue();
+  const hasOfflineQueued = offlineRows.length > 0;
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: BACKGROUND_PRIMARY }}>
       <Stack.Screen options={{ title: "Início" }} />
@@ -171,6 +182,25 @@ export default function Inicio() {
             elapsedMs={elapsedMs}
             reducedMotion={reducedMotion}
           />
+        ) : null}
+        {hasOfflineQueued ? (
+          <YStack
+            gap="$2"
+            margin="$3"
+            padding="$3"
+            borderRadius="$card"
+            borderWidth={1}
+            borderColor="$warningAmber"
+            backgroundColor="$warningAmberSurface"
+            accessibilityRole="text"
+          >
+            <Text fontWeight="600" color="$textPrimary">
+              {UPLOAD_STATUS_LABELS_PT_BR.offline_queued} ({offlineRows.length})
+            </Text>
+            <Text fontSize="$2" color="$textSecondary">
+              {HISTORICO_OFFLINE_QUEUED_HINT_PT_BR}
+            </Text>
+          </YStack>
         ) : null}
         <EmptyStateRecord
           headline={INICIO_HEADLINE_PT_BR}

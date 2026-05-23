@@ -110,17 +110,20 @@ export default function HistoricoScreen() {
 
   const rawRows = query.data?.rows ?? [];
   const rows = rawRows.filter((r) => !dismissed.has(r.id));
-  // R1-P160 — empty state must distinguish "no uploads ever" from
-  // "all uploads dismissed". The original copy ("Você ainda não
-  // enviou nenhum exame") only fits the first case.
-  const allDismissed =
-    query.isSuccess && rawRows.length > 0 && rows.length === 0;
-
   // Story 2.6 — local-only rows from the offline queue render at the
   // top of the list with the `offline_queued` virtual status. They
   // are NOT in the server's `uploads` table yet; the drain hook
   // submits them as soon as connectivity returns.
   const offlineRows = useOfflineQueue();
+  // R1-P160 — empty state must distinguish "no uploads ever" from
+  // "all uploads dismissed". R2-P194 — offline rows also count as
+  // "has uploads" so the dismiss banner doesn't render above a
+  // populated offline list.
+  const allDismissed =
+    query.isSuccess &&
+    rawRows.length > 0 &&
+    rows.length === 0 &&
+    offlineRows.length === 0;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: BACKGROUND_PRIMARY }}>

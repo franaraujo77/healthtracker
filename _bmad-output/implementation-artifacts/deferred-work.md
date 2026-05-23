@@ -297,3 +297,11 @@
 - **F149** Background drains while app suspended (iOS BGTask / Android WorkManager).
 - **F150** Retry backoff + observability telemetry on drain failures (Sentry / Datadog metric on attemptCount).
 - **F151** Expo test infra + unit tests for queue module + drain hook.
+
+
+## Story 2.6 — round-2 review deferrals (F152–F155)
+
+- **F152** Encrypted at-rest persistence for `@healthtracker/offline-upload-queue/<patientId>` (NFR-S5 follow-up; today the queue is unencrypted in AsyncStorage).
+- **F153** Telemetry on drain outcomes — attemptCount distribution, drop rate, time-to-drain (Sentry / Datadog metric).
+- **F154** Adaptive backoff on `recordAttempt` (currently event-driven via NetInfo / AppState; revisit if field data shows it's needed).
+- **F155** Hard cap (vs. soft warn) on `QUEUE_SOFT_CAP = 20` for multi-day offline scenarios.

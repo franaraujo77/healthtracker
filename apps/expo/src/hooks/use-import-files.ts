@@ -24,7 +24,10 @@ import {
   UPLOAD_UNSUPPORTED_MIME_PT_BR,
 } from "@healthtracker/validators";
 
-import { enqueue as enqueueOffline } from "~/lib/offline-upload-queue";
+import {
+  enqueue as enqueueOffline,
+  whenPatientReady,
+} from "~/lib/offline-upload-queue";
 import { trpcClient } from "~/utils/api";
 
 /**
@@ -446,6 +449,12 @@ export function useImportFiles(options: UseImportFilesOptions) {
           if (netState.isConnected === false) {
             const clientIdempotencyKey = crypto.randomUUID();
             try {
+              // R2-P195 — wait up to 5s for the auth listener to bind
+              // the patient id. Without this, the tiny window between
+              // cold boot and `setActivePatient(...)` throws
+              // `OFFLINE_QUEUE_PATIENT_NOT_READY` and surfaces as a
+              // generic upload failure.
+              await whenPatientReady();
               await enqueueOffline({
                 clientIdempotencyKey,
                 localUri: file.uri,
