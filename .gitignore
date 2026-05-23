@@ -142,3 +142,10 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
 .turbo/
+
+# Drizzle's `migrations/meta/` is regenerated on every `drizzle-kit push`
+# — local-only artifact. Keep the parent `packages/db/migrations/` tracked
+# so any real migration file (e.g. the partial-index CONCURRENTLY pattern
+# the CLAUDE.md ops note calls for) still flows through the CI
+# `drizzle-kit check` + `scripts/check-migration.sh` gates (Story 0.4).
+packages/db/migrations/meta/

@@ -8,6 +8,7 @@
 ALTER TABLE "users" ENABLE ROW LEVEL SECURITY;
 
 -- A patient may read only their own row.
+DROP POLICY IF EXISTS "users_select_own" ON "users";
 CREATE POLICY "users_select_own" ON "users"
   FOR SELECT
   USING (
@@ -16,6 +17,7 @@ CREATE POLICY "users_select_own" ON "users"
 
 -- A patient may insert only their own row (id must equal their auth.uid()).
 -- This is the registration insert performed by account.initializeProfile.
+DROP POLICY IF EXISTS "users_insert_self" ON "users";
 CREATE POLICY "users_insert_self" ON "users"
   FOR INSERT
   WITH CHECK (

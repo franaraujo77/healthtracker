@@ -172,7 +172,7 @@ export const consentRouter = {
   /**
    * Story 1.4 — revokes the patient's currently-active grant of
    * `consentType`. The narrow UPDATE policy in
-   * `custom_rls_consent_grants_revoke.sql` permits only this column
+   * `custom_rls_consent_grants_zz_revoke.sql` permits only this column
    * change, only by the row's owner, only on a currently active row.
    *
    * Idempotent: re-tapping "Retirar" on a row that was already revoked

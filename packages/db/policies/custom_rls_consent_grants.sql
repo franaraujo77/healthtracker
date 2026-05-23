@@ -12,6 +12,7 @@
 ALTER TABLE "consent_grants" ENABLE ROW LEVEL SECURITY;
 
 -- A patient may read only their own consent rows.
+DROP POLICY IF EXISTS "consent_grants_select_own" ON "consent_grants";
 CREATE POLICY "consent_grants_select_own" ON "consent_grants"
   FOR SELECT
   USING (
@@ -20,6 +21,7 @@ CREATE POLICY "consent_grants_select_own" ON "consent_grants"
 
 -- A patient may insert only their own consent rows. The WITH CHECK is the
 -- enforcement seam for AC2 / AC3's "scope cannot be forged".
+DROP POLICY IF EXISTS "consent_grants_insert_own" ON "consent_grants";
 CREATE POLICY "consent_grants_insert_own" ON "consent_grants"
   FOR INSERT
   WITH CHECK (

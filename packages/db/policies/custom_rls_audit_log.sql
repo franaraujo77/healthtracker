@@ -6,6 +6,7 @@
 ALTER TABLE "audit_log" ENABLE ROW LEVEL SECURITY;
 
 -- A patient may write audit rows only for themselves as actor.
+DROP POLICY IF EXISTS "audit_log_insert_own" ON "audit_log";
 CREATE POLICY "audit_log_insert_own" ON "audit_log"
   FOR INSERT
   WITH CHECK (
@@ -13,6 +14,7 @@ CREATE POLICY "audit_log_insert_own" ON "audit_log"
   );
 
 -- A patient may read only their own audit rows (consumed by Story 1.4).
+DROP POLICY IF EXISTS "audit_log_select_own" ON "audit_log";
 CREATE POLICY "audit_log_select_own" ON "audit_log"
   FOR SELECT
   USING (
