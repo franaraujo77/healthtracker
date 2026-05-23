@@ -11,12 +11,14 @@ Full-stack health tracker built as a **pnpm + Turborepo monorepo** sharing code 
 All commands run from the repo root unless noted.
 
 **Development**
+
 ```bash
 pnpm dev           # all apps in parallel (turbo watch)
 pnpm dev:next      # web app only (+ its dependencies)
 ```
 
 **Build / Check**
+
 ```bash
 pnpm build         # all packages
 pnpm typecheck     # tsc across all packages
@@ -26,17 +28,39 @@ pnpm format:fix    # prettier with --write
 ```
 
 **Database**
+
 ```bash
 pnpm db:push       # push Drizzle schema to DB (no migration files)
 pnpm db:studio     # open Drizzle Studio UI
 ```
 
+**Database tests**
+
+```bash
+pnpm --filter @healthtracker/db test:unit         # pure-logic, no DB
+pnpm --filter @healthtracker/db test:rls          # requires `supabase start`
+pnpm --filter @healthtracker/db test:integration  # requires Docker (testcontainers)
+```
+
+`test:integration` launches an ephemeral Postgres 16 container per suite via `@testcontainers/postgresql`, applies the Drizzle schema with `drizzle-kit push --force`, and runs `__tests__/integration/**/*.integration.test.ts`. Use it for cases mocks can't reach — partial-index WHERE clauses, JSONB ops, ON CONFLICT semantics, raw-SQL drift between worker and API. See `packages/db/__tests__/integration/setup.ts`.
+
+> **Ops note (Epic 2 retro / Story 2.7 R2-P213):** `pnpm db:push` is fine for
+> additive column / index changes on a quiet DB. It is **not** safe for
+> altering the `WHERE` clause of a **partial unique index** against
+> production: Drizzle emits `DROP INDEX` + `CREATE UNIQUE INDEX`
+> (non-`CONCURRENTLY`), which takes a `ShareLock` and opens a window for a
+> concurrent insert to violate the new constraint. For those changes write a
+> migration file with `CREATE UNIQUE INDEX CONCURRENTLY ... ; DROP INDEX
+CONCURRENTLY ...` and apply in a maintenance window.
+
 **UI components**
+
 ```bash
 pnpm ui-add        # add a shadcn/ui component to packages/ui
 ```
 
 **Mobile (from `apps/expo/`)**
+
 ```bash
 pnpm dev           # start Expo dev server
 pnpm dev:ios       # iOS simulator
@@ -101,6 +125,15 @@ tooling/{eslint,prettier,tailwind,typescript}  — shared config, no runtime cod
 
 - Components are added via `pnpm ui-add` (shadcn/ui CLI). Do not copy-paste component code manually.
 - All components are re-exported from `packages/ui/src/index.ts`.
+
+## Code review discipline (Epic 1 + Epic 2 retros)
+
+Two rounds of code review per story is a hard process gate, not a recommendation. Patterns that the round-1 → round-2 history has surfaced repeatedly:
+
+- **Narrow catches by default.** Any `try { ... } catch (err) { ... }` in new code must articulate which error shapes it intends to swallow (e.g. `if (err.code === '23505') ...; throw err`). Broad `catch (err)` that fail-opens swallows programmer errors (`TypeError`, `ReferenceError`, `SyntaxError`) and infra faults indistinguishably. The Story 2.5 R2-P193 and Story 2.8 R2-P226 patches both narrowed broad catches after the fact — write them narrow the first time.
+- **Query-param coupling check.** When a route helper adds a query-string flag (`postFooRoute(source)` → `/foo?source=...`), the round-1 reviewer must verify the destination route actually consumes the flag. Story 2.5 R1-P153 shipped a producer with no consumer; R2-P171 had to wire it.
+- **Round-2 hunts what round-1 broke or half-finished.** The recurring shape is "round-1 patch was correct in isolation but wrong when composed with the surrounding system." Round-2 reviewers explicitly look for: dead-code guards (a SELECT already filters by X, then the application code checks X again), TOCTOU on SELECT-EXISTS-then-INSERT (use partial unique indexes + catch 23505 at the helper), partial-index ON-CONFLICT `where` clauses that exclude the very rows they were meant to dedup, query-param producers without consumers, broad `catch` that swallows programmer errors.
+- **Don't use `pnpm db:push` for partial-index `WHERE` changes in prod.** See ops note above.
 
 ## Tooling conventions
 

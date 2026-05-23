@@ -85,6 +85,18 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     ],
     "expo-document-picker",
     [
+      // Story 2.5 / F135 — push notifications. iOS APNs entitlements
+      // and Android FCM are wired by the config plugin; the runtime
+      // hook (`apps/expo/src/hooks/use-push-notifications.ts`) handles
+      // permission request + token registration. Real delivery
+      // requires an EAS project (set `extra.eas.projectId`).
+      "expo-notifications",
+      {
+        icon: "./assets/icon-light.png",
+        color: "#0D6E6E",
+      },
+    ],
+    [
       "expo-splash-screen",
       {
         backgroundColor: "#E4E4E7",

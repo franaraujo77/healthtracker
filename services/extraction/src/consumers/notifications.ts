@@ -34,9 +34,12 @@ interface UploadRow {
   id: string;
   original_filename: string;
   failure_reason: string | null;
-  /** R1-P156 — most-common lab_name across the upload's
-   *  observations; falls back to null when none have published yet
-   *  (typical for `pending_review` or `failed` notifications). */
+  /** R1-P156 + F141 — lab_name as written by the extraction worker's
+   *  dispatcher (dominant lab across published observations). Read
+   *  directly from `uploads.lab_name` since F141; the correlated
+   *  subquery on `observations` is gone. Falls back to null when no
+   *  publishable observation was written (typical for
+   *  `pending_review` / `failed`). */
   lab_name: string | null;
 }
 
@@ -65,7 +68,8 @@ const COPY: Record<NotificationKind, (upload: UploadRow) => NotificationCopy> =
       body: bodyForUpload(u),
     }),
     failed: (u) => ({
-      title: "Não conseguimos processar este arquivo. Toque para ver as opções.",
+      title:
+        "Não conseguimos processar este arquivo. Toque para ver as opções.",
       body: bodyForUpload(u),
     }),
   };
@@ -221,19 +225,15 @@ export async function registerNotificationsConsumer(
           continue;
         }
 
+        // F141 — read lab_name straight from `uploads`; the dispatcher
+        // populates it at observation-publish time (see
+        // `consumers/document.ts`).
         const uploads = await deps.sql<UploadRow[]>`
           SELECT
             u.id,
             u.original_filename,
             u.metadata->>'reason' AS failure_reason,
-            (
-              SELECT lab_name
-              FROM observations
-              WHERE upload_id = u.id AND lab_name IS NOT NULL
-              GROUP BY lab_name
-              ORDER BY count(*) DESC
-              LIMIT 1
-            ) AS lab_name
+            u.lab_name AS lab_name
           FROM uploads u
           WHERE u.id = ${uploadId}::uuid
           LIMIT 1

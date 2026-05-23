@@ -19,6 +19,7 @@ import {
   BIOMETRIC_ENABLED_VALUE,
 } from "~/hooks/use-biometric";
 import { useOfflineUploadFlow } from "~/hooks/use-offline-upload-flow";
+import { usePushNotifications } from "~/hooks/use-push-notifications";
 import { supabase } from "~/lib/supabase";
 import { queryClient, trpcClient } from "~/utils/api";
 
@@ -123,6 +124,10 @@ function RootLayout() {
   // AppState and drains the persisted queue on every reconnect /
   // foreground.
   useOfflineUploadFlow();
+  // Story 2.5 / F135 — push token registration + tap deep-link
+  // handling. Self-skips when there's no signed-in session, no EAS
+  // projectId, or on simulators (see hook for details).
+  usePushNotifications();
   useEffect(() => {
     const {
       data: { subscription },

@@ -57,6 +57,14 @@ export interface DispatchOutcome {
   publishedObservationIds: string[];
   /** R2-P121 — fields that threw mid-dispatch + were quarantined. */
   errorCount: number;
+  /**
+   * Epic 2 retro F141 — most-common lab name across the publishable
+   * fields in this dispatch batch. The caller (document consumer)
+   * UPDATEs `uploads.lab_name` so the notification consumer can
+   * body the push by lab name without a correlated subquery. `null`
+   * when no publishable field carried a non-empty lab name.
+   */
+  dominantLabName: string | null;
 }
 
 function normalizeWhitespace(value: string | undefined): string | null {
@@ -74,6 +82,10 @@ export async function dispatchExtractedFields(
   let conflictCount = 0;
   let errorCount = 0;
   const publishedObservationIds: string[] = [];
+  // F141 — frequency tally of non-null lab names on publishable
+  // fields. Mirrors the GROUP BY count(*) ORDER BY DESC LIMIT 1
+  // semantics the old notification-consumer subquery used.
+  const labNameTally = new Map<string, number>();
 
   for (const field of input.fields) {
     // R2-P122 — guard structurally bad fields BEFORE any normalization.
@@ -192,6 +204,10 @@ export async function dispatchExtractedFields(
       if (row) {
         publishedCount += 1;
         publishedObservationIds.push(row.id);
+        const fieldLab = normalizeWhitespace(field.labName);
+        if (fieldLab !== null) {
+          labNameTally.set(fieldLab, (labNameTally.get(fieldLab) ?? 0) + 1);
+        }
       } else {
         // R2-P115 — already-written observation (crash-recovery
         // resume). Count it so the consumer doesn't dead-letter.
@@ -208,12 +224,22 @@ export async function dispatchExtractedFields(
     }
   }
 
+  let dominantLabName: string | null = null;
+  let dominantCount = 0;
+  for (const [name, count] of labNameTally) {
+    if (count > dominantCount) {
+      dominantLabName = name;
+      dominantCount = count;
+    }
+  }
+
   return {
     publishedCount,
     reviewQueueCount,
     conflictCount,
     errorCount,
     publishedObservationIds,
+    dominantLabName,
   };
 }
 

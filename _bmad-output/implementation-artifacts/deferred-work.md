@@ -249,7 +249,6 @@
 - **F65** Web `validateClientSide` empty `file.type` extension fallback.
 - **F66** Distinct badge copy for `skipped_duplicate` vs `queued`.
 
-
 ## Story 2.4 — round-1 review deferrals (F123–F129)
 
 - **F123** RLS adversarial test for `extraction_review_queue` patient policies (Task 2 listed five cases). Requires local Supabase; carries Story 2.3 family.
@@ -260,7 +259,6 @@
 - **F128** Snapshot-sync test for the worker's raw-SQL `resolveLoincCode` vs `packages/api/src/loinc.ts` (the Drizzle version) — Story 2.3 R1-P110 pattern.
 - **F129** Refetch-on-focus for the web detail screen — `refetchOnWindowFocus` doesn't fire on mobile-web returning from camera/picker. Closed by Story 2.5 realtime.
 
-
 ## Story 2.4 — round-2 review deferrals (F130–F134)
 
 - **F130** Introduce `markReviewQueueResolved` helper for write-path symmetry — `writeReviewQueueEntry` only handles INSERT; the patient-confirm flow does its own raw `database.update`. Sanctioned-write-path discipline would suggest a sibling helper.
@@ -269,10 +267,12 @@
 - **F133** Structured log/metric for the `pending_review` post-confirm branch — already added a `console.warn` (R2-P149); upgrade to a metric so ops dashboards can alert on operator-row orphans.
 - **F134** Snapshot-sync test for `resolveLoincCode` API vs worker SQL — Story 2.3 R1-P110 pattern. The Drizzle and raw-postgres implementations can drift silently.
 
-
 ## Story 2.5 — round-1 review deferrals (F135–F142)
 
 - **F135** Expo client hook (`use-push-notifications.ts`) not shipped — Task 6 fully deferred. Permission request, `getExpoPushTokenAsync`, deep-link listener, `SIGNED_OUT` revoke. Without this, AC2/AC3/AC4 are operationally unverifiable; the tRPC mutation is wired and tested. Land in the EAS-build PR.
+  - **Story 2.5 (this story)** — the deep-link consumer (`?source=...` recovery routes) and the push-payload `data.deepLink` both wait on this hook.
+  - **Story 2.6 (offline queue)** — the `SIGNED_OUT`-triggered token revoke must coordinate with the queue's session-gated drain (queue stops on sign-out; token revoke is the symmetric server-side action).
+  - **Story 2.8 (preferences)** — the OS-permission-denied banner (AC4) and the F177 auto-render rely on `Notifications.getPermissionsAsync()` from this hook.
 - **F136** Expo Push receipt polling — Tickets returned inline may say `ok` while the actual push fails at FCM/APNs. Add a polling consumer on `/--/api/v2/push/getReceipts` with a 24h delivery-rate SLO.
 - **F137** Multi-device push fan-out > 100 tokens — Currently handled via R1-P157 client-side chunking. Long-term, surface ticket failures + add structured logging per token.
 - **F138** Notification preferences (per-event opt-out) — Story 2.8.
@@ -280,7 +280,6 @@
 - **F140** SQL snapshot-sync test for `emitNotificationEvent` vs `enqueueNotificationSend` — Two raw-SQL bodies hand-synced.
 - **F141** Lab-name aggregate column on `uploads` — Paired with R1-P156. Eliminates the per-notification SELECT subquery; populated by the dispatcher.
 - **F142** Web push notifications — Explicit defer per UX-DR4 mobile-first.
-
 
 ## Story 2.5 — round-2 review deferrals (F143–F147)
 
@@ -290,14 +289,12 @@
 - **F146** Vocabulary-rename consumer audit — R1-P161 renamed `empty_extraction` → `no_readable_text`. Sweep future analytics consumers + alert filters when they ship.
 - **F147** Persisted dismiss state for the Histórico failed-card 'Pular' button — currently in React local state, evaporates on tab remount.
 
-
 ## Story 2.6 — round-1 review deferrals (F148–F151)
 
 - **F148** Web offline queue — spec defers; web localStorage is awkward for binary blobs at the patient-upload sizes.
 - **F149** Background drains while app suspended (iOS BGTask / Android WorkManager).
 - **F150** Retry backoff + observability telemetry on drain failures (Sentry / Datadog metric on attemptCount).
 - **F151** Expo test infra + unit tests for queue module + drain hook.
-
 
 ## Story 2.6 — round-2 review deferrals (F152–F155)
 
@@ -306,7 +303,6 @@
 - **F154** Adaptive backoff on `recordAttempt` (currently event-driven via NetInfo / AppState; revisit if field data shows it's needed).
 - **F155** Hard cap (vs. soft warn) on `QUEUE_SOFT_CAP = 20` for multi-day offline scenarios.
 
-
 ## Story 2.7 — round-1 review deferrals (F156–F160)
 
 - **F156** Make `observations.upload_id` nullable so manual BIA doesn't need `SENTINEL_UPLOAD_UUID`. Track after R1-P199's structural fix lands.
@@ -314,7 +310,6 @@
 - **F158** SegmentedControl-style device picker on Expo (current impl is 3 styled Buttons).
 - **F159** Concurrency hardening (FOR UPDATE) across all observation-write paths — Story 2.3 `writeObservation` has the same race in theory.
 - **F160** Audit `resourceType: 'observation_submission'` so single-event-per-submission is semantically distinct from per-row writes elsewhere.
-
 
 ## Story 2.7 — round-2 review deferrals (F161–F166)
 
@@ -325,7 +320,6 @@
 - **F165** Audit `resourceId = observationIds[0]` becomes stale after a future overwrite — replace with an audit-group concept in a later per-observation fan-out story.
 - **F166** Drizzle `db:push` ergonomics for altering partial-index WHERE clauses (broader tooling/devops concern; tracked separately).
 
-
 ## Story 2.8 — round-1 review deferrals (F167–F170)
 
 - **F167** `record_access` notification kind end-to-end — toggle is forward-compat scaffolding; the emitter ships in Story 5.3 (doctor-views-record audit).
@@ -335,14 +329,12 @@
 - **F171** Partial UPSERT for `updatePreferences` — today the helper writes all 4 fields; multi-tab / multi-device toggles can lose updates. Switch to `.partial()` schema + dynamic SET when telemetry shows it matters.
 - **F172** Debounce (300 ms) on the optimistic toggle clients — concurrent mutations race today; defer until field data shows it matters.
 
-
 ## Story 2.8 — round-2 review deferrals (F173–F176)
 
 - **F173** Disable toggles during in-flight mutation (rapid-tap defense). Mutually exclusive with F172 (300ms debounce); F172 owns the resolution.
 - **F174** `onSuccess` overwrite causes brief flicker on staggered toggles — fix by merging instead of overwriting the optimistic state.
 - **F175** Worker preference SELECT not memoized across a job batch (currently one SELECT per job). Acceptable for v1 with `batchSize: 10`; revisit if batches grow.
 - **F176** Differentiate "fail-open infra fault" from "no row → defaults" with a 3-state return or out-of-band metric. Not actionable until an ops dashboard demands it.
-
 
 ## Story 2.8 — round-3 review deferral (F177)
 

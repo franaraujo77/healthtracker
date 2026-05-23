@@ -23,12 +23,20 @@ interface MockSqlBehavior {
 function makeSql(behavior: MockSqlBehavior) {
   let transitionCallIndex = 0;
   let observationCallIndex = 0;
+  const labNameUpdates: { labName: string }[] = [];
   // Story 2.3 R1-P95/P106 — also handles SELECT status (re-query
   // after queued→processing miss). R1-P109 — `.begin()` runs the
   // passed callback with this same sql mock so transaction-scoped
   // INSERTs route through the same handler.
   const sql = vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => {
     const raw = strings.join("?").toLowerCase();
+    // F141 — narrow discriminator: the lab_name UPDATE has `set lab_name`
+    // in its SQL; must be checked BEFORE the generic `update uploads`
+    // branch which consumes the transition-call counter.
+    if (raw.includes("update uploads") && raw.includes("set lab_name")) {
+      labNameUpdates.push({ labName: String(values[0]) });
+      return Promise.resolve([]);
+    }
     if (raw.includes("update uploads")) {
       const rows = behavior.transitionRows[transitionCallIndex++] ?? [];
       return Promise.resolve(rows);
@@ -62,7 +70,7 @@ function makeSql(behavior: MockSqlBehavior) {
   (
     sql as unknown as { begin: (cb: (tx: unknown) => unknown) => unknown }
   ).begin = (cb) => Promise.resolve(cb(sql));
-  return sql;
+  return Object.assign(sql, { __labNameUpdates: labNameUpdates });
 }
 
 function jobPayload(): JobPayload<ExtractDocumentPayload> {
@@ -116,6 +124,57 @@ describe("handleDocumentJob — happy path (all high confidence → complete)", 
     // Two UPDATE uploads calls (queued→processing and processing→complete).
     // No throw means happy path completed.
     expect(sql).toHaveBeenCalled();
+  });
+});
+
+describe("F141 — uploads.lab_name dispatcher write", () => {
+  it("UPDATEs uploads.lab_name to the most-common lab across publishable fields", async () => {
+    const sql = makeSql({
+      transitionRows: [
+        [{ id: UPLOAD_ID, status: "processing" }],
+        [{ id: UPLOAD_ID, status: "complete" }],
+      ],
+      loinc: { hemoglobina: HEMOGLOBINA_LOINC },
+    });
+    await handleDocumentJob(
+      {
+        sql,
+        textractAdapter: mockAdapter([
+          { ...HEMOGLOBINA, labName: "Fleury" },
+          { ...HEMOGLOBINA, biomarkerName: "Hemoglobina", labName: "Fleury" },
+          { ...HEMOGLOBINA, biomarkerName: "Hemoglobina", labName: "Sabin" },
+        ]),
+        downloadStorageObject: mockDownload,
+      },
+      jobPayload(),
+    );
+    const { __labNameUpdates } = sql as unknown as {
+      __labNameUpdates: { labName: string }[];
+    };
+    expect(__labNameUpdates).toHaveLength(1);
+    expect(__labNameUpdates[0]?.labName).toBe("Fleury");
+  });
+
+  it("skips the lab_name UPDATE when no publishable field carried a lab", async () => {
+    const sql = makeSql({
+      transitionRows: [
+        [{ id: UPLOAD_ID, status: "processing" }],
+        [{ id: UPLOAD_ID, status: "complete" }],
+      ],
+      loinc: { hemoglobina: HEMOGLOBINA_LOINC },
+    });
+    await handleDocumentJob(
+      {
+        sql,
+        textractAdapter: mockAdapter([HEMOGLOBINA]),
+        downloadStorageObject: mockDownload,
+      },
+      jobPayload(),
+    );
+    const { __labNameUpdates } = sql as unknown as {
+      __labNameUpdates: { labName: string }[];
+    };
+    expect(__labNameUpdates).toHaveLength(0);
   });
 });
 

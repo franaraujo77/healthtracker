@@ -30,7 +30,27 @@ export const Observations = pgTable(
   (t) => ({
     id: t.uuid().notNull().primaryKey().defaultRandom(),
     patientId: t.uuid().notNull(),
-    uploadId: t.uuid().notNull(),
+    /**
+     * Epic 2 retro F162 — NULLABLE. Manual BIA submissions (Story 2.7)
+     * have no source upload; previously these rows used
+     * `SENTINEL_UPLOAD_UUID = '00000000-…'`, which conflated "no
+     * upload" with a real UUID and forced the partial unique index
+     * to discriminate on `source <> 'manual_bia'` (an indirect
+     * proxy for "extracted-style rows only"). With this column
+     * nullable, manual BIA writes pass `null` directly and the
+     * non-manual partial index uses `upload_id IS NOT NULL` as the
+     * clean discriminator.
+     *
+     * **Ops note:** changing this column from NOT NULL to NULL is a
+     * trivial `ALTER TABLE … ALTER COLUMN upload_id DROP NOT NULL`,
+     * safe via `pnpm db:push`. The accompanying partial-index
+     * WHERE-clause change (`source <> 'manual_bia'` → `upload_id IS
+     * NOT NULL`) is NOT db:push-safe in prod per CLAUDE.md; apply
+     * via `CREATE UNIQUE INDEX CONCURRENTLY` + `DROP INDEX
+     * CONCURRENTLY` in a migration when this lands against a
+     * non-empty production database.
+     */
+    uploadId: t.uuid(),
     // Story 2.3 R1-P102 — NULLABLE per Task 1 spec. The current
     // pipeline routes LOINC-unresolved fields to
     // `extraction_review_queue` so `observations` rows always have a
@@ -63,20 +83,20 @@ export const Observations = pgTable(
   }),
   (table) => [
     // Story 2.3 — dedupes re-processing of the same extraction document.
-    // R1-P199 — partial scope was widened to also exclude manual BIA
-    // rows: every manual BIA shares `SENTINEL_UPLOAD_UUID`, so two
-    // devices on the same day with the same LOINC (e.g. InBody + Tanita
-    // both reporting body-fat %) would collide on this index. Manual
-    // BIA has its own dedup (R1-P199's second index below) keyed on
-    // `lab_name`, so excluding `source='manual_bia'` here is safe.
+    // R1-P199 — partial scope was widened to exclude manual BIA rows
+    // (they shared `SENTINEL_UPLOAD_UUID`, which would have collided
+    // two devices on the same day + same LOINC under this index).
+    // Manual BIA has its own dedup (next index) keyed on `lab_name`.
+    //
+    // Epic 2 retro F162 — discriminator is now `upload_id IS NOT NULL`
+    // since manual BIA rows write `upload_id = NULL` (no source upload)
+    // rather than the sentinel. Equivalent in semantics; cleaner intent.
     //
     // Story 2.7 — partial `WHERE deleted_at IS NULL` so a soft-deleted
     // row doesn't block the new insert on the same key.
     uniqueIndex("observations_patient_upload_loinc_date_unique")
       .on(table.patientId, table.uploadId, table.loincCode, table.collectedAt)
-      .where(
-        sql`${table.deletedAt} IS NULL AND ${table.source} <> 'manual_bia'`,
-      ),
+      .where(sql`${table.deletedAt} IS NULL AND ${table.uploadId} IS NOT NULL`),
     // R1-P199 — manual BIA dedup includes `lab_name` so two devices
     // on the same date don't collide. `writeBiaObservations` enforces
     // the same semantic at the application layer (SELECT-then-UPDATE);

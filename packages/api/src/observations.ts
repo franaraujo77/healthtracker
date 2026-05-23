@@ -5,16 +5,6 @@ import { Observations } from "@healthtracker/db/schema";
 import type { AuditDb } from "./audit";
 import { writeAuditLog } from "./audit";
 
-/**
- * Story 2.7 — manual BIA entries have no source upload. The
- * `observations.upload_id` column is NOT NULL (Story 2.3) so we use
- * a sentinel value; the unique-index dedup `(patient_id, upload_id,
- * loinc_code, collected_at)` accidentally becomes the AC3
- * same-day-same-device dedup seam since every manual BIA shares
- * this upload_id. F-item to make the column nullable.
- */
-export const SENTINEL_UPLOAD_UUID = "00000000-0000-0000-0000-000000000000";
-
 /** BIA top-3 LOINC + UCUM mapping (mirrors `packages/db/seed/loinc-ref.ts`). */
 const BIA_BIOMARKERS = [
   {
@@ -39,7 +29,12 @@ const BIA_BIOMARKERS = [
 
 export interface ObservationInsert {
   patientId: string;
-  uploadId: string;
+  /**
+   * Epic 2 retro F162 — nullable. Manual BIA submissions (Story 2.7)
+   * pass `null` since there is no source upload; extraction-pipeline
+   * inserts pass the real upload UUID.
+   */
+  uploadId: string | null;
   /**
    * Story 2.3 R1-P102 — NULLABLE. The pipeline routes LOINC-unresolved
    * fields to `extraction_review_queue` so `observations` rows
@@ -93,7 +88,7 @@ export async function writeObservation(
     .insert(Observations)
     .values({
       patientId: entry.patientId,
-      uploadId: entry.uploadId,
+      uploadId: entry.uploadId ?? null,
       loincCode: entry.loincCode ?? null,
       biomarkerName: entry.biomarkerName,
       valueNumeric: String(entry.valueNumeric),
@@ -112,14 +107,14 @@ export async function writeObservation(
       source: entry.source,
     })
     // R1-P201 — explicit `where` so PG matches the partial unique
-    // index `WHERE deleted_at IS NULL AND source <> 'manual_bia'`.
+    // index `WHERE deleted_at IS NULL AND upload_id IS NOT NULL`.
     // Without it, the planner can't disambiguate which partial index
     // the ON CONFLICT targets when multiple cover the same columns.
-    // Manual BIA inserts never participate in this conflict (the
-    // partial WHERE excludes `source='manual_bia'`); they have their
-    // own application-level dedup in `writeBiaObservations`.
+    // Manual BIA inserts (upload_id IS NULL) never participate in
+    // this conflict (F162); they have their own application-level
+    // dedup in `writeBiaObservations`.
     .onConflictDoNothing({
-      where: sql`${Observations.deletedAt} IS NULL AND ${Observations.source} <> 'manual_bia'`,
+      where: sql`${Observations.deletedAt} IS NULL AND ${Observations.uploadId} IS NOT NULL`,
       target: [
         Observations.patientId,
         Observations.uploadId,
@@ -242,7 +237,8 @@ export async function writeBiaObservations(
       const valueNumeric = input[biomarker.field];
       const row = await writeObservation(database, {
         patientId,
-        uploadId: SENTINEL_UPLOAD_UUID,
+        // F162 — manual BIA has no source upload.
+        uploadId: null,
         loincCode: biomarker.loincCode,
         biomarkerName: biomarker.biomarkerName,
         valueNumeric,

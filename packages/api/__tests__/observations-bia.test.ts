@@ -3,10 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { BiaSubmissionInput } from "@healthtracker/validators";
 
 import type { AuditDb } from "../src/audit";
-import {
-  SENTINEL_UPLOAD_UUID,
-  writeBiaObservations,
-} from "../src/observations";
+import { writeBiaObservations } from "../src/observations";
 
 const PATIENT_ID = "11111111-1111-1111-1111-111111111111";
 
@@ -123,7 +120,8 @@ describe("writeBiaObservations", () => {
     // muscle, body fat.
     expect(insertValuesArgs[0]).toMatchObject({
       patientId: PATIENT_ID,
-      uploadId: SENTINEL_UPLOAD_UUID,
+      // F162 — manual BIA writes NULL upload_id (no source upload).
+      uploadId: null,
       loincCode: "73711-2",
       unitUcum: "cm2",
       source: "manual_bia",

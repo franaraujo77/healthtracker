@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, uniqueIndex } from "drizzle-orm/pg-core";
+import { index, pgTable, uniqueIndex } from "drizzle-orm/pg-core";
 
 /**
  * `audit_log` — append-only record of actions taken on patient data (AR10).
@@ -37,5 +37,15 @@ export const AuditLog = pgTable(
       .where(
         sql`${table.event} IN ('notification.upload_complete', 'notification.upload_pending_review', 'notification.upload_failed')`,
       ),
+    // Epic 2 retro action item — anticipatory index for Story 5.3's
+    // doctor-access-log SELECT ("show me every actor that touched my
+    // record, newest first"). The composite supports both the
+    // patient-scoped query (`actor_id = $patient` ORDER BY created_at
+    // desc) and the per-event-class filter Story 5.3 will need.
+    index("audit_log_actor_event_created_idx").on(
+      table.actorId,
+      table.event,
+      sql`${table.createdAt} desc`,
+    ),
   ],
 );

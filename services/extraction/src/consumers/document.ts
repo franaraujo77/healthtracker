@@ -174,6 +174,18 @@ export async function handleDocumentJob(
         fields,
       });
 
+      // Epic 2 retro F141 — set `uploads.lab_name` to the most-common
+      // lab across this dispatch's publishable fields so the
+      // notification consumer doesn't need the correlated subquery
+      // on `observations`. Only updates when the dispatch yielded a
+      // non-null winner; existing values are intentionally overwritten
+      // on re-dispatch since the latest extraction is most authoritative.
+      if (outcome.dominantLabName !== null) {
+        await tx`UPDATE uploads
+          SET lab_name = ${outcome.dominantLabName}
+          WHERE id = ${uploadId}::uuid`;
+      }
+
       // R1-P93 — emit one `observation.write` audit event per
       // newly-published observation. ON-CONFLICT no-op observations
       // (re-processed) intentionally don't re-audit.
