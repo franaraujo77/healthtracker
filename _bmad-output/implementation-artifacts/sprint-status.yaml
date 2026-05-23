@@ -36,6 +36,20 @@
 
 generated: 2026-05-15
 last_updated: 2026-05-23
+# Story 3.4 spec created → ready-for-dev. Final story of Epic 3.
+# Adds offline-cached Fingerprint via `@tanstack/react-query-persist-client`
+# v5 + `@tanstack/query-async-storage-persister` (NEW deps, version-aligned
+# to TanStack Query catalog ^5.90.8). Per-patient namespaced AsyncStorage
+# (mirrors Story 2.6 offline-upload-queue pattern). Whitelisted dehydrate
+# to `observations.getRecord` + `observations.getPersonalBaseline` only
+# (LGPD hygiene). 24h stale threshold via new
+# `FINGERPRINT_CACHE_STALE_THRESHOLD_MS` constant; amber treatment on
+# the "Última atualização" label (NEVER red — UX spec line 1079).
+# Auto-refetch on NetInfo rising-edge mirrors Story 2.6 R2-P196 dedup
+# pattern. NEW hooks: `use-net-info`, `use-cache-refetch-on-online`,
+# `use-query-cache-lifecycle`. NEW lib: `query-cache-persister.ts`.
+# No new API / no new audit kinds / no DB changes. Strict client-only.
+# After Story 3.4 done → `epic-3-retrospective` slot becomes available.
 # Story 3.3 implementation complete → review. NEW tRPC procedure
 # `getPersonalBaseline` (single SQL aggregate; soft-delete-filtered;
 # emits `observation.baseline.read` audit). `FingerprintChart` extended
@@ -208,7 +222,22 @@ development_status:
   # partial unique index whose WHERE predicate doesn't match the
   # aggregate's filter. No other R3 findings; no R1/R2 dismissals reversed.
   3-3-patient-views-the-fingerprint-at-draw-2-with-personal-baseline-band: done
-  3-4-patient-views-cached-fingerprint-data-while-offline: backlog
+  # round-1 patches applied: R1-P270 fix tRPC query-key shape — TanStack v5
+  # keys queries as `[['<router>','<procedure>'], { input?, type? }]` not as
+  # a dotted string (CRITICAL — `shouldPersistQuery` returned false for
+  # everything → AC5/AC6/AC7 silent no-ops; `FINGERPRINT_CACHE_QUERY_KEYS`
+  # missed every live query → AC4 auto-refetch was a no-op), R1-P271 add
+  # `bootstrapped` gate to `useQueryCacheLifecycle` so the `<Stack>` subtree
+  # waits for the persister to bind before Início's `useQuery` runs (HIGH
+  # AC7 hydration race). R1-P272/P273/P274 declined or informational.
+  # round-2 patches applied: R2-P275 wipe in-memory `observations.getRecord`
+  # / `observations.getPersonalBaseline` on SIGNED_OUT — `invalidateQueries`
+  # marks stale but does NOT remove data, and persister restore MERGES into
+  # cache → cross-patient leak on household-shared device (HIGH; R1
+  # "Cross-patient cache leak" cross-cutting dismissal REVERSED), R2-P276
+  # defensive 2 s timeout on bootstrap gate so a hung `getSession()` can't
+  # leave the whole RootLayout subtree permanently blank (MED).
+  3-4-patient-views-cached-fingerprint-data-while-offline: done
   epic-3-retrospective: optional
 
   # Epic 4: Patient Receives a Personal Health Narrative

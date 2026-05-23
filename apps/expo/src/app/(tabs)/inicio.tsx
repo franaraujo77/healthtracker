@@ -14,8 +14,14 @@ import {
 } from "@healthtracker/ui";
 import { UploadSourceSheet } from "@healthtracker/ui/upload-source-sheet";
 import {
+  FINGERPRINT_CACHE_FRESH_A11Y_PT_BR,
+  FINGERPRINT_CACHE_STALE_A11Y_PT_BR,
+  FINGERPRINT_CACHE_STALE_HINT_PT_BR,
+  FINGERPRINT_CACHE_STALE_THRESHOLD_MS,
+  FINGERPRINT_CACHE_UPDATED_AT_PREFIX_PT_BR,
   FINGERPRINT_PARTIAL_EMPTY_CTA_PT_BR,
   FINGERPRINT_PARTIAL_EMPTY_HEADLINE_PT_BR,
+  formatCachedUpdatedAtPtBr,
   HISTORICO_OFFLINE_QUEUED_HINT_PT_BR,
   INICIO_ADD_MEASUREMENT_CTA_PT_BR,
   INICIO_CTA_DRAW_ONE_PT_BR,
@@ -24,12 +30,15 @@ import {
   INICIO_FINGERPRINT_LOADING_PT_BR,
   INICIO_HEADLINE_DRAW_ONE_PT_BR,
   INICIO_HEADLINE_PT_BR,
+  INICIO_OFFLINE_UPLOAD_DISABLED_PT_BR,
   MANUAL_BIA_ROUTE,
   UPLOAD_ALLOWED_MIME_TYPES,
   UPLOAD_STATUS_LABELS_PT_BR,
 } from "@healthtracker/validators";
 
+import { useCacheRefetchOnOnline } from "~/hooks/use-cache-refetch-on-online";
 import { useImportFiles } from "~/hooks/use-import-files";
+import { useNetInfoExternal } from "~/hooks/use-net-info";
 import { useOfflineQueue } from "~/hooks/use-offline-queue";
 import { trpc } from "~/utils/api";
 
@@ -39,6 +48,25 @@ const BACKGROUND_PRIMARY = "#F9F7F4";
 
 const PDF_ONLY_ACCEPT = [UPLOAD_ALLOWED_MIME_TYPES[0]] as const;
 const ELAPSED_TICK_MS = 1000;
+
+/**
+ * Story 3.4 — the two query-key path filters consumed by
+ * `useCacheRefetchOnOnline`. Hoisted to module scope so the array
+ * identity is stable (the hook's `useEffect` dep includes it).
+ *
+ * R1-P270 — `@trpc/tanstack-react-query` v11 keys queries as
+ * `[['<router>', '<procedure>'], { input?, type? }]`. The first
+ * element of the key is the PATH ARRAY (`['observations','getRecord']`)
+ * — NOT a dotted string. `queryClient.invalidateQueries({ queryKey })`
+ * does prefix-match against the array head, so we pass the wrapping
+ * `[['observations','getRecord']]` shape to match every variant
+ * (input, type=any/infinite) of the procedure. Order matches the
+ * dehydrate whitelist in `apps/expo/src/utils/api.tsx::PERSIST_QUERY_KEYS`.
+ */
+const FINGERPRINT_CACHE_QUERY_KEYS: readonly (readonly unknown[])[] = [
+  [["observations", "getRecord"]],
+  [["observations", "getPersonalBaseline"]],
+] as const;
 
 export default function Inicio() {
   // R2-P171 — auto-open the source-picker when Story 2.5's
@@ -100,6 +128,19 @@ export default function Inicio() {
       sub.remove();
     };
   }, []);
+
+  // Story 3.4 — connectivity-aware label + disabled-CTA branches.
+  // `isConnected === false` means definitively offline; `null` (unknown)
+  // is treated as online (don't false-alarm patients on a slow first
+  // NetInfo emit).
+  const { isConnected } = useNetInfoExternal();
+  const isOffline = isConnected === false;
+
+  // Story 3.4 AC4 — invalidate the Fingerprint queries on a NetInfo
+  // rising-edge transition (offline → online). The keys are memoized
+  // via the module-scope `FINGERPRINT_CACHE_QUERY_KEYS` constant so
+  // the hook's effect dep array stays stable across renders.
+  useCacheRefetchOnOnline(FINGERPRINT_CACHE_QUERY_KEYS);
 
   // Story 2.1 — drive the ExtractionPulse patience-pattern copy from a
   // 1 s tick. Only run the interval while we have an active upload —
@@ -394,6 +435,44 @@ export default function Inicio() {
     }
   }, [baselineQuery.isError, baselineQuery.error]);
 
+  // Story 3.4 — cached-data freshness label (AC1, AC3). We render the
+  // "Última atualização: …" label whenever the data the patient is
+  // currently looking at came from the persisted cache, not a fresh
+  // fetch. The conservative signal is `isOffline` (the user is on
+  // airplane mode / no connectivity — anything visible is necessarily
+  // cached); we deliberately do NOT render the label while online to
+  // avoid noise on the happy path. The threshold-based amber
+  // treatment (`isStale`) is a separate axis evaluated only when the
+  // label is rendered.
+  const recordUpdatedAt = recordQuery.dataUpdatedAt;
+  const baselineUpdatedAt = baselineQuery.dataUpdatedAt;
+  const effectiveUpdatedAt = Math.max(recordUpdatedAt, baselineUpdatedAt);
+  const hasCachedFingerprint =
+    effectiveUpdatedAt > 0 && recordQuery.data !== undefined;
+  const showCachedLabel = hasCachedFingerprint && isOffline;
+  const isCacheStale =
+    showCachedLabel &&
+    nowTick - effectiveUpdatedAt > FINGERPRINT_CACHE_STALE_THRESHOLD_MS;
+  const cachedFormatted = showCachedLabel
+    ? formatCachedUpdatedAtPtBr(effectiveUpdatedAt)
+    : "";
+  const cachedA11y = showCachedLabel
+    ? isCacheStale
+      ? FINGERPRINT_CACHE_STALE_A11Y_PT_BR(cachedFormatted)
+      : FINGERPRINT_CACHE_FRESH_A11Y_PT_BR(cachedFormatted)
+    : "";
+
+  // Story 3.4 — keep the freshness label's stale evaluation honest
+  // across long idle periods. The existing `nowTick` from the active-
+  // upload interval only ticks while an upload is in flight. Add a
+  // lightweight 60s tick while the cached label is visible so a
+  // 23h59m → 24h00m crossover surfaces without a navigation event.
+  useEffect(() => {
+    if (!showCachedLabel) return;
+    const id = setInterval(() => setNowTick(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, [showCachedLabel]);
+
   // Story 3.2 Task 3.6 — swap the primary `EmptyStateRecord` copy at
   // `drawCount === 1` so the headline + CTA reflect "continue
   // building" instead of "start". At `drawCount === 0` (and on
@@ -409,6 +488,28 @@ export default function Inicio() {
     <SafeAreaView style={{ flex: 1, backgroundColor: BACKGROUND_PRIMARY }}>
       <Stack.Screen options={{ title: "Início" }} />
       <YStack flex={1} backgroundColor="$backgroundPrimary">
+        {showCachedLabel ? (
+          <YStack
+            paddingHorizontal="$3"
+            paddingTop="$3"
+            paddingBottom="$1"
+            accessibilityRole="text"
+            accessibilityLabel={cachedA11y}
+          >
+            <Text
+              fontSize="$3"
+              color={isCacheStale ? "$biomarkerDeviation" : "$textSecondary"}
+            >
+              {FINGERPRINT_CACHE_UPDATED_AT_PREFIX_PT_BR}
+              {cachedFormatted}
+            </Text>
+            {isCacheStale ? (
+              <Text fontSize="$2" color="$textSecondary">
+                {FINGERPRINT_CACHE_STALE_HINT_PT_BR}
+              </Text>
+            ) : null}
+          </YStack>
+        ) : null}
         {hasActive ? (
           <ExtractionPulse
             state="processing"
@@ -446,10 +547,28 @@ export default function Inicio() {
             <EmptyStateRecord
               headline={FINGERPRINT_PARTIAL_EMPTY_HEADLINE_PT_BR}
               ctaLabel={FINGERPRINT_PARTIAL_EMPTY_CTA_PT_BR}
-              onCtaPress={() => setSheetOpen(true)}
+              // Story 3.4 AC2 — when offline, opening the sheet would
+              // surface CTAs the patient can't use; short-circuit the
+              // tap and let the inline-disabled-hint below explain.
+              onCtaPress={() => {
+                if (isOffline) return;
+                setSheetOpen(true);
+              }}
               variant="inline"
               state="partial"
             />
+            {isOffline ? (
+              <YStack paddingHorizontal="$4" paddingBottom="$2">
+                <Text
+                  fontSize="$2"
+                  color="$textSecondary"
+                  textAlign="center"
+                  accessibilityRole="text"
+                >
+                  {INICIO_OFFLINE_UPLOAD_DISABLED_PT_BR}
+                </Text>
+              </YStack>
+            ) : null}
           </>
         ) : null}
         {showFingerprintBaseline ? (
@@ -504,16 +623,42 @@ export default function Inicio() {
               // onboarding upload-source sheet. Story 1.5's recovery
               // path (`/onboarding/import` URL) is still reachable
               // directly; the CTA no longer routes to it.
-              onCtaPress={() => setSheetOpen(true)}
+              // Story 3.4 AC2 — short-circuit offline taps; the
+              // inline hint below explains.
+              onCtaPress={() => {
+                if (isOffline) return;
+                setSheetOpen(true);
+              }}
             />
+            {isOffline ? (
+              <YStack paddingHorizontal="$4" paddingBottom="$2">
+                <Text
+                  fontSize="$2"
+                  color="$textSecondary"
+                  textAlign="center"
+                  accessibilityRole="text"
+                >
+                  {INICIO_OFFLINE_UPLOAD_DISABLED_PT_BR}
+                </Text>
+              </YStack>
+            ) : null}
             {/* Story 2.7 — secondary "Adicionar medição" CTA opens
                 the manual BIA form. Story 3.3 AC5 suppresses both
                 this and the primary EmptyStateRecord at drawCount>=2
                 (the patient with a Fingerprint should see their
                 Fingerprint, not an upload prompt; uploads remain
-                reachable via Histórico). */}
+                reachable via Histórico).
+                Story 3.4 AC2 — disabled offline; the local-only
+                manual-BIA form still requires the submit to reach
+                the server, so offline entry can't complete. */}
             <YStack paddingHorizontal="$3" paddingBottom="$3">
-              <Button onPress={() => router.push(MANUAL_BIA_ROUTE)}>
+              <Button
+                disabled={isOffline}
+                onPress={() => {
+                  if (isOffline) return;
+                  router.push(MANUAL_BIA_ROUTE);
+                }}
+              >
                 {INICIO_ADD_MEASUREMENT_CTA_PT_BR}
               </Button>
             </YStack>
@@ -525,8 +670,8 @@ export default function Inicio() {
           onPickPdf={() => void handlePickPdf()}
           onPickImageFromLibrary={() => void handlePickImageLibrary()}
           onPickImageFromCamera={() => void handlePickImageCamera()}
-          pdfDisabled={isUploading}
-          photoDisabled={isUploading}
+          pdfDisabled={isUploading || isOffline}
+          photoDisabled={isUploading || isOffline}
         />
       </YStack>
     </SafeAreaView>

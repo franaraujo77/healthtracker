@@ -1170,3 +1170,63 @@ export function FINGERPRINT_BASELINE_A11Y_LABEL_PT_BR(args: {
 export const INICIO_FINGERPRINT_LOADING_PT_BR = "Carregando seu Fingerprint…";
 export const INICIO_FINGERPRINT_ERROR_PT_BR =
   "Não conseguimos carregar seu Fingerprint agora. Tente novamente em instantes.";
+
+// =============================================================================
+// Story 3.4 — Offline-cached Fingerprint surface
+// =============================================================================
+
+/**
+ * Story 3.4 AC3 — threshold at which the cached "Última atualização"
+ * label switches from `$textSecondary` to `$biomarkerDeviation` (amber).
+ * Single named constant — no magic numbers in the component.
+ */
+export const FINGERPRINT_CACHE_STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000;
+
+/** AC1 — pt-BR label prefix. Concatenated with `formatCachedUpdatedAtPtBr`. */
+export const FINGERPRINT_CACHE_UPDATED_AT_PREFIX_PT_BR = "Última atualização: ";
+
+/** AC3 — subtext rendered below the amber label when stale. */
+export const FINGERPRINT_CACHE_STALE_HINT_PT_BR =
+  "Pode não refletir seu exame mais recente.";
+
+/** AC3 — composite a11y label (fresh state). Colour is never the only signal (NFR-A4). */
+export function FINGERPRINT_CACHE_FRESH_A11Y_PT_BR(formatted: string): string {
+  return `Última atualização em ${formatted}.`;
+}
+
+/** AC3 — composite a11y label (stale state, > 24h). */
+export function FINGERPRINT_CACHE_STALE_A11Y_PT_BR(formatted: string): string {
+  return `Última atualização em ${formatted}. Há mais de 24 horas. Pode não refletir seu exame mais recente.`;
+}
+
+/** AC2 — disabled-state hint shown when the patient taps an upload CTA offline. */
+export const INICIO_OFFLINE_UPLOAD_DISABLED_PT_BR =
+  "Conecte-se à internet para enviar um novo exame.";
+
+/**
+ * AC1 — format an epoch millisecond timestamp as `DD/MM/AAAA HH:mm`
+ * (pt-BR, 24-hour clock). Unlike `formatCollectedAtPtBr` (which works
+ * on `yyyy-mm-dd` date-only strings and dodges the UTC-midnight
+ * off-by-one bug — see R3-P246), this helper takes a true `Date.now()`
+ * epoch value, so `new Date(epochMs)` is correct and timezone-aware
+ * by definition. Do NOT call this helper with a `yyyy-mm-dd` string;
+ * use `formatCollectedAtPtBr` for date-only collection dates.
+ */
+export function formatCachedUpdatedAtPtBr(epochMs: number): string {
+  // Guard against degenerate input — `dataUpdatedAt` can be `0` from
+  // TanStack Query when the query has never resolved. Surface as
+  // the i18n placeholder so the UI doesn't render "01/01/1970 00:00".
+  if (!Number.isFinite(epochMs) || epochMs <= 0) {
+    return UNKNOWN_DATE_PT_BR;
+  }
+  const d = new Date(epochMs);
+  if (Number.isNaN(d.getTime())) return UNKNOWN_DATE_PT_BR;
+  return d.toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}

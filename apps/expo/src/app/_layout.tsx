@@ -1,11 +1,13 @@
 import type { AuthChangeEvent } from "@supabase/supabase-js";
-import { useEffect } from "react";
+import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
 import * as Linking from "expo-linking";
 import { router, Stack } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { StatusBar } from "expo-status-bar";
 import * as Sentry from "@sentry/react-native";
 import { QueryClientProvider } from "@tanstack/react-query";
+import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 
 import { sentryBeforeSend } from "@healthtracker/config";
 import { TamaguiProvider } from "@healthtracker/ui";
@@ -14,14 +16,85 @@ import {
   ONBOARDING_CONSENT_ROUTE,
 } from "@healthtracker/validators";
 
+import type { QueryCachePersister } from "~/lib/query-cache-persister";
 import {
   BIOMETRIC_ENABLED_KEY,
   BIOMETRIC_ENABLED_VALUE,
 } from "~/hooks/use-biometric";
 import { useOfflineUploadFlow } from "~/hooks/use-offline-upload-flow";
 import { usePushNotifications } from "~/hooks/use-push-notifications";
+import { useQueryCacheLifecycle } from "~/hooks/use-query-cache-lifecycle";
+import {
+  getActivePersister,
+  QUERY_CACHE_MAX_AGE_MS,
+  subscribeToPersister,
+} from "~/lib/query-cache-persister";
 import { supabase } from "~/lib/supabase";
-import { queryClient, trpcClient } from "~/utils/api";
+import { queryClient, shouldPersistQuery, trpcClient } from "~/utils/api";
+
+/**
+ * Story 3.4 — persister-aware QueryClient wrapper.
+ *
+ * Architecture lines 478–483 originally specced `fingerprint-cache.ts`
+ * as a Zustand store. By Story 3.3 the Fingerprint data already flows
+ * through TanStack Query; re-projecting it into Zustand would have
+ * doubled the source-of-truth. The persist-client variant is a strict
+ * improvement: single source of truth, persisted to disk for offline
+ * replay. See Story 3.4 Dev Notes § "Why persisted React Query, not
+ * Zustand". This is the divergence-from-architecture pointer.
+ *
+ * Why a wrapper (and not always `PersistQueryClientProvider`)? The
+ * persister is `null` until the auth listener fires
+ * `setActiveQueryCachePatient(session.user.id)`. Mounting
+ * `PersistQueryClientProvider` with `persister: null` is unsupported;
+ * we fall back to the bare `QueryClientProvider` until the bind
+ * happens, then re-mount with the persister. AC7's hydration race is
+ * preserved because `useQueryCacheLifecycle` calls
+ * `setActiveQueryCachePatient` BEFORE the tabs subtree mounts — by
+ * the time Início mounts and its `useQuery` runs, the persister
+ * (and its hydrated cache) is already wired.
+ */
+function QueryProviderWithPersistence({
+  children,
+}: {
+  children: ReactNode;
+}): ReactNode {
+  const [persister, setPersister] = useState<QueryCachePersister | null>(() =>
+    getActivePersister(),
+  );
+
+  useEffect(() => {
+    const unsubscribe = subscribeToPersister((next) => {
+      setPersister(next);
+    });
+    return unsubscribe;
+  }, []);
+
+  if (persister !== null) {
+    return (
+      <PersistQueryClientProvider
+        client={queryClient}
+        persistOptions={{
+          persister,
+          maxAge: QUERY_CACHE_MAX_AGE_MS,
+          dehydrateOptions: {
+            shouldDehydrateQuery: (query) => shouldPersistQuery(query.queryKey),
+          },
+        }}
+        onSuccess={() => {
+          // Defensive no-op here — Story 2.6 owns the upload-side
+          // paused-mutation drain via `useOfflineUploadFlow`.
+          void queryClient.resumePausedMutations();
+        }}
+      >
+        {children}
+      </PersistQueryClientProvider>
+    );
+  }
+  return (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  );
+}
 
 // Module-scope guard (P6) so HMR / Fast Refresh remounts don't re-fire
 // the cold-launch lock redirect mid-session. `useRef` in the component
@@ -124,6 +197,17 @@ function RootLayout() {
   // AppState and drains the persisted queue on every reconnect /
   // foreground.
   useOfflineUploadFlow();
+  // Story 3.4 — bind the React Query persister to the current
+  // patient on SIGNED_IN / cold-launch and clear it on SIGNED_OUT.
+  // Mounted BEFORE the tabs subtree so the persister is wired before
+  // Início's `useQuery` runs (AC7 hydration race).
+  //
+  // R1-P271 — `bootstrapped` flips after the initial `getSession()`
+  // resolves; the children subtree is gated on this flag so a
+  // returning patient never sees Início render against a bare
+  // `QueryClientProvider` before the persister binds. Cold-launch
+  // with no session also flips the flag (anonymous flows unblocked).
+  const { bootstrapped: persisterBootstrapped } = useQueryCacheLifecycle();
   // Story 2.5 / F135 — push token registration + tap deep-link
   // handling. Self-skips when there's no signed-in session, no EAS
   // projectId, or on simulators (see hook for details).
@@ -134,6 +218,30 @@ function RootLayout() {
     } = supabase.auth.onAuthStateChange((event) => {
       if (AUTH_INVALIDATING_EVENTS.includes(event)) {
         void queryClient.invalidateQueries();
+      }
+      // R2-P275 — Story 3.4: cross-patient in-memory cache leak. On
+      // SIGNED_OUT (account switch within the same JS context), the
+      // previous patient's `observations.getRecord` /
+      // `observations.getPersonalBaseline` data stays in the in-memory
+      // QueryCache. `invalidateQueries()` above only marks queries
+      // stale (it does NOT clear data), and the new patient's
+      // `PersistQueryClientProvider` restore merges their persisted
+      // state but does NOT wipe the existing in-memory entries when
+      // their storage is empty (see `persistQueryClientRestore` →
+      // `hydrate` semantics in @tanstack/query-persist-client-core).
+      // Net effect without this patch: a household-shared device that
+      // signs out patient A and signs in patient B briefly renders
+      // patient A's last Fingerprint on B's first Início render
+      // until B's network refetch completes. `removeQueries` wipes
+      // the in-memory cache for the two whitelisted Fingerprint
+      // procedures so the cross-patient flash is impossible.
+      if (event === "SIGNED_OUT") {
+        queryClient.removeQueries({
+          queryKey: [["observations", "getRecord"]],
+        });
+        queryClient.removeQueries({
+          queryKey: [["observations", "getPersonalBaseline"]],
+        });
       }
       // P10 — Account switching: clear the previous patient's biometric
       // preference on sign-out so the cold-launch gate doesn't ask a
@@ -244,19 +352,21 @@ function RootLayout() {
 
   return (
     <TamaguiProvider>
-      <QueryClientProvider client={queryClient}>
-        <Stack
-          screenOptions={{
-            headerStyle: {
-              backgroundColor: HEADER_BG,
-            },
-            contentStyle: {
-              backgroundColor: CONTENT_BG,
-            },
-          }}
-        />
+      <QueryProviderWithPersistence>
+        {persisterBootstrapped ? (
+          <Stack
+            screenOptions={{
+              headerStyle: {
+                backgroundColor: HEADER_BG,
+              },
+              contentStyle: {
+                backgroundColor: CONTENT_BG,
+              },
+            }}
+          />
+        ) : null}
         <StatusBar />
-      </QueryClientProvider>
+      </QueryProviderWithPersistence>
     </TamaguiProvider>
   );
 }
