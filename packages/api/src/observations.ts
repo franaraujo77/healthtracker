@@ -227,31 +227,60 @@ export async function writeBiaObservations(
 
   // 3-way fan-out. Each insert goes through `writeObservation` (the
   // single sanctioned write path).
+  //
+  // R2-P211 — `writeObservation`'s `onConflictDoNothing` clause only
+  // targets the non-manual partial index (the `where` excludes
+  // `source='manual_bia'`), so a race with another concurrent
+  // submission would raise PG's `unique_violation` (SQLSTATE 23505)
+  // against the BIA partial index. Catch it explicitly and translate
+  // to the same `duplicate` response the SELECT-FOR-UPDATE path
+  // returns when a prior row was found — the client renders the
+  // overwrite confirmation modal and the patient retries.
   const observationIds: string[] = [];
-  for (const biomarker of BIA_BIOMARKERS) {
-    const valueNumeric = input[biomarker.field];
-    const row = await writeObservation(database, {
-      patientId,
-      uploadId: SENTINEL_UPLOAD_UUID,
-      loincCode: biomarker.loincCode,
-      biomarkerName: biomarker.biomarkerName,
-      valueNumeric,
-      unitUcum: biomarker.unitUcum,
-      labName,
-      collectedAt,
-      confidenceScore: 1.0,
-      source: "manual_bia",
-    });
-    if (!row) {
-      // ON CONFLICT — shouldn't happen because we just soft-deleted
-      // any prior rows. If it does, the partial unique index says
-      // a non-deleted same-key row exists; surface as a server
-      // error so the client knows to refetch + retry.
-      throw new Error(
-        "writeBiaObservations: ON CONFLICT after soft-delete — concurrent write?",
-      );
+  try {
+    for (const biomarker of BIA_BIOMARKERS) {
+      const valueNumeric = input[biomarker.field];
+      const row = await writeObservation(database, {
+        patientId,
+        uploadId: SENTINEL_UPLOAD_UUID,
+        loincCode: biomarker.loincCode,
+        biomarkerName: biomarker.biomarkerName,
+        valueNumeric,
+        unitUcum: biomarker.unitUcum,
+        labName,
+        collectedAt,
+        confidenceScore: 1.0,
+        source: "manual_bia",
+      });
+      if (!row) {
+        // Defensive: `onConflictDoNothing` doesn't target the BIA
+        // partial index, so this branch should never fire in
+        // production. Keep the throw for visibility if the index
+        // setup ever changes.
+        throw new Error(
+          "writeBiaObservations: ON CONFLICT after soft-delete — concurrent write?",
+        );
+      }
+      observationIds.push(row.id);
     }
-    observationIds.push(row.id);
+  } catch (err) {
+    // R2-P211 — unique_violation against the BIA partial index ⇒
+    // a concurrent submission won the race; surface as a duplicate
+    // so the client renders the overwrite modal.
+    const code =
+      typeof err === "object" && err !== null && "code" in err
+        ? (err as { code: unknown }).code
+        : undefined;
+    if (code === "23505") {
+      console.warn(
+        `[writeBiaObservations] 23505 race for patient=${patientId} date=${collectedAtIso} lab=${labName}`,
+      );
+      return {
+        status: "duplicate",
+        existingObservationIds: [],
+      };
+    }
+    throw err;
   }
 
   // AC2 — single audit event per submission, with `observationIds`

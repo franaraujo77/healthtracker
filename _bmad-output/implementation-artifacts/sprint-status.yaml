@@ -112,6 +112,12 @@ development_status:
   # R1-P205 useEffect-scoped redirect timer, R1-P206 clear error on
   # success, R1-P207 cancelable: false Expo Alert, R1-P208 ON-CONFLICT
   # + two-device test coverage.
+  # round-2 patches applied: R2-P211 catch 23505 from BIA partial
+  # index → duplicate response (HIGH regression), R2-P212 replaced
+  # R1-P208 dead-code test with real 23505-path coverage, R2-P214
+  # shared-mock backing store for two-device test (theatre fix),
+  # R2-P216 explicit date-parts narrowing. R2-P213/P215/P217
+  # documented; F161–F166 deferred.
   2-8-patient-manages-push-notification-preferences: backlog
   epic-2-retrospective: optional
 

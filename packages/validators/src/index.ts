@@ -78,7 +78,18 @@ export const BiaSubmissionSchema = z
       // (server-side defense-in-depth — the client already does this).
       .refine(
         (s) => {
-          const [yStr, mStr, dStr] = s.split("-");
+          // R2-P216 — explicit narrowing of the regex-matched parts.
+          // `noUncheckedIndexedAccess` makes `split` results typed
+          // `string | undefined`; without the early-return the
+          // `Number(undefined) === NaN` path was correct only by
+          // accident (NaN compares false everywhere).
+          const parts = s.split("-");
+          const yStr = parts[0];
+          const mStr = parts[1];
+          const dStr = parts[2];
+          if (yStr === undefined || mStr === undefined || dStr === undefined) {
+            return false;
+          }
           const y = Number(yStr);
           const m = Number(mStr);
           const d = Number(dStr);

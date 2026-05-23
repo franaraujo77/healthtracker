@@ -314,3 +314,13 @@
 - **F158** SegmentedControl-style device picker on Expo (current impl is 3 styled Buttons).
 - **F159** Concurrency hardening (FOR UPDATE) across all observation-write paths — Story 2.3 `writeObservation` has the same race in theory.
 - **F160** Audit `resourceType: 'observation_submission'` so single-event-per-submission is semantically distinct from per-row writes elsewhere.
+
+
+## Story 2.7 — round-2 review deferrals (F161–F166)
+
+- **F161** Future-date cap on `BiaSubmissionSchema.collectedAt` — today accepts `2099-12-31`. Add `<= today + 1d` (timezone buffer) once patient-timezone semantics are settled.
+- **F162** Make `observations.upload_id` nullable to eliminate `SENTINEL_UPLOAD_UUID` (already noted; size as a small DB migration story).
+- **F163** Replace Expo `Alert` with a custom Tamagui Modal so Android back-button isn't blocked by `cancelable: false`.
+- **F164** Document `.for("update")` lock semantics — empty SELECT acquires no lock; the BIA partial unique index is the real concurrency guard (R2-P211 covers the 23505 surface).
+- **F165** Audit `resourceId = observationIds[0]` becomes stale after a future overwrite — replace with an audit-group concept in a later per-observation fan-out story.
+- **F166** Drizzle `db:push` ergonomics for altering partial-index WHERE clauses (broader tooling/devops concern; tracked separately).

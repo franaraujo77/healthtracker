@@ -237,46 +237,169 @@ describe("writeBiaObservations", () => {
     ).rejects.toThrow();
   });
 
-  it("R1-P208 — throws when writeObservation returns null after a soft-delete (concurrent-write detection)", async () => {
-    const { db } = makeDb({
-      // No existing rows on the SELECT → helper goes straight to
-      // the INSERT path. The first INSERT returns null (simulating
-      // an ON CONFLICT from a concurrent writer that won the race).
-      insertReturnings: [null, { id: "obs-2" }, { id: "obs-3" }],
+  it("R2-P212 — translates PG unique_violation (23505) on the BIA partial index to a `duplicate` response", async () => {
+    // R2-P211 — manual_bia inserts can't ON-CONFLICT-no-op because
+    // `writeObservation`'s `where` clause excludes them; a race with
+    // a concurrent submission raises `unique_violation`. The helper
+    // catches SQLSTATE 23505 and surfaces it as a duplicate so the
+    // client renders the overwrite modal.
+    const selectRows: { id: string }[] = [];
+    const selectFn = vi.fn(() => {
+      const chain: Record<string, unknown> = {};
+      const finalize = Promise.resolve(selectRows);
+      chain.from = vi.fn(() => chain);
+      chain.where = vi.fn(() => {
+        const inner: Record<string, unknown> = {};
+        inner.for = vi.fn(() => finalize);
+        return inner;
+      });
+      return chain;
     });
+    const insertFn = vi.fn(() => {
+      const chain: Record<string, unknown> = {};
+      chain.values = vi.fn(() => {
+        const err: { code: string } & Error = Object.assign(
+          new Error("duplicate key value"),
+          { code: "23505" },
+        );
+        return {
+          onConflictDoNothing: vi.fn(() => ({
+            returning: vi.fn(() => Promise.reject(err)),
+          })),
+        };
+      });
+      return chain;
+    });
+    const db = {
+      select: selectFn,
+      update: vi.fn(),
+      insert: insertFn,
+    } as unknown as AuditDb;
+
+    const result = await writeBiaObservations(db, {
+      patientId: PATIENT_ID,
+      input: BASE_INPUT,
+    });
+    expect(result.status).toBe("duplicate");
+  });
+
+  it("R2-P212 — non-23505 errors still bubble out (programmer errors aren't translated to duplicate)", async () => {
+    const { db } = makeDb({});
+    // Force a TypeError mid-insert by tampering with the mock.
+    const broken = {
+      ...db,
+      insert: vi.fn(() => {
+        throw new TypeError("downstream crashed");
+      }),
+    } as unknown as AuditDb;
     await expect(
-      writeBiaObservations(db, {
+      writeBiaObservations(broken, {
         patientId: PATIENT_ID,
         input: BASE_INPUT,
       }),
-    ).rejects.toThrow(/concurrent write/i);
+    ).rejects.toThrow(TypeError);
   });
 
-  it("R1-P199 — two devices on the same date both succeed (different lab_name)", async () => {
-    // Both submissions for the same patient + date but different
-    // devices. Each call sees `existingIds: []` because the
-    // duplicate-detection scope includes `lab_name`. Both proceed
-    // to write 3 observations + 1 audit.
-    const inbody = makeDb({});
-    await writeBiaObservations(inbody.db, {
+  it("R2-P214 — two devices on the same date both succeed against a shared mock backing store", async () => {
+    // R2-P214 — the original R1-P199 test used two independent
+    // mocks; both saw an empty queue and trivially passed. This
+    // version maintains a shared `rowStore` that records inserts
+    // and serves the SELECT-FOR-UPDATE from accumulated state, so
+    // the second device's duplicate-detection query actually sees
+    // the first device's rows.
+    interface StoredRow {
+      labName: string;
+      collectedAt: string;
+      patientId: string;
+      source: string;
+    }
+    const rowStore: StoredRow[] = [];
+    let nextInsertId = 0;
+    const makeSharedDb = (queryLabName: string): AuditDb => {
+      // SELECT returns rows that match the helper's WHERE
+      // predicate (patient + date + lab + source + not soft-deleted).
+      const matching = rowStore
+        .filter(
+          (r) =>
+            r.patientId === PATIENT_ID &&
+            r.collectedAt === BASE_INPUT.collectedAt &&
+            r.labName === queryLabName &&
+            r.source === "manual_bia",
+        )
+        .map((_, i) => ({ id: `existing-${i}` }));
+      const selectFn = vi.fn(() => {
+        const chain: Record<string, unknown> = {};
+        chain.from = vi.fn(() => chain);
+        chain.where = vi.fn(() => {
+          const inner: Record<string, unknown> = {};
+          inner.for = vi.fn(() => Promise.resolve(matching));
+          return inner;
+        });
+        return chain;
+      });
+      const insertFn = vi.fn(() => {
+        const chain: Record<string, unknown> = {};
+        chain.values = vi.fn((arg: unknown) => {
+          const v = arg as {
+            labName?: string;
+            collectedAt?: string;
+            patientId?: string;
+            source?: string;
+          };
+          // Only observation inserts have these fields; audit rows
+          // skip storage (we only care about the unique-index sim).
+          if (
+            v.labName !== undefined &&
+            v.collectedAt !== undefined &&
+            v.patientId !== undefined &&
+            v.source !== undefined
+          ) {
+            rowStore.push({
+              labName: v.labName,
+              collectedAt: v.collectedAt,
+              patientId: v.patientId,
+              source: v.source,
+            });
+          }
+          nextInsertId += 1;
+          const id = `obs-${nextInsertId}`;
+          return {
+            onConflictDoNothing: vi.fn(() => ({
+              returning: vi.fn(() => Promise.resolve([{ id }])),
+            })),
+          };
+        });
+        return chain;
+      });
+      return {
+        select: selectFn,
+        update: vi.fn(),
+        insert: insertFn,
+      } as unknown as AuditDb;
+    };
+
+    const r1 = await writeBiaObservations(makeSharedDb("InBody 770"), {
       patientId: PATIENT_ID,
       input: { ...BASE_INPUT, deviceName: "InBody", deviceModel: "770" },
     });
-    const tanita = makeDb({});
-    const tanitaResult = await writeBiaObservations(tanita.db, {
+    expect(r1.status).toBe("created");
+    // Second device — the shared `rowStore` now contains 3 manual_bia
+    // rows from the first submission, but the duplicate-detection
+    // scope is keyed on `lab_name` so "Tanita BC-558" sees zero
+    // matches and proceeds to write.
+    const r2 = await writeBiaObservations(makeSharedDb("Tanita BC-558"), {
       patientId: PATIENT_ID,
       input: { ...BASE_INPUT, deviceName: "Tanita", deviceModel: "BC-558" },
     });
-    expect(tanitaResult.status).toBe("created");
-    // Each submission writes 4 inserts (3 observations + 1 audit).
-    expect(inbody.insertValuesArgs).toHaveLength(4);
-    expect(tanita.insertValuesArgs).toHaveLength(4);
-    // The two submissions use distinct labNames — the partial
-    // unique index `(patient_id, collected_at, lab_name, loinc_code)
-    // WHERE source = 'manual_bia'` keeps them disjoint.
-    expect(inbody.insertValuesArgs[0]).toMatchObject({ labName: "InBody 770" });
-    expect(tanita.insertValuesArgs[0]).toMatchObject({
-      labName: "Tanita BC-558",
-    });
+    expect(r2.status).toBe("created");
+    // 6 manual_bia rows total in the shared store (3 per submission).
+    const manualBiaRows = rowStore.filter((r) => r.source === "manual_bia");
+    expect(manualBiaRows).toHaveLength(6);
+    expect(
+      manualBiaRows.filter((r) => r.labName === "InBody 770"),
+    ).toHaveLength(3);
+    expect(
+      manualBiaRows.filter((r) => r.labName === "Tanita BC-558"),
+    ).toHaveLength(3);
   });
 });
