@@ -238,7 +238,7 @@ development_status:
   # defensive 2 s timeout on bootstrap gate so a hung `getSession()` can't
   # leave the whole RootLayout subtree permanently blank (MED).
   3-4-patient-views-cached-fingerprint-data-while-offline: done
-  epic-3-retrospective: optional
+  epic-3-retrospective: done
 
   # Epic 4: Patient Receives a Personal Health Narrative
   epic-4: backlog
