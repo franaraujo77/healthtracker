@@ -115,6 +115,52 @@ export function buildNotificationPayload(
   }));
 }
 
+/**
+ * Story 2.8 — preference gate. Maps the `kind` to the matching
+ * `notification_preferences` column and returns true when the
+ * patient has muted that family. A missing row (first-time patient)
+ * is treated as all-true (no mute).
+ *
+ * Kind → column mapping (mirrors API helper docs):
+ *   - complete       → results_ready
+ *   - pending_review → review_required
+ *   - failed         → results_ready (folded into the same toggle;
+ *                                     spec Clarification #1)
+ */
+export async function isPreferenceMuted(
+  sql: postgres.Sql,
+  patientId: string,
+  kind: NotificationKind,
+): Promise<boolean> {
+  const rows = await sql<
+    {
+      results_ready: boolean;
+      letters_ready: boolean;
+      record_access: boolean;
+      review_required: boolean;
+    }[]
+  >`
+    SELECT results_ready, letters_ready, record_access, review_required
+    FROM notification_preferences
+    WHERE patient_id = ${patientId}::uuid
+    LIMIT 1
+  `;
+  const row = rows[0];
+  if (!row) return false; // No row → all-true defaults; never muted.
+  switch (kind) {
+    case "complete":
+    case "failed":
+      return row.results_ready === false;
+    case "pending_review":
+      return row.review_required === false;
+    default: {
+      const exhaustive: never = kind;
+      void exhaustive;
+      return false;
+    }
+  }
+}
+
 export async function registerNotificationsConsumer(
   boss: PgBoss,
   deps: {
@@ -129,6 +175,16 @@ export async function registerNotificationsConsumer(
       for (const job of jobs) {
         const { uploadId, kind } = job.data.payload;
         const patientId = job.data.patientId;
+
+        // Story 2.8 — preference gate. Skip the Expo Push POST when
+        // the patient has muted the matching event family. Missing
+        // row (first-time patient) is treated as all-true.
+        if (await isPreferenceMuted(deps.sql, patientId, kind)) {
+          console.log(
+            `[notification.send] patientId=${patientId} kind=${kind}: muted by preference — skipping`,
+          );
+          continue;
+        }
 
         const uploads = await deps.sql<UploadRow[]>`
           SELECT

@@ -153,6 +153,45 @@ export const BIA_DUPLICATE_MODAL_CANCEL_PT_BR = "Cancelar";
 export const INICIO_ADD_MEASUREMENT_CTA_PT_BR =
   "Adicionar medição (Bioimpedância)";
 
+// =============================================================================
+// Story 2.8 — Push notification preferences
+// =============================================================================
+
+/**
+ * Story 2.8 — patient preferences for the 4 notification event
+ * families. The worker (`services/extraction/src/consumers/
+ * notifications.ts`) reads the row at dispatch time and skips the
+ * Expo Push POST when the relevant column is `false`. Defaults are
+ * all `true` (opt-out model) — both at the column-default layer and
+ * at the API helper's synthetic-default fallback for first-time
+ * patients with no row.
+ */
+export const NotificationPreferencesSchema = z.object({
+  resultsReady: z.boolean(),
+  lettersReady: z.boolean(),
+  recordAccess: z.boolean(),
+  reviewRequired: z.boolean(),
+});
+export type NotificationPreferencesInput = z.infer<
+  typeof NotificationPreferencesSchema
+>;
+
+export const NOTIFICATIONS_SETTINGS_ROUTE = "/configuracoes/notificacoes";
+
+export const NOTIFICATIONS_SETTINGS_TITLE_PT_BR = "Notificações";
+export const NOTIF_PREF_RESULTS_READY_PT_BR = "Resultados prontos";
+export const NOTIF_PREF_LETTERS_READY_PT_BR = "Cartas prontas";
+export const NOTIF_PREF_RECORD_ACCESS_PT_BR = "Acesso ao histórico";
+export const NOTIF_PREF_REVIEW_REQUIRED_PT_BR = "Confirmação necessária";
+export const NOTIF_PREF_LOADING_PT_BR = "Carregando…";
+export const NOTIF_PREF_ERROR_PT_BR =
+  "Não conseguimos salvar — tente novamente.";
+export const NOTIF_OS_DENIED_BANNER_PT_BR =
+  "As notificações estão desativadas no sistema. Toque para ativar nas configurações do dispositivo.";
+export const NOTIF_OS_DENIED_HINT_PT_BR = "(desativado no sistema)";
+
+export const NOTIFICATIONS_SETTINGS_LINK_LABEL_PT_BR = "Notificações";
+
 // Story 2.5 — Histórico tab + push-notification copy.
 export const HISTORICO_ROUTE = "/inicio/historico";
 export const HISTORICO_TITLE_PT_BR = "Histórico";

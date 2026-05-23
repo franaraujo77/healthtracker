@@ -1,7 +1,14 @@
 import type { TRPCRouterRecord } from "@trpc/server";
 import { z } from "zod/v4";
 
-import { revokePushTokenByDevice, writePushToken } from "../notifications";
+import { NotificationPreferencesSchema } from "@healthtracker/validators";
+
+import {
+  getNotificationPreferences,
+  revokePushTokenByDevice,
+  writeNotificationPreferences,
+  writePushToken,
+} from "../notifications";
 import { protectedProcedure } from "../trpc";
 
 // R2-P174 — tighten the format check. The original `startsWith`/
@@ -57,5 +64,27 @@ export const notificationsRouter = {
       const patientId = ctx.session.user.id;
       await revokePushTokenByDevice(ctx.db, patientId, input.deviceId);
       return { ok: true as const };
+    }),
+
+  /**
+   * Story 2.8 — read the patient's notification preferences. Returns
+   * synthetic all-true defaults when no row exists.
+   */
+  getPreferences: protectedProcedure.query(async ({ ctx }) => {
+    const patientId = ctx.session.user.id;
+    return getNotificationPreferences(ctx.db, patientId);
+  }),
+
+  /**
+   * Story 2.8 — UPSERT the patient's notification preferences.
+   * Returns the post-write row so the client can sync optimistic
+   * state with the server's view (defense against a stale toggle
+   * being re-sent during a debounce window).
+   */
+  updatePreferences: protectedProcedure
+    .input(NotificationPreferencesSchema)
+    .mutation(async ({ ctx, input }) => {
+      const patientId = ctx.session.user.id;
+      return writeNotificationPreferences(ctx.db, patientId, input);
     }),
 } satisfies TRPCRouterRecord;

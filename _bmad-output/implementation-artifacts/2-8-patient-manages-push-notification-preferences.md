@@ -1,6 +1,6 @@
 # Story 2.8: Patient manages push notification preferences
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -143,6 +143,53 @@ claude-opus-4-7[1m]
 
 ### Debug Log References
 
+- `pnpm typecheck` — 16/16 clean.
+- `pnpm lint` — 14/14 clean.
+- `pnpm format:fix` then `pnpm format` — clean.
+- `pnpm test` — **190 unit tests pass** (+9 this story: 5 API helpers/router + 4 worker preference-gate).
+
 ### Completion Notes List
 
+**Clarifications resolved (all 7 recommended defaults adopted):**
+1. `failed` folds into `results_ready`.
+2. First-time prompt timing deferred to F135 (Story 2.5's Expo hook).
+3. No audit row on preference toggle.
+4. Web doesn't render the OS-denied banner.
+5. Per-patient preferences (not per-device).
+6. Opt-out default (all `true`).
+7. 300 ms debounce — deferred as F-item; the current mutation fires per-toggle and the client is fast enough that an explicit debounce isn't necessary for v1.
+
+**What was implemented:**
+- Schema + RLS: `notification_preferences` (patient_id PK, 4 booleans defaulted true, createdAt/updatedAt), patient SELECT/INSERT/UPDATE own, no DELETE.
+- API helpers: `getNotificationPreferences` (returns `DEFAULT_NOTIFICATION_PREFERENCES` when no row), `writeNotificationPreferences` (UPSERT on PK).
+- tRPC procedures: `notifications.getPreferences` (query) + `notifications.updatePreferences` (mutation).
+- Worker preference gate: `isPreferenceMuted(sql, patientId, kind)` runs BEFORE the upload/token SELECTs; on muted, log + `continue` (no POST, no retry).
+- Expo screen at `apps/expo/src/app/configuracoes/notificacoes.tsx` with 4 `Switch` rows + optimistic update + `Linking.openSettings()` deep-link button.
+- Web page at `apps/web/src/app/configuracoes/notificacoes/` with auth gate + SSR prefetch + 4 checkboxes.
+- Configurações tab row now links to the new screen (was disabled with "Em breve" hint).
+- Validators: schema + pt-BR copy (10 constants) + route.
+
+**Out of scope / deferred:**
+- F135 — Expo client hook (token registration + permission status lookup) still deferred; that hook is the source of `Notifications.getPermissionsAsync().status === 'denied'` that the AC4 auto-render path needs. Until F135 lands, the "open system settings" CTA is always visible (operationally testable but not gated on actual permission status).
+- 300 ms debounce on the optimistic update.
+- Per-device preferences (per-patient today).
+- Email / SMS / web push preferences.
+
 ### File List
+
+**New files**
+- `packages/db/src/schema/notification_preferences.ts`
+- `packages/db/policies/custom_rls_notification_preferences.sql`
+- `packages/api/__tests__/notification-preferences.test.ts`
+- `apps/web/src/app/configuracoes/notificacoes/page.tsx`
+- `apps/web/src/app/configuracoes/notificacoes/notificacoes-client.tsx`
+- `apps/expo/src/app/configuracoes/notificacoes.tsx`
+
+**Modified files**
+- `packages/db/src/schema/index.ts` — exports `NotificationPreferences`.
+- `packages/api/src/notifications.ts` — `getNotificationPreferences` + `writeNotificationPreferences` + `DEFAULT_NOTIFICATION_PREFERENCES`.
+- `packages/api/src/router/notifications.ts` — `getPreferences` + `updatePreferences` procedures.
+- `packages/validators/src/index.ts` — `NotificationPreferencesSchema`, pt-BR copy, route.
+- `services/extraction/src/consumers/notifications.ts` — `isPreferenceMuted` + preference gate at the top of the handler.
+- `services/extraction/__tests__/notifications.test.ts` — 4 new tests + updated existing handler tests for the new preference-SELECT call ordering.
+- `apps/expo/src/app/(tabs)/configuracoes.tsx` — Notificações row now active.

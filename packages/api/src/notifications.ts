@@ -1,5 +1,6 @@
-import { sql } from "@healthtracker/db";
-import { PushTokens } from "@healthtracker/db/schema";
+import type { NotificationPreferencesInput } from "@healthtracker/validators";
+import { eq, sql } from "@healthtracker/db";
+import { NotificationPreferences, PushTokens } from "@healthtracker/db/schema";
 
 import type { AuditDb } from "./audit";
 
@@ -126,4 +127,81 @@ export async function revokePushTokenByDevice(
       AND device_id = ${deviceId}::uuid
       AND revoked_at IS NULL
   `);
+}
+
+/**
+ * Story 2.8 — synthetic default preferences for first-time patients
+ * with no row in `notification_preferences`. Mirrors the column
+ * defaults (all `true`); having the default in code AND the schema is
+ * defense-in-depth — the worker's `getNotificationPreferences` path
+ * never has to know about the schema column defaults.
+ */
+export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferencesInput = {
+  resultsReady: true,
+  lettersReady: true,
+  recordAccess: true,
+  reviewRequired: true,
+};
+
+/**
+ * Story 2.8 — read the patient's notification preferences. Returns
+ * synthetic all-true defaults when no row exists (first-time patient).
+ */
+export async function getNotificationPreferences(
+  database: AuditDb,
+  patientId: string,
+): Promise<NotificationPreferencesInput> {
+  const [row] = await database
+    .select({
+      resultsReady: NotificationPreferences.resultsReady,
+      lettersReady: NotificationPreferences.lettersReady,
+      recordAccess: NotificationPreferences.recordAccess,
+      reviewRequired: NotificationPreferences.reviewRequired,
+    })
+    .from(NotificationPreferences)
+    .where(eq(NotificationPreferences.patientId, patientId))
+    .limit(1);
+  return row ?? DEFAULT_NOTIFICATION_PREFERENCES;
+}
+
+/**
+ * Story 2.8 — sanctioned write path for `notification_preferences`.
+ * UPSERTs on the `patient_id` primary key so the first toggle
+ * doesn't need a separate INSERT path. Returns the post-write row.
+ */
+export async function writeNotificationPreferences(
+  database: AuditDb,
+  patientId: string,
+  prefs: NotificationPreferencesInput,
+): Promise<NotificationPreferencesInput> {
+  const [row] = await database
+    .insert(NotificationPreferences)
+    .values({
+      patientId,
+      resultsReady: prefs.resultsReady,
+      lettersReady: prefs.lettersReady,
+      recordAccess: prefs.recordAccess,
+      reviewRequired: prefs.reviewRequired,
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: NotificationPreferences.patientId,
+      set: {
+        resultsReady: prefs.resultsReady,
+        lettersReady: prefs.lettersReady,
+        recordAccess: prefs.recordAccess,
+        reviewRequired: prefs.reviewRequired,
+        updatedAt: new Date(),
+      },
+    })
+    .returning({
+      resultsReady: NotificationPreferences.resultsReady,
+      lettersReady: NotificationPreferences.lettersReady,
+      recordAccess: NotificationPreferences.recordAccess,
+      reviewRequired: NotificationPreferences.reviewRequired,
+    });
+  if (!row) {
+    throw new Error("writeNotificationPreferences: insert returned no row");
+  }
+  return row;
 }

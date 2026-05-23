@@ -118,7 +118,7 @@ development_status:
   # shared-mock backing store for two-device test (theatre fix),
   # R2-P216 explicit date-parts narrowing. R2-P213/P215/P217
   # documented; F161–F166 deferred.
-  2-8-patient-manages-push-notification-preferences: ready-for-dev
+  2-8-patient-manages-push-notification-preferences: review
   epic-2-retrospective: optional
 
   # Epic 3: Patient Can See Their Health Fingerprint Over Time

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   buildNotificationPayload,
+  isPreferenceMuted,
   registerNotificationsConsumer,
 } from "../src/consumers/notifications.js";
 
@@ -109,6 +110,8 @@ describe("registerNotificationsConsumer handler", () => {
   it("skips when the patient has zero active push tokens", async () => {
     const { boss, getHandler } = makeFakeBoss();
     const { sql, calls } = makeFakeSql([
+      // Story 2.8 — preference gate SELECT (no row → all-true → not muted)
+      [],
       // upload SELECT
       [UPLOAD],
       // tokens SELECT — empty
@@ -125,13 +128,15 @@ describe("registerNotificationsConsumer handler", () => {
       },
     ]);
     expect(sendBatch).not.toHaveBeenCalled();
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(3);
   });
 
   it("revokes a token that comes back DeviceNotRegistered", async () => {
     const { boss, getHandler } = makeFakeBoss();
     const tokens = [{ id: "tok-1", expo_token: TOKENS[0] }];
     const { sql, calls } = makeFakeSql([
+      // Story 2.8 — preference gate (no row → not muted)
+      [],
       [UPLOAD],
       tokens,
       // The UPDATE on revoke — no rows expected back
@@ -152,13 +157,14 @@ describe("registerNotificationsConsumer handler", () => {
       },
     ]);
     expect(sendBatch).toHaveBeenCalledTimes(1);
-    // The 3rd SQL call is the UPDATE push_tokens SET revoked_at = now()
-    expect(calls).toHaveLength(3);
+    // 4 SQL calls: prefs gate + upload + tokens + revoke UPDATE.
+    expect(calls).toHaveLength(4);
   });
 
   it("skips silently when the upload row is missing", async () => {
     const { boss, getHandler } = makeFakeBoss();
-    const { sql } = makeFakeSql([[]]);
+    // prefs gate (empty), then upload SELECT (empty → missing).
+    const { sql } = makeFakeSql([[], []]);
     const sendBatch = vi.fn(() => Promise.resolve([]));
     await registerNotificationsConsumer(boss, {
       sql,
@@ -170,5 +176,78 @@ describe("registerNotificationsConsumer handler", () => {
       },
     ]);
     expect(sendBatch).not.toHaveBeenCalled();
+  });
+});
+
+describe("isPreferenceMuted — Story 2.8 preference gate", () => {
+  function makeSqlReturning(rows: unknown[]) {
+    return ((strings: TemplateStringsArray, ..._values: unknown[]) => {
+      void strings;
+      return Promise.resolve(rows);
+    }) as unknown as Parameters<typeof isPreferenceMuted>[0];
+  }
+
+  it("returns false (not muted) when no preference row exists — all-true default", async () => {
+    const sql = makeSqlReturning([]);
+    expect(await isPreferenceMuted(sql, "p-1", "complete")).toBe(false);
+    expect(await isPreferenceMuted(sql, "p-1", "pending_review")).toBe(false);
+    expect(await isPreferenceMuted(sql, "p-1", "failed")).toBe(false);
+  });
+
+  it("kind=complete checks results_ready", async () => {
+    const muted = makeSqlReturning([
+      {
+        results_ready: false,
+        letters_ready: true,
+        record_access: true,
+        review_required: true,
+      },
+    ]);
+    expect(await isPreferenceMuted(muted, "p-1", "complete")).toBe(true);
+    const unmuted = makeSqlReturning([
+      {
+        results_ready: true,
+        letters_ready: false,
+        record_access: false,
+        review_required: false,
+      },
+    ]);
+    expect(await isPreferenceMuted(unmuted, "p-1", "complete")).toBe(false);
+  });
+
+  it("kind=failed also checks results_ready (folded by Clarification #1)", async () => {
+    const muted = makeSqlReturning([
+      {
+        results_ready: false,
+        letters_ready: true,
+        record_access: true,
+        review_required: true,
+      },
+    ]);
+    expect(await isPreferenceMuted(muted, "p-1", "failed")).toBe(true);
+  });
+
+  it("kind=pending_review checks review_required", async () => {
+    const muted = makeSqlReturning([
+      {
+        results_ready: true,
+        letters_ready: true,
+        record_access: true,
+        review_required: false,
+      },
+    ]);
+    expect(await isPreferenceMuted(muted, "p-1", "pending_review")).toBe(true);
+    // A mute on results_ready should NOT affect pending_review.
+    const partial = makeSqlReturning([
+      {
+        results_ready: false,
+        letters_ready: true,
+        record_access: true,
+        review_required: true,
+      },
+    ]);
+    expect(await isPreferenceMuted(partial, "p-1", "pending_review")).toBe(
+      false,
+    );
   });
 });

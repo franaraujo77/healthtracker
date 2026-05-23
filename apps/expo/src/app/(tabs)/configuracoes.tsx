@@ -7,6 +7,8 @@ import {
   CONFIGURACOES_DISABLED_HINT_PT_BR,
   CONFIGURACOES_PRIVACIDADE_ROW_PT_BR,
   CONFIGURACOES_TITLE_PT_BR,
+  NOTIFICATIONS_SETTINGS_LINK_LABEL_PT_BR,
+  NOTIFICATIONS_SETTINGS_ROUTE,
   PRIVACIDADE_ROUTE,
 } from "@healthtracker/validators";
 
@@ -87,10 +89,10 @@ export default function ConfiguracoesIndex() {
           disabled
           hint={CONFIGURACOES_DISABLED_HINT_PT_BR}
         />
+        {/* Story 2.8 — Notificações is now active. */}
         <SettingsRow
-          label="Notificações"
-          disabled
-          hint={CONFIGURACOES_DISABLED_HINT_PT_BR}
+          label={NOTIFICATIONS_SETTINGS_LINK_LABEL_PT_BR}
+          onPress={() => router.push(NOTIFICATIONS_SETTINGS_ROUTE)}
         />
       </YStack>
     </SafeAreaView>
