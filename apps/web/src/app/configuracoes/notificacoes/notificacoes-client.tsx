@@ -10,6 +10,7 @@ import {
   NOTIF_PREF_LOADING_PT_BR,
   NOTIF_PREF_RECORD_ACCESS_PT_BR,
   NOTIF_PREF_RESULTS_READY_PT_BR,
+  NOTIF_PREF_RETRY_PT_BR,
   NOTIF_PREF_REVIEW_REQUIRED_PT_BR,
   NOTIFICATIONS_SETTINGS_TITLE_PT_BR,
 } from "@healthtracker/validators";
@@ -43,10 +44,12 @@ export function NotificacoesClient() {
         setError(null);
       },
       onError: () => {
+        // R3-P233 — keep the optimistic state visible so the user
+        // doesn't see their intent snap back; show the error
+        // alongside and let them tap "Tentar novamente" to re-fire
+        // the mutation with the same payload. A transient 5xx no
+        // longer silently undoes the patient's change.
         setError(NOTIF_PREF_ERROR_PT_BR);
-        // Revert: drop the optimistic so the next render falls back
-        // to the server-confirmed query data.
-        setOptimistic(null);
       },
     }),
   );
@@ -74,7 +77,7 @@ export function NotificacoesClient() {
           onClick={() => void query.refetch()}
           className="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm"
         >
-          {NOTIF_PREF_LOADING_PT_BR}
+          {NOTIF_PREF_RETRY_PT_BR}
         </button>
       </section>
     );
@@ -103,9 +106,22 @@ export function NotificacoesClient() {
         ))}
       </ul>
       {error !== null ? (
-        <p role="alert" className="text-sm text-red-700">
-          {error}
-        </p>
+        <div className="flex flex-col gap-2">
+          <p role="alert" className="text-sm text-red-700">
+            {error}
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              if (optimistic === null) return;
+              setError(null);
+              mutation.mutate(optimistic);
+            }}
+            className="w-fit rounded-md border border-stone-300 bg-white px-3 py-2 text-sm"
+          >
+            {NOTIF_PREF_RETRY_PT_BR}
+          </button>
+        </div>
       ) : null}
     </section>
   );

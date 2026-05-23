@@ -8,12 +8,12 @@ import { Button, Text, XStack, YStack } from "tamagui";
 import type { NotificationPreferencesInput } from "@healthtracker/validators";
 import {
   NOTIF_OPEN_SYSTEM_SETTINGS_CTA_PT_BR,
-  NOTIF_OS_DENIED_HINT_PT_BR,
   NOTIF_PREF_ERROR_PT_BR,
   NOTIF_PREF_LETTERS_READY_PT_BR,
   NOTIF_PREF_LOADING_PT_BR,
   NOTIF_PREF_RECORD_ACCESS_PT_BR,
   NOTIF_PREF_RESULTS_READY_PT_BR,
+  NOTIF_PREF_RETRY_PT_BR,
   NOTIF_PREF_REVIEW_REQUIRED_PT_BR,
   NOTIFICATIONS_SETTINGS_TITLE_PT_BR,
 } from "@healthtracker/validators";
@@ -56,10 +56,10 @@ export default function NotificacoesScreen() {
         setError(null);
       },
       onError: () => {
+        // R3-P233 — keep the optimistic state so the patient's
+        // intent stays visible; surface the error with a retry
+        // button that re-fires the same payload.
         setError(NOTIF_PREF_ERROR_PT_BR);
-        // Revert: drop the optimistic value so the next render reads
-        // from the server-confirmed query data.
-        setOptimistic(null);
       },
     }),
   );
@@ -99,7 +99,7 @@ export default function NotificacoesScreen() {
               {NOTIF_PREF_ERROR_PT_BR}
             </Text>
             <Button onPress={() => void query.refetch()}>
-              {NOTIF_PREF_LOADING_PT_BR}
+              {NOTIF_PREF_RETRY_PT_BR}
             </Button>
           </YStack>
         ) : null}
@@ -124,18 +124,33 @@ export default function NotificacoesScreen() {
                 <Text fontSize="$4" color="$textPrimary">
                   {label}
                 </Text>
+                {/* R3-P232 — the OS-denied hint was set unconditionally
+                    on every toggle and announced "(desativado no sistema)"
+                    via screen readers even when OS permissions were
+                    granted. Drop it until F135 lands a real permission
+                    check that can gate the hint on actual status. */}
                 <Switch
                   value={prefs[key]}
                   onValueChange={(next: boolean) => onToggle(key, next)}
                   accessibilityLabel={label}
-                  accessibilityHint={NOTIF_OS_DENIED_HINT_PT_BR}
                 />
               </XStack>
             ))}
             {error !== null ? (
-              <Text accessibilityRole="alert" color="$errorRed">
-                {error}
-              </Text>
+              <YStack gap="$2">
+                <Text accessibilityRole="alert" color="$errorRed">
+                  {error}
+                </Text>
+                <Button
+                  onPress={() => {
+                    if (optimistic === null) return;
+                    setError(null);
+                    mutation.mutate(optimistic);
+                  }}
+                >
+                  {NOTIF_PREF_RETRY_PT_BR}
+                </Button>
+              </YStack>
             ) : null}
           </YStack>
         ) : null}

@@ -242,3 +242,23 @@ claude-opus-4-7[1m]
 ### Change Log
 
 - 2026-05-22 — Code review round 2. **4 patches applied (R2-P226/P227/P228/P229), 1 documented-no-change (R2-P230), 4 deferred (F173–F176), 6 dismissed.** The HIGH fix closed the round-1 regression: the worker's fail-open catch is now narrowed to db/network-shaped errors so programmer bugs (TypeError, etc.) surface instead of silently muting the gate. Med fixes: read-side validation in `getNotificationPreferences`, `query.isError` UX on both screens, exported `NOTIFICATION_KIND_TO_PREFERENCE` as documented source-of-truth + snapshot test pinning the worker switch behavior. **191 unit tests green** (+1: R2-P229 snapshot test). Typecheck, lint, format all green.
+
+### Review Findings (code review round 3 — 2026-05-23)
+
+3-layer adversarial round-3 on the post-R2 state. The bar was high; the obvious bugs had been caught. **0 HIGH + 1 Med + 2 Low.** 3 patches applied (R3-P231–R3-P233); 1 deferred (F177); 5 dismissed after re-examination.
+
+**`patch` (must fix before done):**
+
+- [x] [Review][Patch] **R3-P231 [Med UX]: Retry button label was `NOTIF_PREF_LOADING_PT_BR` ("Carregando…")** [`apps/expo/.../notificacoes.tsx`, `apps/web/.../notificacoes-client.tsx`] — R2-P228's retry buttons used the loading-status string as their label. A button labeled "Carregando…" looks like an in-progress spinner, not a CTA. Fix: added `NOTIF_PREF_RETRY_PT_BR = "Tentar novamente"` and used it on both surfaces.
+- [x] [Review][Patch] **R3-P232 [Low a11y]: `accessibilityHint="(desativado no sistema)"` set unconditionally on every Switch** [`apps/expo/.../notificacoes.tsx`] — Screen-reader users would hear "desativado no sistema" announced after every toggle label even when OS permissions were granted. Fix: removed the hint until F135 lands a real permission check that can conditionally set it.
+- [x] [Review][Patch] **R3-P233 [Low UX]: Optimistic state was nulled on mutation error, leaving the patient with no path back** [both clients] — `setOptimistic(null)` snapped the toggle back to the prior server value with only an inline error text. A transient 5xx silently undid the patient's intent. Fix: keep the optimistic state visible on error; render a "Tentar novamente" button next to the error that re-fires `mutation.mutate(optimistic)` with the same payload.
+
+**`defer` (added to deferred-work.md):**
+
+- [x] [Review][Defer] **F177** Auto-render AC4 OS-denied banner via `expo-notifications` permission check. Spec text mandates an alarmist banner; what ships is a permanently-visible neutral CTA. F135 wires the permission status; F177 tracks the conditional banner copy on top of that.
+
+**Dismissed (~5):** R2-P226 condition correctness (logic sound, readability poor but not buggy); R2-P227 `null` from driver (impossible against `NOT NULL` columns; falls through to default-true anyway); concurrent-toggle race (folded into F171/F172); worker sync-throw from `sql` template tag (await covers it); R2-P229 snapshot only mute-when-false (other tests in the file cover the inverse).
+
+### Change Log
+
+- 2026-05-23 — Code review round 3. **3 patches applied (R3-P231/P232/P233), 1 deferred (F177), 5 dismissed after re-examination.** The patches address polish on the round-2 patches themselves: the retry button now has a real CTA label, the a11y hint no longer misleads screen-reader users about OS permission state, and a mutation error keeps the patient's intent visible with a retry affordance instead of silently reverting. **191 unit tests green** (no test count change — patches are UX/copy, not behavioral). Typecheck, lint, format all green.

@@ -342,3 +342,8 @@
 - **F174** `onSuccess` overwrite causes brief flicker on staggered toggles — fix by merging instead of overwriting the optimistic state.
 - **F175** Worker preference SELECT not memoized across a job batch (currently one SELECT per job). Acceptable for v1 with `batchSize: 10`; revisit if batches grow.
 - **F176** Differentiate "fail-open infra fault" from "no row → defaults" with a 3-state return or out-of-band metric. Not actionable until an ops dashboard demands it.
+
+
+## Story 2.8 — round-3 review deferral (F177)
+
+- **F177** Auto-render AC4 OS-denied banner via `expo-notifications` permission check. Spec text mandates an alarmist banner when permission is denied; current code always renders a neutral CTA. F135 wires the permission status; F177 tracks the conditional banner copy on top of that.

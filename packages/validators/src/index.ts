@@ -200,6 +200,10 @@ export const NOTIF_OS_DENIED_HINT_PT_BR = "(desativado no sistema)";
 // for the patient.
 export const NOTIF_OPEN_SYSTEM_SETTINGS_CTA_PT_BR =
   "Abrir configurações do sistema";
+// R3-P231 — `NOTIF_PREF_LOADING_PT_BR` is a status string, not a CTA;
+// recovery buttons need an explicit retry label so the patient
+// recognizes them as actionable.
+export const NOTIF_PREF_RETRY_PT_BR = "Tentar novamente";
 
 export const NOTIFICATIONS_SETTINGS_LINK_LABEL_PT_BR = "Notificações";
 
