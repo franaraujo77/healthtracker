@@ -14,7 +14,9 @@
     "./separator": "./src/separator.tsx",
     "./toast": "./src/toast.tsx",
     "./extraction-pulse": "./src/extraction-pulse.tsx",
-    "./upload-source-sheet": "./src/upload-source-sheet.tsx"
+    "./upload-source-sheet": "./src/upload-source-sheet.tsx",
+    "./fingerprint-chart": "./src/fingerprint-chart.tsx",
+    "./fingerprint-chart-baseline": "./src/fingerprint-chart-baseline.tsx"
   },
   "license": "MIT",
   "scripts": {

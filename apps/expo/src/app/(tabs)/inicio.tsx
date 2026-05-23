@@ -5,13 +5,13 @@ import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { Button, Text, YStack } from "tamagui";
 
-import type { FingerprintChartBaselineBiomarker } from "@healthtracker/ui";
+import type { FingerprintChartBaselineBiomarker } from "@healthtracker/ui/fingerprint-chart-baseline";
 import {
   BiomarkerCard,
   EmptyStateRecord,
   ExtractionPulse,
-  FingerprintChart,
 } from "@healthtracker/ui";
+import { FingerprintChart } from "@healthtracker/ui/fingerprint-chart";
 import { UploadSourceSheet } from "@healthtracker/ui/upload-source-sheet";
 import {
   FINGERPRINT_CACHE_FRESH_A11Y_PT_BR,
