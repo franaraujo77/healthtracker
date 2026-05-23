@@ -16,7 +16,7 @@
   "dependencies": {
     "@healthtracker/types": "workspace:*",
     "@supabase/supabase-js": "catalog:",
-    "pg-boss": "^12.18.2",
+    "pg-boss": "12.18.2",
     "postgres": "catalog:"
   },
   "devDependencies": {

@@ -21,7 +21,8 @@
  * for testcontainers when the SQL itself is the thing under test.
  */
 import { spawnSync } from "node:child_process";
-import { dirname, resolve } from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
@@ -32,6 +33,7 @@ const DB_PACKAGE_ROOT = resolve(
   "..",
   "..",
 );
+const POLICIES_DIR = join(DB_PACKAGE_ROOT, "policies");
 
 export interface IntegrationDb {
   url: string;
@@ -71,5 +73,34 @@ export async function startIntegrationDb(): Promise<IntegrationDb> {
   }
 
   const sql = postgres(url, { max: 4 });
+
+  // Apply RLS / Storage policy files (`custom_*.sql`) in the same C-locale
+  // glob order CI uses (.github/workflows/ci.yml "Apply custom RLS +
+  // Storage policies" step). Without this, the testcontainer lacks any
+  // RLS policy / trigger that lives only in a policy file (e.g. the
+  // `consent_grants_revoke_only_revoked_at` trigger introduced by Story
+  // 1.4 and consolidated into `custom_rls_consent_grants_zz_revoke.sql`
+  // by Story 3.5 round-3 review fix #3).
+  //
+  // `storage.*` policies are SKIPPED — the bare postgres:16-alpine
+  // container has no `storage` schema (it's Supabase-managed). Tests that
+  // need storage policy assertions belong in the `test:rls` suite which
+  // runs against `supabase start`.
+  const policyFiles = readdirSync(POLICIES_DIR)
+    .filter((f) => f.startsWith("custom_rls_") && f.endsWith(".sql"))
+    .sort(); // C-locale (codepoint) sort — matches Ubuntu/CI default
+  for (const file of policyFiles) {
+    const sqlText = readFileSync(join(POLICIES_DIR, file), "utf8");
+    try {
+      await sql.unsafe(sqlText);
+    } catch (err) {
+      await sql.end();
+      await container.stop();
+      throw new Error(
+        `policy apply failed for ${file}: ${(err as Error).message}`,
+      );
+    }
+  }
+
   return { url, sql, container };
 }

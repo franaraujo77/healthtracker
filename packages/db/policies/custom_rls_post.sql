@@ -9,6 +9,7 @@
 ALTER TABLE "post" ENABLE ROW LEVEL SECURITY;
 
 -- Allows authenticated patients to read their own posts via protectedProcedure (SET LOCAL).
+DROP POLICY IF EXISTS "post_select_own" ON "post";
 CREATE POLICY "post_select_own" ON "post"
   FOR SELECT
   USING (
@@ -17,6 +18,7 @@ CREATE POLICY "post_select_own" ON "post"
 
 -- Allows anon/public reads so publicProcedure endpoints remain functional.
 -- Remove this policy once post.all and post.byId are gated behind protectedProcedure.
+DROP POLICY IF EXISTS "post_select_anon" ON "post";
 CREATE POLICY "post_select_anon" ON "post"
   FOR SELECT
   TO anon

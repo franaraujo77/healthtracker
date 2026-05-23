@@ -80,7 +80,7 @@ export interface ConsentRevocationInput {
  * Story 1.4 — sanctioned write path for revoking the patient's currently
  * active grant of `consentType`. Issues a narrow UPDATE that sets
  * `revoked_at = NOW()` on the row where `revoked_at IS NULL`; the
- * `custom_rls_consent_grants_revoke.sql` policy enforces that only the
+ * `custom_rls_consent_grants_zz_revoke.sql` policy enforces that only the
  * row's owner can update, and the accompanying trigger enforces that no
  * column other than `revoked_at` may be touched.
  *

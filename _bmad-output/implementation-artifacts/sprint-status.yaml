@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-05-15
-last_updated: 2026-05-23
+last_updated: 2026-05-24
 # Story 3.4 spec created → ready-for-dev. Final story of Epic 3.
 # Adds offline-cached Fingerprint via `@tanstack/react-query-persist-client`
 # v5 + `@tanstack/query-async-storage-persister` (NEW deps, version-aligned
@@ -238,6 +238,13 @@ development_status:
   # defensive 2 s timeout on bootstrap gate so a hung `getSession()` can't
   # leave the whole RootLayout subtree permanently blank (MED).
   3-4-patient-views-cached-fingerprint-data-while-offline: done
+  # Story 3.5 spec created → ready-for-dev. Baseline Supabase migration
+  # covering Epics 0–3 schema (pgboss + patients/consent/audit +
+  # uploads/observations/loinc_ref/extraction_review_queue/push_tokens/
+  # notification_preferences + Epic 3 read-side objects). Validated against
+  # dev DB (jhklzsdxlrvyprysfeku); production project (wkjwnwwzsulkfzpaihkp)
+  # is empty and will receive baseline on first `supabase-deploy` workflow run.
+  3-5-generate-baseline-supabase-migration-covering-epics-0-to-3-schema: review
   epic-3-retrospective: done
 
   # Epic 4: Patient Receives a Personal Health Narrative
