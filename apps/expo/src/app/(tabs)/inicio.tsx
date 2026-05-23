@@ -1,15 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { AccessibilityInfo } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Stack, useLocalSearchParams } from "expo-router";
-import { Text, YStack } from "tamagui";
+import { router, Stack, useLocalSearchParams } from "expo-router";
+import { Button, Text, YStack } from "tamagui";
 
 import { EmptyStateRecord, ExtractionPulse } from "@healthtracker/ui";
 import { UploadSourceSheet } from "@healthtracker/ui/upload-source-sheet";
 import {
   HISTORICO_OFFLINE_QUEUED_HINT_PT_BR,
+  INICIO_ADD_MEASUREMENT_CTA_PT_BR,
   INICIO_CTA_PT_BR,
   INICIO_HEADLINE_PT_BR,
+  MANUAL_BIA_ROUTE,
   UPLOAD_ALLOWED_MIME_TYPES,
   UPLOAD_STATUS_LABELS_PT_BR,
 } from "@healthtracker/validators";
@@ -211,6 +213,15 @@ export default function Inicio() {
           // CTA no longer routes to it.
           onCtaPress={() => setSheetOpen(true)}
         />
+        {/* Story 2.7 — secondary "Adicionar medição" CTA opens the
+            manual BIA form. Spec Task 7 collapses the picker sheet
+            since only one option exists today; the button label
+            spells out the option for clarity. */}
+        <YStack paddingHorizontal="$3" paddingBottom="$3">
+          <Button onPress={() => router.push(MANUAL_BIA_ROUTE)}>
+            {INICIO_ADD_MEASUREMENT_CTA_PT_BR}
+          </Button>
+        </YStack>
         <UploadSourceSheet
           open={sheetOpen}
           onOpenChange={setSheetOpen}

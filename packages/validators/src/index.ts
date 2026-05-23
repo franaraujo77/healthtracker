@@ -50,6 +50,75 @@ export const UPLOAD_STATUS_LABELS_PT_BR: Record<
 export const HISTORICO_OFFLINE_QUEUED_HINT_PT_BR =
   "Vamos enviar assim que sua conexão voltar.";
 
+// =============================================================================
+// Story 2.7 — Manual BIA (bioimpedance) entry
+// =============================================================================
+
+export const BIA_DEVICE_NAMES = ["InBody", "Tanita", "Outro"] as const;
+export type BiaDeviceName = (typeof BIA_DEVICE_NAMES)[number];
+
+/**
+ * Story 2.7 — input schema for `observations.submitBia`. The form
+ * collects 3 numeric biomarkers + a collection date (ISO yyyy-mm-dd,
+ * formatted client-side from a dd/mm/yyyy input) + a device name
+ * (with optional custom label when 'Outro') + optional `deviceModel`.
+ * `overwrite` is set by the duplicate-modal Substituir CTA on
+ * re-submit; default `false`.
+ */
+export const BiaSubmissionSchema = z
+  .object({
+    visceralFatAreaCm2: z.number().positive().max(500),
+    skeletalMuscleMassKg: z.number().positive().max(200),
+    bodyFatPercentage: z.number().min(0).max(100),
+    collectedAt: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "BIA_COLLECTED_AT_INVALID"),
+    deviceName: z.enum(BIA_DEVICE_NAMES),
+    deviceCustomName: z.string().max(80).optional(),
+    deviceModel: z.string().max(80).optional(),
+    overwrite: z.boolean().optional(),
+  })
+  .refine(
+    (d) =>
+      d.deviceName !== "Outro" ||
+      (d.deviceCustomName !== undefined &&
+        d.deviceCustomName.trim().length > 0),
+    {
+      message: "BIA_DEVICE_CUSTOM_NAME_REQUIRED",
+      path: ["deviceCustomName"],
+    },
+  );
+export type BiaSubmissionInput = z.infer<typeof BiaSubmissionSchema>;
+
+export const MANUAL_BIA_ROUTE = "/inicio/medicao/bia";
+
+export const BIA_FORM_TITLE_PT_BR = "Bioimpedância";
+export const BIA_FIELD_VISCERAL_FAT_PT_BR = "Área de gordura visceral (cm²)";
+export const BIA_FIELD_SKELETAL_MUSCLE_PT_BR =
+  "Massa muscular esquelética (kg)";
+export const BIA_FIELD_BODY_FAT_PT_BR = "Percentual de gordura corporal (%)";
+export const BIA_FIELD_COLLECTED_AT_PT_BR = "Data da medição (dd/mm/aaaa)";
+export const BIA_FIELD_DEVICE_NAME_PT_BR = "Aparelho";
+export const BIA_FIELD_DEVICE_CUSTOM_NAME_PT_BR = "Nome do aparelho";
+export const BIA_FIELD_DEVICE_MODEL_PT_BR = "Modelo (opcional)";
+export const BIA_FIELD_REQUIRED_PT_BR = "Este campo é obrigatório.";
+export const BIA_FIELD_NUMBER_INVALID_PT_BR =
+  "Use um número válido — por exemplo, 14,2.";
+export const BIA_FIELD_DATE_INVALID_PT_BR =
+  "Use uma data válida no formato dd/mm/aaaa.";
+export const BIA_SUBMIT_CTA_PT_BR = "Salvar";
+export const BIA_SUBMIT_SUCCESS_PT_BR = "Medição salva.";
+export const BIA_SUBMIT_ERROR_PT_BR =
+  "Não conseguimos salvar — tente novamente.";
+
+export const BIA_DUPLICATE_MODAL_TITLE_PT_BR =
+  "Já existe uma medição com este dispositivo para esta data. Deseja substituir?";
+export const BIA_DUPLICATE_MODAL_CONFIRM_PT_BR = "Substituir";
+export const BIA_DUPLICATE_MODAL_CANCEL_PT_BR = "Cancelar";
+
+export const INICIO_ADD_MEASUREMENT_CTA_PT_BR =
+  "Adicionar medição (Bioimpedância)";
+
 // Story 2.5 — Histórico tab + push-notification copy.
 export const HISTORICO_ROUTE = "/inicio/historico";
 export const HISTORICO_TITLE_PT_BR = "Histórico";

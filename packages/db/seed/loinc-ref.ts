@@ -152,6 +152,26 @@ const LOINC_SEED: LoincSeedEntry[] = [
     unitUcum: "U/L",
     category: "metabolic",
   },
+  // Story 2.7 — BIA top-3 for the manual-entry path. The pt-BR
+  // names match the labels on InBody / Tanita printouts.
+  {
+    loincCode: "73711-2",
+    biomarkerNamePt: "Área de gordura visceral",
+    unitUcum: "cm2",
+    category: "bia",
+  },
+  {
+    loincCode: "73964-7",
+    biomarkerNamePt: "Massa muscular esquelética",
+    unitUcum: "kg",
+    category: "bia",
+  },
+  {
+    loincCode: "41982-0",
+    biomarkerNamePt: "Percentual de gordura corporal",
+    unitUcum: "%",
+    category: "bia",
+  },
 ];
 
 /**

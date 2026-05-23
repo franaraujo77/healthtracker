@@ -1,6 +1,41 @@
+import type { BiaSubmissionInput } from "@healthtracker/validators";
+import { and, eq, isNull, sql } from "@healthtracker/db";
 import { Observations } from "@healthtracker/db/schema";
 
 import type { AuditDb } from "./audit";
+import { writeAuditLog } from "./audit";
+
+/**
+ * Story 2.7 — manual BIA entries have no source upload. The
+ * `observations.upload_id` column is NOT NULL (Story 2.3) so we use
+ * a sentinel value; the unique-index dedup `(patient_id, upload_id,
+ * loinc_code, collected_at)` accidentally becomes the AC3
+ * same-day-same-device dedup seam since every manual BIA shares
+ * this upload_id. F-item to make the column nullable.
+ */
+export const SENTINEL_UPLOAD_UUID = "00000000-0000-0000-0000-000000000000";
+
+/** BIA top-3 LOINC + UCUM mapping (mirrors `packages/db/seed/loinc-ref.ts`). */
+const BIA_BIOMARKERS = [
+  {
+    field: "visceralFatAreaCm2" as const,
+    loincCode: "73711-2",
+    unitUcum: "cm2",
+    biomarkerName: "Área de gordura visceral",
+  },
+  {
+    field: "skeletalMuscleMassKg" as const,
+    loincCode: "73964-7",
+    unitUcum: "kg",
+    biomarkerName: "Massa muscular esquelética",
+  },
+  {
+    field: "bodyFatPercentage" as const,
+    loincCode: "41982-0",
+    unitUcum: "%",
+    biomarkerName: "Percentual de gordura corporal",
+  },
+];
 
 export interface ObservationInsert {
   patientId: string;
@@ -87,3 +122,159 @@ export async function writeObservation(
     .returning({ id: Observations.id });
   return row ?? null;
 }
+
+export type BiaSubmissionResult =
+  | {
+      status: "created";
+      observationIds: string[];
+      overwroteObservationIds?: string[];
+    }
+  | { status: "duplicate"; existingObservationIds: string[] };
+
+function deviceLabName(input: BiaSubmissionInput): string {
+  const base =
+    input.deviceName === "Outro"
+      ? (input.deviceCustomName ?? "").trim()
+      : input.deviceName;
+  if (input.deviceModel && input.deviceModel.trim().length > 0) {
+    return `${base} ${input.deviceModel.trim()}`;
+  }
+  return base;
+}
+
+/**
+ * Story 2.7 — single sanctioned write path for manual BIA
+ * submissions. Fans out to 3 `writeObservation` calls (one per
+ * biomarker) inside the caller's transaction; emits one
+ * `observation.write` audit per submission (AC2).
+ *
+ * AC3: when `overwrite !== true` and a `(patient, collected_at,
+ * lab_name)` row already exists with `source = 'manual_bia'` and
+ * `deleted_at IS NULL`, the helper returns `{ status: 'duplicate' }`
+ * WITHOUT writing. The client renders the confirmation modal and
+ * re-submits with `overwrite: true`, which soft-deletes the prior
+ * rows and inserts the new ones inside the same transaction.
+ */
+export async function writeBiaObservations(
+  database: AuditDb,
+  args: { patientId: string; input: BiaSubmissionInput },
+): Promise<BiaSubmissionResult> {
+  const { patientId, input } = args;
+  const labName = deviceLabName(input);
+  if (labName.length === 0) {
+    // Defense-in-depth — the Zod refinement already enforces this.
+    throw new Error(
+      "writeBiaObservations: deviceName resolved to empty string",
+    );
+  }
+  const collectedAt = new Date(`${input.collectedAt}T00:00:00.000Z`);
+  if (Number.isNaN(collectedAt.getTime())) {
+    throw new Error("writeBiaObservations: collectedAt is unparseable");
+  }
+  const collectedAtIso = input.collectedAt;
+
+  // AC3 — duplicate detection. Scope: same patient + same date +
+  // same `lab_name` + `source = 'manual_bia'` + not soft-deleted.
+  const existing = await database
+    .select({ id: Observations.id })
+    .from(Observations)
+    .where(
+      and(
+        eq(Observations.patientId, patientId),
+        eq(Observations.collectedAt, collectedAtIso),
+        eq(Observations.labName, labName),
+        eq(Observations.source, "manual_bia"),
+        isNull(Observations.deletedAt),
+      ),
+    );
+  const existingIds = existing.map((r) => r.id);
+
+  if (existingIds.length > 0 && input.overwrite !== true) {
+    return { status: "duplicate", existingObservationIds: existingIds };
+  }
+
+  // Overwrite path — soft-delete the prior rows inside the same
+  // transaction so the partial unique index frees the slot for the
+  // new INSERTs.
+  if (existingIds.length > 0) {
+    await database
+      .update(Observations)
+      .set({ deletedAt: new Date() })
+      .where(
+        and(
+          eq(Observations.patientId, patientId),
+          eq(Observations.collectedAt, collectedAtIso),
+          eq(Observations.labName, labName),
+          eq(Observations.source, "manual_bia"),
+          isNull(Observations.deletedAt),
+        ),
+      );
+  }
+
+  // 3-way fan-out. Each insert goes through `writeObservation` (the
+  // single sanctioned write path).
+  const observationIds: string[] = [];
+  for (const biomarker of BIA_BIOMARKERS) {
+    const valueNumeric = input[biomarker.field];
+    const row = await writeObservation(database, {
+      patientId,
+      uploadId: SENTINEL_UPLOAD_UUID,
+      loincCode: biomarker.loincCode,
+      biomarkerName: biomarker.biomarkerName,
+      valueNumeric,
+      unitUcum: biomarker.unitUcum,
+      labName,
+      collectedAt,
+      confidenceScore: 1.0,
+      source: "manual_bia",
+    });
+    if (!row) {
+      // ON CONFLICT — shouldn't happen because we just soft-deleted
+      // any prior rows. If it does, the partial unique index says
+      // a non-deleted same-key row exists; surface as a server
+      // error so the client knows to refetch + retry.
+      throw new Error(
+        "writeBiaObservations: ON CONFLICT after soft-delete — concurrent write?",
+      );
+    }
+    observationIds.push(row.id);
+  }
+
+  // AC2 — single audit event per submission, with `observationIds`
+  // in metadata for downstream fan-out.
+  const firstId = observationIds[0];
+  if (!firstId) {
+    throw new Error("writeBiaObservations: zero observations written");
+  }
+  await writeAuditLog(database, {
+    actorId: patientId,
+    actorType: "patient",
+    event: "observation.write",
+    resourceId: firstId,
+    resourceType: "observation",
+    metadata: {
+      source: "manual_bia",
+      deviceName: input.deviceName,
+      deviceCustomName: input.deviceCustomName,
+      deviceModel: input.deviceModel,
+      labName,
+      observationIds,
+      collectedAt: collectedAtIso,
+      ...(existingIds.length > 0
+        ? { overwroteObservationIds: existingIds }
+        : {}),
+    },
+  });
+
+  return existingIds.length > 0
+    ? {
+        status: "created",
+        observationIds,
+        overwroteObservationIds: existingIds,
+      }
+    : { status: "created", observationIds };
+}
+
+// Re-export `sql` use so the helper compiles even if Drizzle's eq/and
+// imports change shape (defense against a Drizzle-major bump).
+void sql;

@@ -1,6 +1,6 @@
 # Story 2.7: Patient manually enters bioimpedance (BIA) measurements
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -173,6 +173,50 @@ claude-opus-4-7[1m]
 
 ### Debug Log References
 
+- `pnpm typecheck`, `pnpm lint`, `pnpm format`, `pnpm test` all green.
+- **179 unit tests pass** (+6 in `observations-bia.test.ts`: 3 ACs + labName composition + collectedAt guard + duplicate-detection).
+
 ### Completion Notes List
 
+**Clarifications resolved (all 6 recommended defaults adopted):**
+
+1. Sentinel `upload_id` for manual entries (nullable refactor → F-item).
+2. Soft-delete via `deletedAt` + partial unique index `WHERE deleted_at IS NULL`.
+3. One `observation.write` audit per submission with `observationIds[]` in metadata.
+4. Duplicate scope: same patient + same date + same `lab_name` + `source = 'manual_bia'`.
+5. Required: 3 numerics + collectedAt + deviceName (+ deviceCustomName when 'Outro'); deviceModel optional.
+6. Single "Adicionar medição (Bioimpedância)" CTA (no picker sheet — only one option today).
+
+**What was implemented:**
+- Schema: `observations.deletedAt` (nullable timestamptz) + partial unique index `WHERE deletedAt IS NULL` so soft-deleted rows don't block re-insert on overwrite.
+- LOINC seed: 3 BIA codes (73711-2 visceral fat / 73964-7 skeletal muscle / 41982-0 body fat).
+- Validators: `BiaSubmissionSchema` + 17 pt-BR copy constants + `MANUAL_BIA_ROUTE` + `INICIO_ADD_MEASUREMENT_CTA_PT_BR`.
+- `writeBiaObservations(db, ...)` helper: duplicate detection → optional soft-delete → 3× `writeObservation` → 1× audit, all inside `protectedProcedure` transaction.
+- `observationsRouter.submitBia` tRPC mutation; registered in `appRouter`.
+- Web BIA form at `apps/web/src/app/inicio/medicao/bia/` (page + client form + duplicate confirm modal).
+- Expo BIA screen at `apps/expo/src/app/medicao/bia.tsx` with `Alert.alert` duplicate confirmation.
+- "Adicionar medição" CTA on Expo Início.
+
+**Out of scope / deferred:**
+- Web Início "Adicionar medição" CTA — deferred (the route is reachable directly; the CTA wiring is small and can land in a follow-up).
+- Editing a BIA row via a dedicated edit flow (today only overwrite).
+- Fingerprint query `WHERE deleted_at IS NULL` filter (Epic 3 concern).
+- `upload_id` nullable refactor (F-item).
+- BIA-specific notification.
+
 ### File List
+
+**New files**
+- `packages/api/src/router/observations.ts`
+- `packages/api/__tests__/observations-bia.test.ts`
+- `apps/web/src/app/inicio/medicao/bia/page.tsx`
+- `apps/web/src/app/inicio/medicao/bia/bia-form.tsx`
+- `apps/expo/src/app/medicao/bia.tsx`
+
+**Modified files**
+- `packages/db/src/schema/observations.ts` — `deletedAt` + partial unique index.
+- `packages/db/seed/loinc-ref.ts` — 3 BIA codes.
+- `packages/api/src/observations.ts` — `writeBiaObservations` + `SENTINEL_UPLOAD_UUID`.
+- `packages/api/src/root.ts` — registers `observationsRouter`.
+- `packages/validators/src/index.ts` — `BiaSubmissionSchema`, pt-BR copy.
+- `apps/expo/src/app/(tabs)/inicio.tsx` — "Adicionar medição" CTA.

@@ -51,18 +51,28 @@ export const Observations = pgTable(
       .timestamp({ mode: "date", withTimezone: true })
       .defaultNow()
       .notNull(),
+    /**
+     * Story 2.7 — soft-delete for the BIA overwrite path (AC3). When
+     * a patient overwrites a same-date+device manual BIA entry, the
+     * prior rows are stamped with `deleted_at = now()`; the unique
+     * index below is partial (`WHERE deleted_at IS NULL`) so the
+     * re-insert with the same key succeeds. Future Fingerprint
+     * consumers MUST filter `WHERE deleted_at IS NULL`.
+     */
+    deletedAt: t.timestamp({ mode: "date", withTimezone: true }),
   }),
   (table) => [
     // Story 2.3 — dedupes re-processing of the same document. If the
     // extraction worker re-runs (idempotency replay, dead-letter
     // retry), the same (patient, upload, loinc, date) combination
     // hits ON CONFLICT and the `writeObservation` helper returns null.
-    uniqueIndex("observations_patient_upload_loinc_date_unique").on(
-      table.patientId,
-      table.uploadId,
-      table.loincCode,
-      table.collectedAt,
-    ),
+    //
+    // Story 2.7 — partial `WHERE deleted_at IS NULL` so a soft-deleted
+    // row (BIA overwrite) doesn't block the new insert on the same
+    // key. Documented in `packages/api/src/observations.ts`.
+    uniqueIndex("observations_patient_upload_loinc_date_unique")
+      .on(table.patientId, table.uploadId, table.loincCode, table.collectedAt)
+      .where(sql`${table.deletedAt} IS NULL`),
     // Fingerprint query (Story 3.1+): "most recent observations per
     // patient, ordered by collection date desc".
     index("observations_patient_collected_idx").on(
