@@ -136,7 +136,7 @@ export async function applyDeadLetter(
   if (!row) {
     return { updated: false, currentStatus: null };
   }
-  return { updated: true, currentStatus: row.status as UploadStatus };
+  return { updated: true, currentStatus: row.status };
 }
 
 async function runUpdate(
@@ -174,5 +174,5 @@ async function runUpdate(
   if (!row) {
     return { updated: false, currentStatus: null };
   }
-  return { updated: true, currentStatus: row.status as UploadStatus };
+  return { updated: true, currentStatus: row.status };
 }
