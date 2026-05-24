@@ -13,7 +13,7 @@ catalog:
   "@tamagui/animations-css": ^1.144.4
   "@tamagui/animations-react-native": ^1.144.4
   "@tamagui/babel-plugin": ^1.144.4
-  "@tamagui/core": ^1.144.4
+  "@tamagui/core": ^2.0.0
   "@tamagui/next-plugin": ^1.144.4
   "@tamagui/web": ^1.144.4
   tamagui: ^1.144.4
