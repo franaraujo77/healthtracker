@@ -85,8 +85,8 @@ catalogs:
       specifier: ^3.2.0
       version: 3.2.4
     zod:
-      specifier: ^4.1.12
-      version: 4.1.12
+      specifier: ^4.4.3
+      version: 4.4.3
   react19:
     '@types/react':
       specifier: ~19.1.0
@@ -333,7 +333,7 @@ importers:
         version: 2.106.1
       '@t3-oss/env-nextjs':
         specifier: ^0.13.11
-        version: 0.13.11(arktype@2.1.20)(typescript@5.9.3)(zod@4.1.12)
+        version: 0.13.11(arktype@2.1.20)(typescript@5.9.3)(zod@4.4.3)
       '@tamagui/core':
         specifier: 'catalog:'
         version: 1.144.4(react-dom@19.1.4(react@19.1.4))(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.1.12)(bufferutil@4.1.0)(react@19.1.4))(react@19.1.4)
@@ -369,7 +369,7 @@ importers:
         version: 1.144.4(react-dom@19.1.4(react@19.1.4))(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.1.12)(bufferutil@4.1.0)(react@19.1.4))(react@19.1.4)
       zod:
         specifier: 'catalog:'
-        version: 4.1.12
+        version: 4.4.3
     devDependencies:
       '@axe-core/playwright':
         specifier: ^4.10.1
@@ -445,7 +445,7 @@ importers:
         version: 2.2.6
       zod:
         specifier: 'catalog:'
-        version: 4.1.12
+        version: 4.4.3
     devDependencies:
       '@healthtracker/eslint-config':
         specifier: workspace:*
@@ -485,13 +485,13 @@ importers:
         version: 2.106.1
       '@t3-oss/env-core':
         specifier: ^0.13.8
-        version: 0.13.8(arktype@2.1.20)(typescript@5.9.3)(zod@4.1.12)
+        version: 0.13.8(arktype@2.1.20)(typescript@5.9.3)(zod@4.4.3)
       next:
         specifier: '>=15'
         version: 15.5.18(@babel/core@7.29.0)(@opentelemetry/api@1.9.1)(@playwright/test@1.60.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.1.4(react@19.1.4))(react@19.1.4)
       zod:
         specifier: 'catalog:'
-        version: 4.1.12
+        version: 4.4.3
     devDependencies:
       '@healthtracker/eslint-config':
         specifier: workspace:*
@@ -537,13 +537,13 @@ importers:
         version: 0.45.2(@neondatabase/serverless@0.10.0)(@opentelemetry/api@1.9.1)(@planetscale/database@1.19.0)(@prisma/client@5.22.0(prisma@5.22.0))(@types/better-sqlite3@7.6.13)(@types/pg@8.15.6)(@vercel/postgres@0.10.0(utf-8-validate@6.0.4))(better-sqlite3@12.2.0)(gel@2.0.0)(mysql2@3.11.3)(pg@8.20.0)(postgres@3.4.9)(prisma@5.22.0)
       drizzle-zod:
         specifier: ^0.8.3
-        version: 0.8.3(drizzle-orm@0.45.2(@neondatabase/serverless@0.10.0)(@opentelemetry/api@1.9.1)(@planetscale/database@1.19.0)(@prisma/client@5.22.0(prisma@5.22.0))(@types/better-sqlite3@7.6.13)(@types/pg@8.15.6)(@vercel/postgres@0.10.0(utf-8-validate@6.0.4))(better-sqlite3@12.2.0)(gel@2.0.0)(mysql2@3.11.3)(pg@8.20.0)(postgres@3.4.9)(prisma@5.22.0))(zod@4.1.12)
+        version: 0.8.3(drizzle-orm@0.45.2(@neondatabase/serverless@0.10.0)(@opentelemetry/api@1.9.1)(@planetscale/database@1.19.0)(@prisma/client@5.22.0(prisma@5.22.0))(@types/better-sqlite3@7.6.13)(@types/pg@8.15.6)(@vercel/postgres@0.10.0(utf-8-validate@6.0.4))(better-sqlite3@12.2.0)(gel@2.0.0)(mysql2@3.11.3)(pg@8.20.0)(postgres@3.4.9)(prisma@5.22.0))(zod@4.4.3)
       postgres:
         specifier: 'catalog:'
         version: 3.4.9
       zod:
         specifier: 'catalog:'
-        version: 4.1.12
+        version: 4.4.3
     devDependencies:
       '@healthtracker/eslint-config':
         specifier: workspace:*
@@ -635,7 +635,7 @@ importers:
         version: 5.9.3
       zod:
         specifier: 'catalog:'
-        version: 4.1.12
+        version: 4.4.3
 
   packages/validators:
     dependencies:
@@ -644,7 +644,7 @@ importers:
         version: 1.17.1
       zod:
         specifier: 'catalog:'
-        version: 4.1.12
+        version: 4.4.3
     devDependencies:
       '@healthtracker/eslint-config':
         specifier: workspace:*
@@ -9845,6 +9845,9 @@ packages:
   zod@4.1.12:
     resolution: {integrity: sha512-JInaHOamG8pt5+Ey8kGmdcAcg3OL9reK8ltczgHTAwNhMys/6ThXHityHxVV2p3fkw/c+MAvBHFVYHFZDmjMCQ==}
 
+  zod@4.4.3:
+    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
+
 snapshots:
 
   '@0no-co/graphql.web@1.2.0(graphql@15.8.0)':
@@ -13162,25 +13165,25 @@ snapshots:
     dependencies:
       tslib: 2.8.1
 
-  '@t3-oss/env-core@0.13.11(arktype@2.1.20)(typescript@5.9.3)(zod@4.1.12)':
+  '@t3-oss/env-core@0.13.11(arktype@2.1.20)(typescript@5.9.3)(zod@4.4.3)':
     optionalDependencies:
       arktype: 2.1.20
       typescript: 5.9.3
-      zod: 4.1.12
+      zod: 4.4.3
 
-  '@t3-oss/env-core@0.13.8(arktype@2.1.20)(typescript@5.9.3)(zod@4.1.12)':
+  '@t3-oss/env-core@0.13.8(arktype@2.1.20)(typescript@5.9.3)(zod@4.4.3)':
     optionalDependencies:
       arktype: 2.1.20
       typescript: 5.9.3
-      zod: 4.1.12
+      zod: 4.4.3
 
-  '@t3-oss/env-nextjs@0.13.11(arktype@2.1.20)(typescript@5.9.3)(zod@4.1.12)':
+  '@t3-oss/env-nextjs@0.13.11(arktype@2.1.20)(typescript@5.9.3)(zod@4.4.3)':
     dependencies:
-      '@t3-oss/env-core': 0.13.11(arktype@2.1.20)(typescript@5.9.3)(zod@4.1.12)
+      '@t3-oss/env-core': 0.13.11(arktype@2.1.20)(typescript@5.9.3)(zod@4.4.3)
     optionalDependencies:
       arktype: 2.1.20
       typescript: 5.9.3
-      zod: 4.1.12
+      zod: 4.4.3
 
   '@tailwindcss/node@4.3.0':
     dependencies:
@@ -14736,6 +14739,14 @@ snapshots:
       chai: 5.3.3
       tinyrainbow: 2.0.0
 
+  '@vitest/mocker@3.2.4(vite@7.3.2(@types/node@22.18.12)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.22.0)(yaml@2.9.0))':
+    dependencies:
+      '@vitest/spy': 3.2.4
+      estree-walker: 3.0.3
+      magic-string: 0.30.21
+    optionalDependencies:
+      vite: 7.3.2(@types/node@22.18.12)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.22.0)(yaml@2.9.0)
+
   '@vitest/mocker@3.2.4(vite@7.3.2(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.22.0)(yaml@2.9.0))':
     dependencies:
       '@vitest/spy': 3.2.4
@@ -15925,10 +15936,10 @@ snapshots:
       postgres: 3.4.9
       prisma: 5.22.0
 
-  drizzle-zod@0.8.3(drizzle-orm@0.45.2(@neondatabase/serverless@0.10.0)(@opentelemetry/api@1.9.1)(@planetscale/database@1.19.0)(@prisma/client@5.22.0(prisma@5.22.0))(@types/better-sqlite3@7.6.13)(@types/pg@8.15.6)(@vercel/postgres@0.10.0(utf-8-validate@6.0.4))(better-sqlite3@12.2.0)(gel@2.0.0)(mysql2@3.11.3)(pg@8.20.0)(postgres@3.4.9)(prisma@5.22.0))(zod@4.1.12):
+  drizzle-zod@0.8.3(drizzle-orm@0.45.2(@neondatabase/serverless@0.10.0)(@opentelemetry/api@1.9.1)(@planetscale/database@1.19.0)(@prisma/client@5.22.0(prisma@5.22.0))(@types/better-sqlite3@7.6.13)(@types/pg@8.15.6)(@vercel/postgres@0.10.0(utf-8-validate@6.0.4))(better-sqlite3@12.2.0)(gel@2.0.0)(mysql2@3.11.3)(pg@8.20.0)(postgres@3.4.9)(prisma@5.22.0))(zod@4.4.3):
     dependencies:
       drizzle-orm: 0.45.2(@neondatabase/serverless@0.10.0)(@opentelemetry/api@1.9.1)(@planetscale/database@1.19.0)(@prisma/client@5.22.0(prisma@5.22.0))(@types/better-sqlite3@7.6.13)(@types/pg@8.15.6)(@vercel/postgres@0.10.0(utf-8-validate@6.0.4))(better-sqlite3@12.2.0)(gel@2.0.0)(mysql2@3.11.3)(pg@8.20.0)(postgres@3.4.9)(prisma@5.22.0)
-      zod: 4.1.12
+      zod: 4.4.3
 
   dunder-proto@1.0.1:
     dependencies:
@@ -20160,7 +20171,7 @@ snapshots:
     dependencies:
       '@types/chai': 5.2.3
       '@vitest/expect': 3.2.4
-      '@vitest/mocker': 3.2.4(vite@7.3.2(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.22.0)(yaml@2.9.0))
+      '@vitest/mocker': 3.2.4(vite@7.3.2(@types/node@22.18.12)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.22.0)(yaml@2.9.0))
       '@vitest/pretty-format': 3.2.4
       '@vitest/runner': 3.2.4
       '@vitest/snapshot': 3.2.4
@@ -20486,3 +20497,5 @@ snapshots:
   zod@3.25.76: {}
 
   zod@4.1.12: {}
+
+  zod@4.4.3: {}
