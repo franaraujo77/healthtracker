@@ -57,6 +57,7 @@
   },
   "globalEnv": [
     "DATABASE_URL",
+    "POSTGRES_URL",
     "SUPABASE_URL",
     "SUPABASE_ANON_KEY",
     "SUPABASE_SERVICE_ROLE_KEY",
@@ -86,6 +87,7 @@
     "VERCEL",
     "VERCEL_ENV",
     "VERCEL_URL",
+    "ENABLE_EXPERIMENTAL_COREPACK",
     "npm_lifecycle_event"
   ]
 }
