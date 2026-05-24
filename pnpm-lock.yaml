@@ -181,8 +181,8 @@ importers:
         specifier: 'catalog:'
         version: 5.100.14(react@19.1.4)
       '@tanstack/react-query-persist-client':
-        specifier: ^5.90.8
-        version: 5.100.13(@tanstack/react-query@5.100.14(react@19.1.4))(react@19.1.4)
+        specifier: ^5.100.14
+        version: 5.100.14(@tanstack/react-query@5.100.14(react@19.1.4))(react@19.1.4)
       '@trpc/client':
         specifier: 'catalog:'
         version: 11.17.0(@trpc/server@11.17.0(typescript@5.9.3))(typescript@5.9.3)
@@ -4677,6 +4677,9 @@ packages:
   '@tanstack/query-persist-client-core@5.100.13':
     resolution: {integrity: sha512-y0er+wfRn+TL3uNQ9mUSJcoSv+DTkKN0QFFy+CLM+zZVwuQ/CCgR+ApAp7aAaU7XzPILuhM0XSgnDyMlwMIrvQ==}
 
+  '@tanstack/query-persist-client-core@5.100.14':
+    resolution: {integrity: sha512-mn60cqoQO/xB6aHxp/hxlSj5mcdcTO4tjj4SXSz5MKzkaMZnvcEGySz3+cGQOT8McREN56fL41L0eR//v5RwNw==}
+
   '@tanstack/react-form@1.32.0':
     resolution: {integrity: sha512-6WP5SQTA6/H9crCpvpq3ZppYWqtrdE5NjOy6ebABi6uAQPqhfTzrdjS9t40mCZCFtGI5585OhJV6zBP/KN2zcw==}
     peerDependencies:
@@ -4686,10 +4689,10 @@ packages:
       '@tanstack/react-start':
         optional: true
 
-  '@tanstack/react-query-persist-client@5.100.13':
-    resolution: {integrity: sha512-1Mvlkc4ay9sbdI9CuV4G3rbhSMk1lqST2lQZ0v7aLQzAEzARI9Kqz956PDhHIAVoKc6qTmwHoL7OauflcSCkNw==}
+  '@tanstack/react-query-persist-client@5.100.14':
+    resolution: {integrity: sha512-lQSnbJva85o7jGcJiIDrA8s3VGGx9zaBCgAljm0H1QcScU2iaDYnPuRLg/xI0k0dC45pgg9RTvpgJx5iVHRsjA==}
     peerDependencies:
-      '@tanstack/react-query': ^5.100.13
+      '@tanstack/react-query': ^5.100.14
       react: ^18 || ^19
 
   '@tanstack/react-query@5.100.14':
@@ -14351,6 +14354,10 @@ snapshots:
     dependencies:
       '@tanstack/query-core': 5.100.13
 
+  '@tanstack/query-persist-client-core@5.100.14':
+    dependencies:
+      '@tanstack/query-core': 5.100.14
+
   '@tanstack/react-form@1.32.0(react-dom@19.1.4(react@19.1.4))(react@19.1.4)':
     dependencies:
       '@tanstack/form-core': 1.32.0
@@ -14359,9 +14366,9 @@ snapshots:
     transitivePeerDependencies:
       - react-dom
 
-  '@tanstack/react-query-persist-client@5.100.13(@tanstack/react-query@5.100.14(react@19.1.4))(react@19.1.4)':
+  '@tanstack/react-query-persist-client@5.100.14(@tanstack/react-query@5.100.14(react@19.1.4))(react@19.1.4)':
     dependencies:
-      '@tanstack/query-persist-client-core': 5.100.13
+      '@tanstack/query-persist-client-core': 5.100.14
       '@tanstack/react-query': 5.100.14(react@19.1.4)
       react: 19.1.4
 
