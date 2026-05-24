@@ -45,6 +45,14 @@
         "@types/react-dom"
       ],
       "enabled": false
+    },
+    {
+      "description": "ESLint core + @eslint/js have a peer-dep matrix that breaks at install if either is bumped alone. Closed PRs #39 (@eslint/js 9→10) and #40 (eslint 9→10) both demonstrated the trap. Bump as one coordinated story alongside eslint-plugin-* peer-range audits — see epics.md Maintenance section M3. typescript-eslint and other plugins whose peer range explicitly accepts v9 + v10 are NOT ignored — they can land independently.",
+      "matchPackageNames": [
+        "eslint",
+        "@eslint/js"
+      ],
+      "enabled": false
     }
   ],
   "updateInternalDeps": true,
