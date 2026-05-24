@@ -44,7 +44,7 @@
     "@healthtracker/prettier-config": "workspace:*",
     "@healthtracker/tsconfig": "workspace:*",
     "@supabase/supabase-js": "catalog:",
-    "@testcontainers/postgresql": "^11.0.0",
+    "@testcontainers/postgresql": "^12.0.0",
     "@vitest/coverage-v8": "catalog:",
     "drizzle-kit": "^0.31.10",
     "eslint": "catalog:",
