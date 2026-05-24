@@ -28,7 +28,7 @@
     "@healthtracker/types": "workspace:*",
     "@healthtracker/validators": "workspace:*",
     "@trpc/server": "catalog:",
-    "superjson": "2.2.3",
+    "superjson": "2.2.6",
     "zod": "catalog:"
   },
   "devDependencies": {
