@@ -21,23 +21,26 @@ import * as schema from "./schema";
 //   - POSTGRES_URL is honoured as a fallback so a Vercel project
 //     originally configured for the Neon-style env var still works
 //     without a dashboard edit.
-const connectionString = process.env.DATABASE_URL ?? process.env.POSTGRES_URL;
-if (!connectionString) {
-  throw new Error(
-    "Missing DATABASE_URL (or POSTGRES_URL) — required by @healthtracker/db client",
-  );
-}
+//
+// Lazy connection: `@vercel/postgres`'s `sql` export was a lazy
+// tagged-template — importing it never opened a connection. Mocked
+// unit tests in `packages/api/__tests__` import `db` transitively via
+// `trpc.ts` and never need a real DB. To preserve that contract,
+// fall back to a syntactically-valid placeholder URL when no env var
+// is set: postgres-js validates the URL shape at construction but
+// only attempts the TCP connect on the first actual query. The
+// placeholder DSN can never resolve (`_no_database_url_/_set_`), so
+// any real query path that slips through without DATABASE_URL will
+// fail loudly with a connect error instead of silently succeeding.
+const PLACEHOLDER_URL = "postgres://_no_database_url_/_set_";
+const connectionString =
+  process.env.DATABASE_URL ?? process.env.POSTGRES_URL ?? PLACEHOLDER_URL;
 
-// Vercel serverless functions are short-lived; cap the per-instance
-// connection count low so a burst of cold starts doesn't blow through
-// Supabase's pooler connection limit. `prepare: false` is required when
-// pointing at Supabase's transaction-mode pooler (port 6543) and is
-// harmless on the session-mode pooler (port 5432) — leaving it on means
-// the same client works against either pooler URL.
-const client = postgres(connectionString, {
-  max: 1,
-  prepare: false,
-});
+// `max: 1` keeps each serverless instance from blowing through Supabase's
+// pooler connection limit during a cold-start burst. `prepare: false` is
+// required for the transaction-mode pooler (port 6543) and harmless on
+// session-mode (port 5432), so the same client works against either URL.
+const client = postgres(connectionString, { max: 1, prepare: false });
 
 export const db = drizzle(client, {
   schema,
