@@ -1831,3 +1831,34 @@ The Expo SDK ships as a coupled bundle. SDK 54's `bundledNativeModules.json` (Ex
 - It is **not** a CLAUDE.md "ops note" partial-index situation — it's a coupled SDK upgrade, which is the safer kind of breaking change (deterministic, well-documented by Expo) provided we treat it as one atomic unit.
 
 **Requirements:** none (operational). Touches: AR1 (monorepo), AR4 (Supabase pooler — unaffected), AR11 (mobile flow), NFR-A4 (a11y — full re-test).
+
+### M2: Tamagui 2.x upgrade (web + mobile UI seam)
+
+**Status:** `not-scheduled` — wait for a product trigger or for tamagui 1.x to enter security-only / EOL mode.
+
+**Trigger conditions (any of):**
+
+- Product needs a Tamagui 2.x feature (e.g., a new component or a stable API tamagui 1.x doesn't ship).
+- A peer dep we need (e.g., a future `react-native-reanimated` major, or a Next.js major that drops the current `@tamagui/next-plugin` ABI) requires Tamagui 2 as its peer.
+- Tamagui 1.x reaches EOL / stops receiving security fixes.
+
+**Why this is NOT a per-package story:**
+
+Tamagui ships as a coupled compiler + runtime bundle across `@tamagui/core`, `@tamagui/web`, `@tamagui/animations-css`, `@tamagui/animations-react-native`, `@tamagui/babel-plugin`, `@tamagui/next-plugin`, the `tamagui` umbrella, and the shared theme tokens we expose from `packages/ui/src/theme/`. All siblings must be on the same major version — mixing 1.x and 2.x breaks at type-check and runtime across `packages/ui`, `apps/web`, and `apps/expo`. Dependabot's closed PR #34 demonstrated the fragmentation hazard (it bumped only `@tamagui/core` to 2.0 while siblings stayed at `^1.144.4`). Both bot configs now ignore `tamagui` + `@tamagui/*` for this reason.
+
+**Scope when scheduled (rough — refine into stories at planning time):**
+
+- M2.1: Pin every `@tamagui/*` + `tamagui` catalog entry in `pnpm-workspace.yaml` to the same 2.x major; bump `tamagui` umbrella in lock-step.
+- M2.2: Apply the Tamagui 2.0 compiler migration — platform-arg-driven web/native resolution, inlined `TAMAGUI_TARGET` / `EXPO_OS` constants (rewrites parts of `next.config.js` and the Expo babel config).
+- M2.3: API renames sweep — `sheet`/`adapt`/`select` callsites across `packages/ui/src/**` (Story 0.2 design system) and `apps/web` + `apps/expo` consumers. Map every existing import to the 2.x equivalent.
+- M2.4: RNGH press-gesture overhaul — every Tamagui `<Button>` / pressable in the patient flows (Início CTAs, EmptyStateRecord, UploadSourceSheet, biometric unlock) needs a behaviour re-test for press-cancel + accessibility-action paths (NFR-A4).
+- M2.5: Tamagui 2's vite-plugin peer-dep was removed — verify nothing in the test toolchain (vitest + `@tamagui/babel-plugin`) regresses.
+- M2.6: Visual regression pass — Início, Histórico, Onboarding, Consent, Auth, Notification settings. Capture before/after screenshots for the patient-facing screens; flag any token resolution drift (e.g. `$biomarkerDeviation` rendering differently between 1.x and 2.x).
+- M2.7: A11y re-test — every screen with token-driven colour pairing (Story 3.3, Story 3.4 amber stale state, BiomarkerCard deviation states).
+
+**Dependencies / sequencing notes:**
+
+- Like M1, this is a horizontal change. Schedule **between epics** (ideally bundled with M1 in a single "platform upgrade sprint" if both trigger conditions fire together — they share the mobile QA burden and the EAS rebuild).
+- The compiler rewrite in M2.2 changes generated CSS / RN style output, so visual regression is the dominant risk surface. CI cannot catch this (no screenshot pipeline).
+
+**Requirements:** none (operational). Touches: AR1 (monorepo), AR11 (mobile flow), AR12 (web flow), NFR-A4 (a11y — full re-test).
