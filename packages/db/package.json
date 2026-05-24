@@ -34,9 +34,9 @@
     "with-env": "dotenv -e ../../.env --"
   },
   "dependencies": {
-    "@vercel/postgres": "^0.10.0",
     "drizzle-orm": "^0.45.2",
     "drizzle-zod": "^0.8.3",
+    "postgres": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
@@ -48,7 +48,6 @@
     "@vitest/coverage-v8": "catalog:",
     "drizzle-kit": "^0.31.10",
     "eslint": "catalog:",
-    "postgres": "catalog:",
     "prettier": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

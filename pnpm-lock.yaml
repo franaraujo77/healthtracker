@@ -531,15 +531,15 @@ importers:
 
   packages/db:
     dependencies:
-      "@vercel/postgres":
-        specifier: ^0.10.0
-        version: 0.10.0(utf-8-validate@6.0.4)
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@neondatabase/serverless@0.10.0)(@opentelemetry/api@1.9.1)(@planetscale/database@1.19.0)(@prisma/client@5.22.0(prisma@5.22.0))(@types/better-sqlite3@7.6.13)(@types/pg@8.15.6)(@vercel/postgres@0.10.0(utf-8-validate@6.0.4))(better-sqlite3@12.2.0)(gel@2.0.0)(mysql2@3.11.3)(pg@8.20.0)(postgres@3.4.9)(prisma@5.22.0)
       drizzle-zod:
         specifier: ^0.8.3
         version: 0.8.3(drizzle-orm@0.45.2(@neondatabase/serverless@0.10.0)(@opentelemetry/api@1.9.1)(@planetscale/database@1.19.0)(@prisma/client@5.22.0(prisma@5.22.0))(@types/better-sqlite3@7.6.13)(@types/pg@8.15.6)(@vercel/postgres@0.10.0(utf-8-validate@6.0.4))(better-sqlite3@12.2.0)(gel@2.0.0)(mysql2@3.11.3)(pg@8.20.0)(postgres@3.4.9)(prisma@5.22.0))(zod@4.1.12)
+      postgres:
+        specifier: "catalog:"
+        version: 3.4.9
       zod:
         specifier: "catalog:"
         version: 4.1.12
@@ -568,9 +568,6 @@ importers:
       eslint:
         specifier: "catalog:"
         version: 9.38.0(jiti@2.6.1)
-      postgres:
-        specifier: "catalog:"
-        version: 3.4.9
       prettier:
         specifier: "catalog:"
         version: 3.6.2
@@ -12511,12 +12508,6 @@ packages:
     peerDependencies:
       pg: ">=8.0"
 
-  pg-protocol@1.10.3:
-    resolution:
-      {
-        integrity: sha512-6DIBgBQaTKDJyxnXaLiLR8wBpQQcGWuAESkRBX/t6OwA8YsqP+iVSiond2EDy6Y/dsGk8rh/jtax3js5NeV7JQ==,
-      }
-
   pg-protocol@1.13.0:
     resolution:
       {
@@ -17334,6 +17325,7 @@ snapshots:
   "@neondatabase/serverless@0.9.5":
     dependencies:
       "@types/pg": 8.11.6
+    optional: true
 
   "@next/env@15.5.18": {}
 
@@ -19963,9 +19955,10 @@ snapshots:
 
   "@types/pg@8.11.6":
     dependencies:
-      "@types/node": 24.9.1
-      pg-protocol: 1.10.3
+      "@types/node": 25.9.1
+      pg-protocol: 1.13.0
       pg-types: 4.1.0
+    optional: true
 
   "@types/pg@8.15.6":
     dependencies:
@@ -20124,6 +20117,7 @@ snapshots:
       ws: 8.21.0(bufferutil@4.0.8)(utf-8-validate@6.0.4)
     transitivePeerDependencies:
       - utf-8-validate
+    optional: true
 
   "@vitest/coverage-v8@3.2.4(vitest@3.2.4(@types/node@25.9.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.48.0)(tsx@4.22.0)(yaml@2.9.0))":
     dependencies:
@@ -20831,6 +20825,7 @@ snapshots:
   bufferutil@4.0.8:
     dependencies:
       node-gyp-build: 4.8.4
+    optional: true
 
   buildcheck@0.0.7:
     optional: true
@@ -23617,7 +23612,8 @@ snapshots:
 
   node-forge@1.4.0: {}
 
-  node-gyp-build@4.8.4: {}
+  node-gyp-build@4.8.4:
+    optional: true
 
   node-int64@0.4.0: {}
 
@@ -23697,7 +23693,8 @@ snapshots:
       define-properties: 1.2.1
       es-object-atoms: 1.1.1
 
-  obuf@1.1.2: {}
+  obuf@1.1.2:
+    optional: true
 
   on-finished@2.3.0:
     dependencies:
@@ -23855,13 +23852,12 @@ snapshots:
 
   pg-int8@1.0.1: {}
 
-  pg-numeric@1.0.2: {}
+  pg-numeric@1.0.2:
+    optional: true
 
   pg-pool@3.13.0(pg@8.20.0):
     dependencies:
       pg: 8.20.0
-
-  pg-protocol@1.10.3: {}
 
   pg-protocol@1.13.0: {}
 
@@ -23882,6 +23878,7 @@ snapshots:
       postgres-date: 2.1.0
       postgres-interval: 3.0.0
       postgres-range: 1.1.4
+    optional: true
 
   pg@8.20.0:
     dependencies:
@@ -23957,25 +23954,30 @@ snapshots:
 
   postgres-array@2.0.0: {}
 
-  postgres-array@3.0.4: {}
+  postgres-array@3.0.4:
+    optional: true
 
   postgres-bytea@1.0.1: {}
 
   postgres-bytea@3.0.0:
     dependencies:
       obuf: 1.1.2
+    optional: true
 
   postgres-date@1.0.7: {}
 
-  postgres-date@2.1.0: {}
+  postgres-date@2.1.0:
+    optional: true
 
   postgres-interval@1.2.0:
     dependencies:
       xtend: 4.0.2
 
-  postgres-interval@3.0.0: {}
+  postgres-interval@3.0.0:
+    optional: true
 
-  postgres-range@1.1.4: {}
+  postgres-range@1.1.4:
+    optional: true
 
   postgres@3.4.9: {}
 
