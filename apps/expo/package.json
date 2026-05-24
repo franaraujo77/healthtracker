@@ -14,6 +14,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@expo-google-fonts/lora": "^0.4.1",
     "@healthtracker/config": "workspace:*",
     "@healthtracker/ui": "workspace:*",
     "@healthtracker/validators": "workspace:*",
@@ -36,6 +37,7 @@
     "expo-dev-client": "~6.0.16",
     "expo-device": "~8.0.9",
     "expo-document-picker": "~14.0.7",
+    "expo-font": "~14.0.8",
     "expo-image-picker": "~17.0.8",
     "expo-linking": "~8.0.8",
     "expo-local-authentication": "~17.0.8",

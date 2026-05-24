@@ -223,8 +223,11 @@ export const NOTIFICATION_KIND_TO_PREFERENCE = {
   complete: "resultsReady",
   pending_review: "reviewRequired",
   failed: "resultsReady",
+  // Story 4.1 — the LLM letter consumer fires this kind on
+  // `letters.status='complete'` transition; gated on `lettersReady`.
+  letter_ready: "lettersReady",
 } as const satisfies Record<
-  "complete" | "pending_review" | "failed",
+  "complete" | "pending_review" | "failed" | "letter_ready",
   keyof NotificationPreferencesInput
 >;
 export type NotificationKindForPreferences =
@@ -1230,3 +1233,110 @@ export function formatCachedUpdatedAtPtBr(epochMs: number): string {
     hour12: false,
   });
 }
+
+// =============================================================================
+// Story 4.1 — Streamed Letter narrative (Epic 4 kickoff)
+// =============================================================================
+
+/**
+ * Audit event names. Use these constants everywhere — never inline-
+ * string the event name. Reviewers grep `LETTER_AUDIT_*` to verify
+ * coverage (Epic 1 / Epic 2 retro discipline).
+ *
+ * - `letter.queued`     — enqueue-site writes (covered by the partial
+ *                          unique index on `audit_log(resource_id,
+ *                          event) WHERE event = 'letter.queued'`).
+ * - `letter.generated`  — LLM consumer on `status='complete'` transition.
+ * - `letter.read`       — SSE endpoint on connection open (legitimate
+ *                          repeat events for re-reads — Story 4.2).
+ */
+export const LETTER_AUDIT_QUEUED = "letter.queued" as const;
+export const LETTER_AUDIT_GENERATED = "letter.generated" as const;
+export const LETTER_AUDIT_READ = "letter.read" as const;
+
+/** AC4 — NFR-P2 budget: first SSE `type:"token"` flushed within 3 s. */
+export const LETTER_FIRST_TOKEN_MAX_MS = 3000;
+
+/**
+ * Anthropic model identifier used for Letter generation. Centralised
+ * here so a Sonnet bump (e.g. 4.6 → 4.7) is a one-line change. Story
+ * 4.1 anti-pattern: never use a retired identifier (`claude-3-*`,
+ * `claude-2-*`). Confirm via Context7 before bumping.
+ */
+export const LETTER_MODEL_ID = "claude-sonnet-4-6" as const;
+
+/** AC3 — direct SSE endpoint; NOT proxied through tRPC. */
+export const LETTER_STREAM_ROUTE = (letterId: string) =>
+  `/api/stream/letter/${letterId}`;
+
+/**
+ * Expo Router 6 full-screen modal route for the LetterReader (AC5).
+ * Mobile path: `apps/expo/src/app/cartas/[letterId].tsx`.
+ */
+export const CARTA_ROUTE = (letterId: string) => `/cartas/${letterId}`;
+
+/**
+ * AC5 — composite a11y label for the `<article>` root of LetterReader.
+ * UX spec line 1318. Caller passes a pt-BR-formatted date via
+ * `formatCollectedAtPtBr` / `formatCachedUpdatedAtPtBr`.
+ */
+export function letterReaderAriaLabelPtBr(formattedDate: string): string {
+  return `Carta do Seu Eu Passado — ${formattedDate}`;
+}
+
+/**
+ * AC5 — author attribution rendered at the close of the Letter body.
+ * Translates UX spec line 874 ("Your health record, compiled {date}")
+ * per UX-DR20.
+ */
+export function letterAuthorAttributionPtBr(formattedDate: string): string {
+  return `Seu registro de saúde, compilado em ${formattedDate}`;
+}
+
+/**
+ * AC11 — inline error message rendered by the LetterReader when the
+ * SSE stream emits `{type:"error", code:"LETTER_UNAVAILABLE"}`. UX
+ * spec line 881 ("Your letter is taking longer than expected —
+ * check back in a few minutes"). NEVER blocks the Fingerprint (the
+ * LetterReader is a separate route).
+ */
+export const LETTER_UNAVAILABLE_PT_BR =
+  "Sua carta está demorando mais do que o esperado. Volte em alguns minutos.";
+
+/**
+ * AC10 — copy shown when a free-tier patient opens the LetterReader.
+ * SSE endpoint emits `{type:"error", code:"PREMIUM_REQUIRED"}` and
+ * the screen renders this message + the upgrade CTA.
+ */
+export const LETTER_PREMIUM_REQUIRED_PT_BR =
+  "Cartas personalizadas estão disponíveis no plano Premium. Toque para saber mais.";
+
+export const LETTER_PREMIUM_UPGRADE_CTA_PT_BR = "Saber mais sobre o Premium";
+
+/** AC11 — generic streaming-not-yet-ready placeholder. */
+export const LETTER_PREPARING_PT_BR = "Preparando sua carta…";
+
+/**
+ * Push-notification copy fired by `services/llm` when `letters.status`
+ * transitions to `complete` and the patient's `lettersReady`
+ * preference is `true`. Factual register — UX-DR20 forbids urgency
+ * or alarm. Title is the headline; body is the secondary line.
+ */
+export const LETTER_NOTIFICATION_TITLE_PT_BR = "Sua carta está pronta";
+export const LETTER_NOTIFICATION_BODY_PT_BR =
+  "Sua nova carta personalizada chegou. Toque para abrir.";
+
+/**
+ * Story 4.2 (preview) — re-read CTA label. Listed here so Story 4.2
+ * doesn't need to amend this section.
+ */
+export const LETTER_READ_CTA_PT_BR = "Ler carta";
+
+/**
+ * AC7 — diagnostic-phrasing regex for the ANVISA replay test. Any
+ * Letter body sampled across `services/llm`'s fixture replay MUST
+ * yield zero matches. The "u" flag enables Unicode property
+ * matching for `\b` to behave correctly around pt-BR diacritics.
+ */
+export const LETTER_DIAGNOSTIC_PHRASE_REGEX =
+  /\b(você tem|isso indica|você deve)\b/iu;

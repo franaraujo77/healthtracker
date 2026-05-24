@@ -79,14 +79,23 @@ describe("buildNotificationPayload", () => {
  */
 function makeFakeBoss() {
   let handler:
-    | ((jobs: { data: { patientId: string; payload: { uploadId: string; kind: string } } }[]) => Promise<void>)
+    | ((
+        jobs: {
+          data: {
+            patientId: string;
+            payload: { uploadId: string; kind: string };
+          };
+        }[],
+      ) => Promise<void>)
     | undefined;
   const work = vi.fn((_name: string, _opts: unknown, h: typeof handler) => {
     handler = h;
     return Promise.resolve();
   });
   return {
-    boss: { work } as unknown as Parameters<typeof registerNotificationsConsumer>[0],
+    boss: { work } as unknown as Parameters<
+      typeof registerNotificationsConsumer
+    >[0],
     getHandler: () => handler!,
   };
 }
@@ -124,7 +133,10 @@ describe("registerNotificationsConsumer handler", () => {
     });
     await getHandler()([
       {
-        data: { patientId: "p-1", payload: { uploadId: UPLOAD.id, kind: "complete" } },
+        data: {
+          patientId: "p-1",
+          payload: { uploadId: UPLOAD.id, kind: "complete" },
+        },
       },
     ]);
     expect(sendBatch).not.toHaveBeenCalled();
@@ -153,7 +165,10 @@ describe("registerNotificationsConsumer handler", () => {
     });
     await getHandler()([
       {
-        data: { patientId: "p-1", payload: { uploadId: UPLOAD.id, kind: "complete" } },
+        data: {
+          patientId: "p-1",
+          payload: { uploadId: UPLOAD.id, kind: "complete" },
+        },
       },
     ]);
     expect(sendBatch).toHaveBeenCalledTimes(1);
@@ -172,7 +187,10 @@ describe("registerNotificationsConsumer handler", () => {
     });
     await getHandler()([
       {
-        data: { patientId: "p-1", payload: { uploadId: UPLOAD.id, kind: "complete" } },
+        data: {
+          patientId: "p-1",
+          payload: { uploadId: UPLOAD.id, kind: "complete" },
+        },
       },
     ]);
     expect(sendBatch).not.toHaveBeenCalled();
@@ -273,5 +291,31 @@ describe("R2-P229 — kind→preference snapshot sync", () => {
     expect(await isPreferenceMuted(sqlMuted, "p", "complete")).toBe(true);
     expect(await isPreferenceMuted(sqlMuted, "p", "pending_review")).toBe(true);
     expect(await isPreferenceMuted(sqlMuted, "p", "failed")).toBe(true);
+    // Story 4.1 — `letter_ready` folds into `lettersReady`.
+    expect(await isPreferenceMuted(sqlMuted, "p", "letter_ready")).toBe(true);
+  });
+});
+
+describe("Story 4.1 — letter_ready push copy", () => {
+  it("renders the pt-BR letter_ready copy and deep-links to /cartas/:letterId", () => {
+    const out = buildNotificationPayload(
+      UPLOAD,
+      "letter_ready",
+      [TOKENS[0]!],
+      "letter-uuid-123",
+    );
+    expect(out[0]?.title).toBe("Sua carta está pronta");
+    expect(out[0]?.body).toBe(
+      "Sua nova carta personalizada chegou. Toque para abrir.",
+    );
+    expect(out[0]?.data.deepLink).toBe("/cartas/letter-uuid-123");
+  });
+
+  it("falls back to the uploads deep link when letterId is missing", () => {
+    // Defense-in-depth — a malformed job payload (no letterId)
+    // routes to the upload detail rather than producing a /cartas/
+    // path that won't resolve.
+    const out = buildNotificationPayload(UPLOAD, "letter_ready", [TOKENS[0]!]);
+    expect(out[0]?.data.deepLink).toBe(`/inicio/uploads/${UPLOAD.id}`);
   });
 });

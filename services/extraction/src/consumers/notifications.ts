@@ -18,11 +18,17 @@ import type { JobPayload } from "@healthtracker/types";
  * Push API outages.
  */
 
-export type NotificationKind = "complete" | "pending_review" | "failed";
+export type NotificationKind =
+  | "complete"
+  | "pending_review"
+  | "failed"
+  | "letter_ready";
 
 interface NotificationSendPayload {
   uploadId: string;
   kind: NotificationKind;
+  /** Story 4.1 — required when `kind === "letter_ready"`; ignored otherwise. */
+  letterId?: string;
 }
 
 interface PushTokenRow {
@@ -72,6 +78,12 @@ const COPY: Record<NotificationKind, (upload: UploadRow) => NotificationCopy> =
         "Não conseguimos processar este arquivo. Toque para ver as opções.",
       body: bodyForUpload(u),
     }),
+    // Story 4.1 — push fired by `services/llm` on letters.status →
+    // 'complete'. Factual register (UX-DR20 — no urgency).
+    letter_ready: () => ({
+      title: "Sua carta está pronta",
+      body: "Sua nova carta personalizada chegou. Toque para abrir.",
+    }),
   };
 
 function truncate(s: string, n: number): string {
@@ -100,6 +112,7 @@ export function buildNotificationPayload(
   upload: UploadRow,
   kind: NotificationKind,
   tokens: string[],
+  letterId?: string,
 ): {
   to: string;
   title: string;
@@ -107,6 +120,12 @@ export function buildNotificationPayload(
   data: { uploadId: string; kind: NotificationKind; deepLink: string };
 }[] {
   const copy = COPY[kind](upload);
+  // Story 4.1 — letter_ready taps deep-link to the cartas route;
+  // every other kind routes to the per-upload detail screen.
+  const deepLink =
+    kind === "letter_ready" && letterId
+      ? `/cartas/${letterId}`
+      : `/inicio/uploads/${upload.id}`;
   return tokens.map((token) => ({
     to: token,
     title: copy.title,
@@ -114,7 +133,7 @@ export function buildNotificationPayload(
     data: {
       uploadId: upload.id,
       kind,
-      deepLink: `/inicio/uploads/${upload.id}`,
+      deepLink,
     },
   }));
 }
@@ -192,6 +211,11 @@ export async function isPreferenceMuted(
       return row.results_ready === false;
     case "pending_review":
       return row.review_required === false;
+    case "letter_ready":
+      // Story 4.1 — folded into `letters_ready`. Independent toggle
+      // from `results_ready` because Letter delivery has a separate
+      // emotional weight in the UX (UX spec lines 769–778).
+      return row.letters_ready === false;
     default: {
       const exhaustive: never = kind;
       void exhaustive;
@@ -212,7 +236,7 @@ export async function registerNotificationsConsumer(
     { batchSize: 10 },
     async (jobs) => {
       for (const job of jobs) {
-        const { uploadId, kind } = job.data.payload;
+        const { uploadId, kind, letterId } = job.data.payload;
         const patientId = job.data.patientId;
 
         // Story 2.8 — preference gate. Skip the Expo Push POST when
@@ -262,6 +286,7 @@ export async function registerNotificationsConsumer(
           upload,
           kind,
           tokens.map((t) => t.expo_token),
+          letterId,
         );
         const tickets = await deps.expoPushClient.sendBatch(messages);
 

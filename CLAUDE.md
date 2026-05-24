@@ -134,7 +134,7 @@ pnpm dev:ios       # iOS simulator
 pnpm dev:android   # Android emulator
 ```
 
-**Environment**: Copy `.env.example` to `.env` at the repo root before running anything. Required vars: `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `CORS_ORIGIN`. Web scripts use `with-env` to inject these.
+**Environment**: Copy `.env.example` to `.env` at the repo root before running anything. Required vars: `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `CORS_ORIGIN`. Web scripts use `with-env` to inject these. Story 4.1 adds `ANTHROPIC_API_KEY` (NFR-S6: empty in dev → stub adapter; non-empty in prod → real Claude Sonnet, DPA-gated), `LLM_SERVICE_URL`, and `EXPO_PUBLIC_LLM_SERVICE_URL` for the persistent `services/llm` SSE server (`pnpm --filter @healthtracker/llm-service dev` on `:3001`).
 
 ## Architecture
 

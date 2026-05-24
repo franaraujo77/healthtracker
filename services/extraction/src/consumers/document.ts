@@ -5,6 +5,7 @@ import type { ExtractDocumentPayload, JobPayload } from "@healthtracker/types";
 
 import type { TextractAdapter } from "../textract/adapter.js";
 import { emitNotificationEvent } from "../notifications/emit.js";
+import { emitLetterQueued } from "../notifications/letters-emit.js";
 import { dispatchExtractedFields } from "../pipeline/dispatch.js";
 import {
   applyDeadLetter,
@@ -312,6 +313,21 @@ export async function handleDocumentJob(
           conflicts: outcome.conflictCount,
         },
       });
+      // Story 4.1 — Letter enqueue piggybacks the upload-complete
+      // tx so the queue write and the status transition are atomic.
+      // `emitLetterQueued` returns `{enqueued: false, reason}` for
+      // every skip path (free tier, missing consent, muted pref,
+      // already queued by the API path); it never throws on skip
+      // (NFR-I3 — Letter failure must not block uploads).
+      const letterResult = await emitLetterQueued(tx, {
+        patientId,
+        uploadId,
+      });
+      if (!letterResult.enqueued) {
+        console.log(
+          `[extraction.document] uploadId=${uploadId}: letter skipped (${letterResult.reason})`,
+        );
+      }
     });
   } catch (err) {
     console.error(
