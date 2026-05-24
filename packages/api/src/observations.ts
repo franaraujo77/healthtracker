@@ -265,7 +265,7 @@ export async function writeBiaObservations(
     // so the client renders the overwrite modal.
     const code =
       typeof err === "object" && err !== null && "code" in err
-        ? (err as { code: unknown }).code
+        ? err.code
         : undefined;
     if (code === "23505") {
       console.warn(

@@ -183,7 +183,7 @@ export function usePushNotifications(): void {
           | undefined;
         const deepLink = data?.deepLink;
         if (typeof deepLink === "string" && deepLink.startsWith("/")) {
-          router.push(deepLink as Parameters<typeof router.push>[0]);
+          router.push(deepLink);
         }
       },
     );
