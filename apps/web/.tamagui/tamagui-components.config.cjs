@@ -9999,7 +9999,6 @@ var require_ChildListCollection = __commonJS({
             ),
             _step;
           !(_step = _iterator()).done;
-
         ) {
           var listSet = _step.value;
           for (
@@ -10008,7 +10007,6 @@ var require_ChildListCollection = __commonJS({
               ),
               _step2;
             !(_step2 = _iterator2()).done;
-
           ) {
             var list = _step2.value;
             fn(list);
@@ -10028,7 +10026,6 @@ var require_ChildListCollection = __commonJS({
             ),
             _step3;
           !(_step3 = _iterator3()).done;
-
         ) {
           var list = _step3.value;
           fn(list);
@@ -10047,7 +10044,6 @@ var require_ChildListCollection = __commonJS({
             ),
             _step4;
           !(_step4 = _iterator4()).done;
-
         ) {
           var list = _step4.value;
           if (fn(list)) {
@@ -10554,7 +10550,6 @@ var require_ViewabilityHelper = __commonJS({
             ),
             _step;
           !(_step = _iterator()).done;
-
         ) {
           var _step$value = _step.value,
             key = _step$value[0],
@@ -10569,7 +10564,6 @@ var require_ViewabilityHelper = __commonJS({
             ),
             _step2;
           !(_step2 = _iterator2()).done;
-
         ) {
           var _step2$value = _step2.value,
             _key = _step2$value[0],
@@ -11268,7 +11262,9 @@ var require_VirtualizedList = __commonJS({
       return null;
     }
     __name(findLastWhere, "findLastWhere");
-    var VirtualizedList = class _VirtualizedList extends _StateSafePureComponent.default {
+    var VirtualizedList = class _VirtualizedList
+      extends _StateSafePureComponent.default
+    {
       static {
         __name(this, "VirtualizedList");
       }
@@ -12532,7 +12528,6 @@ var require_VirtualizedList = __commonJS({
               ),
               _step;
             !(_step = _iterator()).done;
-
           ) {
             var section = _step.value;
             if (section.isSpacer) {
@@ -14587,7 +14582,6 @@ var require_AnimatedWithChildren = __commonJS({
               ),
               _step;
             !(_step = _iterator()).done;
-
           ) {
             var child = _step.value;
             child.__makeNative(platformConfig);
@@ -14641,7 +14635,6 @@ var require_AnimatedWithChildren = __commonJS({
               ),
               _step2;
             !(_step2 = _iterator2()).done;
-
           ) {
             var child = _step2.value;
             if (child.__getValue) {
@@ -14888,7 +14881,9 @@ var require_AnimatedInterpolation = __commonJS({
       );
     }
     __name(checkInfiniteRange, "checkInfiniteRange");
-    var AnimatedInterpolation = class _AnimatedInterpolation extends _AnimatedWithChildren.default {
+    var AnimatedInterpolation = class _AnimatedInterpolation
+      extends _AnimatedWithChildren.default
+    {
       static {
         __name(this, "AnimatedInterpolation");
       }
@@ -17147,7 +17142,6 @@ var require_VirtualizedSectionList = __commonJS({
             ),
             _step;
           !(_step = _iterator()).done;
-
         ) {
           var section = _step.value;
           if (stickyHeaderIndices != null) {
