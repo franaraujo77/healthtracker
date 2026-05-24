@@ -17,6 +17,7 @@ import {
 } from "@healthtracker/validators";
 
 import type { QueryCachePersister } from "~/lib/query-cache-persister";
+import { env } from "~/env";
 import {
   BIOMETRIC_ENABLED_KEY,
   BIOMETRIC_ENABLED_VALUE,
@@ -169,7 +170,7 @@ async function evaluateBiometricGate(): Promise<void> {
 }
 
 Sentry.init({
-  dsn: process.env.EXPO_PUBLIC_SENTRY_DSN,
+  dsn: env.EXPO_PUBLIC_SENTRY_DSN,
   tracesSampleRate: 0.1,
   enableNativeCrashHandling: true,
   debug: __DEV__,

@@ -19,8 +19,9 @@ export interface LoincResolution {
  * Case-insensitive match on `biomarker_name_pt`. Returns null on miss.
  *
  * The worker uses raw `postgres` SQL on its own connection; this
- * version uses Drizzle bound to the API's `@vercel/postgres` client.
- * The semantic contract is identical (snapshot-pinned by tests).
+ * version uses Drizzle bound to the API's shared postgres-js client
+ * (`packages/db/src/client.ts`). The semantic contract is identical
+ * (snapshot-pinned by tests).
  */
 export async function resolveLoincCode(
   database: AuditDb,

@@ -14,9 +14,11 @@ type WorkerSql = postgres.Sql | postgres.TransactionSql;
  * Mirrors the contracts of `packages/api/src/upload-transitions.ts`
  * (Story 2.1's `applyUploadTransition` + `applyDeadLetter`). The
  * worker cannot import that helper directly: the API uses Drizzle
- * bound to `@vercel/postgres`, the worker uses the `postgres` driver
- * on a direct (non-PgBouncer) connection (pg-boss requires session-
- * mode for advisory locks). Duplicating the SQL is the trade-off.
+ * bound to a shared postgres-js client (`packages/db/src/client.ts`)
+ * with a pooler connection sized for serverless cold-starts; the
+ * worker uses `postgres` on a direct (non-pooled) connection because
+ * pg-boss requires session-mode for advisory locks. Duplicating the
+ * SQL is the trade-off.
  *
  * Risk: if the API helper's SQL contract drifts, this file gets out
  * of sync. The Story 2.3 spec calls for a snapshot test that diffs
