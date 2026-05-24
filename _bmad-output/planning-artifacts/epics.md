@@ -1795,3 +1795,39 @@ An operator can view a queue of low-confidence extraction results (anonymised), 
 **Then** index DDL uses `CONCURRENTLY` per the CLAUDE.md ops note and the rollout plan is documented in the PR.
 
 **Requirements:** AR6, AR10, AR14, NFR-S7
+
+---
+
+## Maintenance Backlog
+
+> Cross-cutting operational work that doesn't fit a product epic. These are tracked here so they're visible during sprint planning, but they intentionally don't have story numbers — they're scheduled as maintenance sprints between product epics, or triggered when a specific blocker forces them.
+
+### M1: Expo SDK 56 upgrade (mobile only)
+
+**Status:** `not-scheduled` — wait for a product trigger or for SDK 54 to approach EOL.
+
+**Trigger conditions (any of):**
+
+- Product needs an Expo SDK 56-only feature (e.g., a new push notification API, a new background task surface, or a privacy-manifest requirement for App Store submission).
+- Expo SDK 54 reaches EOL or stops receiving security patches.
+- A dependency we need lands a new major that requires SDK 56 as a peer (e.g., a future `react-native-reanimated` 5.x or `victory-native` 5.x).
+
+**Why this is NOT a per-package story:**
+
+The Expo SDK ships as a coupled bundle. SDK 54's `bundledNativeModules.json` (Expo's EAS-validated compatibility matrix) pins exact versions of every `expo-*` and the core RN native peers. Bumping any one out of band (e.g., `expo-constants` from `~18.0.10` to `56.0.x`, or `react-native-worklets` from `0.5.1` to `0.8.x`) breaks the native ABI between modules at runtime — and CI cannot detect it because the mobile app isn't built or run in CI (no EAS Build step on PR checks). Dependabot / Renovate are configured to ignore Expo + React Native package families for this reason; see `.github/dependabot.yml` and `.github/renovate.json`.
+
+**Scope when scheduled (rough — refine into stories at planning time):**
+
+- M1.1: Run Expo's official SDK 54 → 56 upgrade guide; bump `expo`, all `expo-*`, `react-native` (likely 0.81 → 0.82+), `react-native-reanimated` (4.1 → 4.x or 5.x), and all `react-native-*` peers in a single coordinated PR.
+- M1.2: Decide the iOS floor. SDK 56's `expo-system-ui@56.0.0` raises minimum iOS to 16.4 (drops iPhone 8 / 8 Plus and earlier). This is a product decision — gather analytics on the user-base iOS distribution before committing.
+- M1.3: EAS Build native rebuild (iOS + Android); install fresh dev-client on test devices.
+- M1.4: Full mobile QA pass — every screen and every native API surface (camera, document picker, image picker, biometric auth, secure store, notifications, local notifications, deep links, audit-log emission paths).
+- M1.5: Update `Info.plist` (iOS minimum target), `app.json` / `app.config.ts` (SDK version, runtime version policy), and the `bundledNativeModules.json` reference in this doc.
+- M1.6: App Store + Google Play resubmission with new minimum OS metadata.
+
+**Dependencies / sequencing notes:**
+
+- This is a horizontal infrastructure change. Schedule it **between epics** (e.g., after Epic 3 close-out, before Epic 4 mobile work begins) so it doesn't block a feature epic's mobile QA window.
+- It is **not** a CLAUDE.md "ops note" partial-index situation — it's a coupled SDK upgrade, which is the safer kind of breaking change (deterministic, well-documented by Expo) provided we treat it as one atomic unit.
+
+**Requirements:** none (operational). Touches: AR1 (monorepo), AR4 (Supabase pooler — unaffected), AR11 (mobile flow), NFR-A4 (a11y — full re-test).

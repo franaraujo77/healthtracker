@@ -3,6 +3,12 @@
 # GitHub-Actions ecosystem updates and for security advisories that
 # Renovate doesn't surface (e.g. GHSA bumps with `security-updates` flow).
 #
+# Expo and React Native packages are explicitly ignored: their versions
+# are governed by Expo SDK's `bundledNativeModules.json` (the EAS-validated
+# compat matrix), and bumping any one out of band breaks native ABI
+# coupling that CI cannot detect (no EAS Build on PR checks). The SDK
+# upgrade is the atomic unit of work — see epics.md "Maintenance" section.
+#
 # The `groups` block below ensures that when Dependabot opens a turbo
 # bump it includes ALL turbo-family packages in one PR. Without this,
 # bumping `turbo` alone leaves `@turbo/gen` and `eslint-plugin-turbo`
@@ -22,6 +28,18 @@ updates:
           - "@turbo/*"
           - "eslint-plugin-turbo"
           - "eslint-config-turbo"
+    ignore:
+      # Expo SDK is a coupled bundle (bundledNativeModules.json). Bump
+      # via a single SDK-upgrade story, not per-package.
+      - dependency-name: "expo"
+      - dependency-name: "expo-*"
+      # React Native + its native peers ship with the SDK; they cannot
+      # safely drift from the SDK-pinned versions.
+      - dependency-name: "react-native"
+      - dependency-name: "react-native-*"
+      - dependency-name: "@react-native/*"
+      - dependency-name: "@react-native-async-storage/*"
+      - dependency-name: "@react-native-community/*"
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
