@@ -16,7 +16,7 @@
       ]
     },
     {
-      "description": "Expo SDK is a coupled bundle (bundledNativeModules.json). Bump via a single SDK-upgrade story, not per-package — see epics.md Maintenance section.",
+      "description": "Expo SDK is a coupled bundle (bundledNativeModules.json). Bump via a single SDK-upgrade story, not per-package — see epics.md Maintenance section M1.",
       "matchPackagePatterns": [
         "^expo$",
         "^expo-",
@@ -25,6 +25,14 @@
         "^@react-native/",
         "^@react-native-async-storage/",
         "^@react-native-community/"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Tamagui is a coupled compiler/runtime bundle across @tamagui/core, @tamagui/web, @tamagui/animations-*, @tamagui/babel-plugin, @tamagui/next-plugin, and the tamagui umbrella. Per-package bumps fragment the ecosystem (closed PR #34). Bump via a single Tamagui-upgrade story — see epics.md Maintenance section M2.",
+      "matchPackagePatterns": [
+        "^tamagui$",
+        "^@tamagui/"
       ],
       "enabled": false
     }
