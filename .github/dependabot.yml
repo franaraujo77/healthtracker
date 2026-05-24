@@ -78,6 +78,16 @@ updates:
       # NOT ignored — they can land independently.
       - dependency-name: "eslint"
       - dependency-name: "@eslint/js"
+      # @types/node major must match the Node runtime engines pin
+      # (package.json `engines.node: ^22.21.0`). Bumping types ahead of
+      # runtime lets code compile against APIs the runtime doesn't
+      # have — `tsc` can't catch this. Closed PR #45 demonstrated:
+      # dependabot tried to jump catalog `^22.18.12` → `^25.9.1` while
+      # the engines stayed at ^22. We still want 22.x patch/minor
+      # bumps (security fixes), so ignore only the major.
+      - dependency-name: "@types/node"
+        update-types:
+          - "version-update:semver-major"
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
