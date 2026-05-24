@@ -53,6 +53,12 @@
         "@eslint/js"
       ],
       "enabled": false
+    },
+    {
+      "description": "@types/node major must match the Node runtime engines pin (package.json `engines.node: ^22.21.0`). Bumping types ahead of runtime lets code compile against APIs the runtime doesn't have — tsc can't catch this. Closed PR #45 demonstrated: dependabot tried catalog ^22.18.12 → ^25.9.1 while engines stayed at ^22. Patches/minors within the same major are still welcome (security fixes).",
+      "matchPackageNames": ["@types/node"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
     }
   ],
   "updateInternalDeps": true,
