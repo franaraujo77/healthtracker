@@ -1814,11 +1814,11 @@ An operator can view a queue of low-confidence extraction results (anonymised), 
 
 **Why this is NOT a per-package story:**
 
-The Expo SDK ships as a coupled bundle. SDK 54's `bundledNativeModules.json` (Expo's EAS-validated compatibility matrix) pins exact versions of every `expo-*` and the core RN native peers. Bumping any one out of band (e.g., `expo-constants` from `~18.0.10` to `56.0.x`, or `react-native-worklets` from `0.5.1` to `0.8.x`) breaks the native ABI between modules at runtime — and CI cannot detect it because the mobile app isn't built or run in CI (no EAS Build step on PR checks). Dependabot / Renovate are configured to ignore Expo + React Native package families for this reason; see `.github/dependabot.yml` and `.github/renovate.json`.
+The Expo SDK ships as a coupled bundle. SDK 54's `bundledNativeModules.json` (Expo's EAS-validated compatibility matrix) pins exact versions of every `expo-*`, the core RN native peers, AND React itself (`react@19.1.0`, plus matched `react-dom` and `@types/react`). Bumping any one out of band (e.g., `expo-constants` from `~18.0.10` to `56.0.x`, `react-native-worklets` from `0.5.1` to `0.8.x`, or `react` from `19.1.4` to `19.2.6` per closed PR #37) breaks the native ABI between modules at runtime — and CI cannot detect it because the mobile app isn't built or run in CI (no EAS Build step on PR checks). Dependabot / Renovate are configured to ignore Expo + React Native + React-core package families for this reason; see `.github/dependabot.yml` and `.github/renovate.json`.
 
 **Scope when scheduled (rough — refine into stories at planning time):**
 
-- M1.1: Run Expo's official SDK 54 → 56 upgrade guide; bump `expo`, all `expo-*`, `react-native` (likely 0.81 → 0.82+), `react-native-reanimated` (4.1 → 4.x or 5.x), and all `react-native-*` peers in a single coordinated PR.
+- M1.1: Run Expo's official SDK 54 → 56 upgrade guide; bump `expo`, all `expo-*`, `react-native` (likely 0.81 → 0.82+), `react-native-reanimated` (4.1 → 4.x or 5.x), `react` + `react-dom` + `@types/react` + `@types/react-dom` (to whatever SDK 56's `bundledNativeModules.json` pins), and all `react-native-*` peers in a single coordinated PR.
 - M1.2: Decide the iOS floor. SDK 56's `expo-system-ui@56.0.0` raises minimum iOS to 16.4 (drops iPhone 8 / 8 Plus and earlier). This is a product decision — gather analytics on the user-base iOS distribution before committing.
 - M1.3: EAS Build native rebuild (iOS + Android); install fresh dev-client on test devices.
 - M1.4: Full mobile QA pass — every screen and every native API surface (camera, document picker, image picker, biometric auth, secure store, notifications, local notifications, deep links, audit-log emission paths).
