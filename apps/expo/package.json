@@ -32,7 +32,7 @@
     "@trpc/server": "catalog:",
     "@trpc/tanstack-react-query": "catalog:",
     "expo": "~54.0.20",
-    "expo-constants": "~18.0.10",
+    "expo-constants": "~56.0.15",
     "expo-dev-client": "~6.0.16",
     "expo-device": "~8.0.9",
     "expo-document-picker": "~14.0.7",
