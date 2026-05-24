@@ -3,15 +3,18 @@
 # GitHub-Actions ecosystem updates and for security advisories that
 # Renovate doesn't surface (e.g. GHSA bumps with `security-updates` flow).
 #
-# Expo, React Native, Tamagui, and React (core + types) packages are
-# explicitly ignored: their versions are governed by per-ecosystem
-# coupling that CI cannot detect (Expo by `bundledNativeModules.json`,
-# RN by Expo SDK, Tamagui by its compiler/runtime ABI across
-# @tamagui/* siblings, React by Expo SDK 54's exact `react@19.1.0` pin
-# plus the matched `react-dom`/`react-native` peer). Bumping any one
-# out of band breaks the others at type-check or runtime. The
-# ecosystem upgrade is the atomic unit of work — see epics.md
-# "Maintenance" section (M1 Expo SDK 56, M2 Tamagui 2.x).
+# Expo, React Native, Tamagui, React (core + types), and ESLint
+# core+@eslint/js packages are explicitly ignored: their versions are
+# governed by per-ecosystem coupling that CI cannot detect (Expo by
+# `bundledNativeModules.json`, RN by Expo SDK, Tamagui by its
+# compiler/runtime ABI across @tamagui/* siblings, React by Expo SDK
+# 54's exact `react@19.1.0` pin plus the matched `react-dom`/
+# `react-native` peer, ESLint by the eslint↔@eslint/js↔eslint-plugin-*
+# peer-dep matrix that breaks at install time if any one is bumped
+# alone). Bumping any one out of band breaks the others at install
+# time, type-check, or runtime. The ecosystem upgrade is the atomic
+# unit of work — see epics.md "Maintenance" section (M1 Expo SDK 56,
+# M2 Tamagui 2.x, M3 ESLint v10).
 #
 # The `groups` block below ensures that when Dependabot opens a turbo
 # bump it includes ALL turbo-family packages in one PR. Without this,
@@ -62,6 +65,19 @@ updates:
       - dependency-name: "react-dom"
       - dependency-name: "@types/react"
       - dependency-name: "@types/react-dom"
+      # ESLint v10 has a peer-dep matrix that breaks at install if any
+      # piece is bumped alone: `@eslint/js@10` requires `eslint@^10`,
+      # most `eslint-plugin-*` peers (esp. @next/eslint-plugin-next)
+      # have not broadly published v10 ranges yet, and the
+      # `unstable_native_nodejs_ts_config` flag the workspace uses
+      # would need a v10 audit. Closed PRs #39 (@eslint/js 9→10) and
+      # #40 (eslint 9→10) both demonstrated the trap. Bump as one
+      # coordinated story — see epics.md M3 ESLint v10 upgrade.
+      # NOTE: typescript-eslint (and other downstream plugins whose
+      # peer range explicitly accepts both v9 + v10) are intentionally
+      # NOT ignored — they can land independently.
+      - dependency-name: "eslint"
+      - dependency-name: "@eslint/js"
   - package-ecosystem: github-actions
     directory: "/"
     schedule:

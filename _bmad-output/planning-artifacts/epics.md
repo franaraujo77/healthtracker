@@ -1862,3 +1862,35 @@ Tamagui ships as a coupled compiler + runtime bundle across `@tamagui/core`, `@t
 - The compiler rewrite in M2.2 changes generated CSS / RN style output, so visual regression is the dominant risk surface. CI cannot catch this (no screenshot pipeline).
 
 **Requirements:** none (operational). Touches: AR1 (monorepo), AR11 (mobile flow), AR12 (web flow), NFR-A4 (a11y — full re-test).
+
+### M3: ESLint v10 family upgrade (tooling only)
+
+**Status:** `not-scheduled` — low priority. ESLint v9 is still actively maintained; schedule when v9 enters security-only mode, OR when a dep we need requires v10 as a peer, OR when our own rule set wants a v10-only feature.
+
+**Trigger conditions (any of):**
+
+- ESLint v9 reaches EOL / security-only.
+- A plugin we depend on (`@next/eslint-plugin-next`, `eslint-plugin-react`, `eslint-plugin-react-hooks`, `eslint-plugin-jsx-a11y`, `eslint-plugin-import`, `eslint-plugin-turbo`, or `@vercel/style-guide`) ships a major that requires `eslint@^10` as a peer.
+- We want a v10-only feature (e.g., new rule, perf gains, native TypeScript config support without the `unstable_native_nodejs_ts_config` flag).
+
+**Why this is NOT a per-package story:**
+
+The ESLint v10 ecosystem has a tight peer-dep matrix at install time. `@eslint/js@10` declares `eslint: ^10.0.0`; the workspace's catalog pins `eslint: ^9.x` across 12 packages; bumping just one breaks `pnpm install` workspace-wide (closed PRs #39 and #40 both demonstrated this — install-time failure across every CI job). Most ecosystem plugins haven't published v10-compatible peer ranges broadly yet, and the project's `unstable_native_nodejs_ts_config` flag (used in every `eslint --flag unstable_native_nodejs_ts_config` script across the workspace) needs a v10 audit since the flag may have stabilised / renamed / been removed.
+
+Dependabot/Renovate are configured to ignore `eslint` + `@eslint/js` for this reason. Note: `typescript-eslint` and other plugins whose peer range explicitly accepts both v9 + v10 are NOT ignored — they can land independently.
+
+**Scope when scheduled (rough — refine into stories at planning time):**
+
+- M3.1: Audit every `eslint-plugin-*` and `eslint-config-*` in the workspace catalog; bump each to the version whose peer range accepts v10. If any plugin has no v10-compatible release, stop and decide: replace the plugin, drop the rule, or wait.
+- M3.2: Bump `eslint` core + `@eslint/js` to the same v10 minor in the catalog, in lockstep with M3.1.
+- M3.3: Audit `tooling/eslint/base.ts`, `tooling/eslint/nextjs.ts`, `tooling/eslint/react.ts` for any rule config / preset that v10's `eslint:recommended` ruleset changed (v10 changed several recommended defaults).
+- M3.4: Verify the `unstable_native_nodejs_ts_config` flag in every `eslint --flag unstable_native_nodejs_ts_config` script still works on v10 — or replace with v10's stable equivalent if the flag has been renamed/promoted.
+- M3.5: Check Node version floor — v10 requires Node `^20.19 || ^22.13 || >=24`. Confirm CI runner Node version satisfies it (`pnpm` engines pin in repo root + `actions/setup-node` in `.github/workflows/ci.yml`).
+- M3.6: Land as one PR; verify `pnpm lint` + `pnpm format` still pass across all 12 packages.
+
+**Dependencies / sequencing notes:**
+
+- Lower blast radius than M1 / M2 (tooling only, no product surface). Can land in any sprint that has spare capacity.
+- Bundle with the prettier-ecosystem reflow (PRs #29 prettier-core + #42 prettier-plugin-tailwindcss are both on hold for `pnpm format:fix` reflow) **only if** they happen to land in the same sprint — they're independent otherwise.
+
+**Requirements:** none (operational). Touches: tooling/eslint/*, tooling/prettier/* (only if bundled), .github/workflows/ci.yml (Node version), eslint.config.ts in every package.
