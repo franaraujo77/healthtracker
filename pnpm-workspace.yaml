@@ -17,7 +17,7 @@ catalog:
   "@tamagui/next-plugin": ^1.144.4
   "@tamagui/web": ^1.144.4
   tamagui: ^1.144.4
-  "@tailwindcss/postcss": ^4.1.16
+  "@tailwindcss/postcss": ^4.3.0
   "@tailwindcss/vite": ^4.1.16
   "@tanstack/react-form": ^1.32.0
   "@tanstack/react-query": ^5.100.14
