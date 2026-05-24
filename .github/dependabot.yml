@@ -3,11 +3,13 @@
 # GitHub-Actions ecosystem updates and for security advisories that
 # Renovate doesn't surface (e.g. GHSA bumps with `security-updates` flow).
 #
-# Expo, React Native, and Tamagui packages are explicitly ignored:
-# their versions are governed by per-ecosystem coupling that CI cannot
-# detect (Expo by `bundledNativeModules.json`, RN by Expo SDK, Tamagui
-# by its compiler/runtime ABI across @tamagui/* siblings). Bumping any
-# one out of band breaks the others at type-check or runtime. The
+# Expo, React Native, Tamagui, and React (core + types) packages are
+# explicitly ignored: their versions are governed by per-ecosystem
+# coupling that CI cannot detect (Expo by `bundledNativeModules.json`,
+# RN by Expo SDK, Tamagui by its compiler/runtime ABI across
+# @tamagui/* siblings, React by Expo SDK 54's exact `react@19.1.0` pin
+# plus the matched `react-dom`/`react-native` peer). Bumping any one
+# out of band breaks the others at type-check or runtime. The
 # ecosystem upgrade is the atomic unit of work — see epics.md
 # "Maintenance" section (M1 Expo SDK 56, M2 Tamagui 2.x).
 #
@@ -50,6 +52,16 @@ updates:
       # fragmentation that motivated this).
       - dependency-name: "tamagui"
       - dependency-name: "@tamagui/*"
+      # React is pinned by Expo SDK 54's bundledNativeModules.json to an
+      # exact version. Bumping the `react19` catalog out of band crosses
+      # the SDK contract — even patch/minor jumps inside 19.x can break
+      # RN's bridgeless renderer expectations. The matched `react-dom`
+      # and `@types/react` move together. Closed PR #37 demonstrated
+      # this when dependabot tried 19.1.4 → 19.2.6.
+      - dependency-name: "react"
+      - dependency-name: "react-dom"
+      - dependency-name: "@types/react"
+      - dependency-name: "@types/react-dom"
   - package-ecosystem: github-actions
     directory: "/"
     schedule:

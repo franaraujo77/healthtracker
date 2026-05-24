@@ -35,6 +35,16 @@
         "^@tamagui/"
       ],
       "enabled": false
+    },
+    {
+      "description": "React (+ react-dom + @types/react + @types/react-dom) is pinned by Expo SDK 54's bundledNativeModules.json to an exact version. Bumping the `react19` catalog out of band crosses the SDK contract — closed PR #37 demonstrated this when dependabot tried 19.1.4 → 19.2.6. Bump via the M1 Expo SDK upgrade story, not per-package.",
+      "matchPackageNames": [
+        "react",
+        "react-dom",
+        "@types/react",
+        "@types/react-dom"
+      ],
+      "enabled": false
     }
   ],
   "updateInternalDeps": true,
