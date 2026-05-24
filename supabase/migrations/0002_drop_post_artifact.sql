@@ -1,0 +1,29 @@
+-- =============================================================================
+-- 0002_drop_post_artifact.sql
+-- =============================================================================
+--
+-- Drops the `post` table (and its two RLS policies) that the Story 3.5
+-- baseline migration shipped to production. The table was a leftover from
+-- the `create-t3-turbo` starter — no product feature uses it.
+--
+-- Companion repo cleanup in the same PR:
+--   - apps/web/src/app/page.tsx          replaced with redirect to /inicio
+--                                        or /auth/register (was rendering
+--                                        the broken posts demo on the root
+--                                        URL in production)
+--   - apps/web/src/app/_components/      posts.tsx + auth-showcase.tsx
+--                                        deleted
+--   - apps/expo/src/app/index.tsx        replaced with Redirect to /inicio
+--   - apps/expo/src/app/post/[id].tsx    deleted
+--   - packages/api/src/router/post.ts    deleted; root.ts no longer mounts it
+--   - packages/db/src/schema/posts.ts    deleted; index.ts no longer exports it
+--   - packages/db/policies/custom_rls_post.sql  deleted
+--   - packages/db/__tests__/rls/post.test.ts    deleted
+--
+-- The `IF EXISTS` guard makes this safe to apply against any environment
+-- (production, future fresh projects via Story 3.5 baseline replay where
+-- the table never existed, etc.). `CASCADE` drops the two policies
+-- (post_select_own, post_select_anon) along with the table.
+-- =============================================================================
+
+DROP TABLE IF EXISTS public.post CASCADE;

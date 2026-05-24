@@ -1,41 +1,15 @@
-import { Suspense } from "react";
+import { redirect } from "next/navigation";
 
-import { HydrateClient, prefetch, trpc } from "~/trpc/server";
-import { AuthShowcase } from "./_components/auth-showcase";
-import {
-  CreatePostForm,
-  PostCardSkeleton,
-  PostList,
-} from "./_components/posts";
+import { getSession } from "~/auth/server";
 
-export default function HomePage() {
-  prefetch(trpc.post.all.queryOptions());
-
-  return (
-    <HydrateClient>
-      <main className="container h-screen py-16">
-        <div className="flex flex-col items-center justify-center gap-4">
-          <h1 className="text-5xl font-extrabold tracking-tight sm:text-[5rem]">
-            Create <span className="text-primary">T3</span> Turbo
-          </h1>
-          <AuthShowcase />
-
-          <CreatePostForm />
-          <div className="w-full max-w-2xl overflow-y-scroll">
-            <Suspense
-              fallback={
-                <div className="flex w-full flex-col gap-4">
-                  <PostCardSkeleton />
-                  <PostCardSkeleton />
-                  <PostCardSkeleton />
-                </div>
-              }
-            >
-              <PostList />
-            </Suspense>
-          </div>
-        </div>
-      </main>
-    </HydrateClient>
-  );
+// Root entry: route the user into the actual app. Signed-in patients
+// land on the Início (Story 3.x), everyone else funnels to the
+// register/sign-in flow (Story 1.1). The previous landing page was
+// the unmodified `create-t3-turbo` template's posts demo — the `post`
+// table, router, and UI are deleted in the same commit as a hygiene
+// cleanup (Epic 0/1 leftovers).
+export default async function HomePage() {
+  const session = await getSession();
+  if (!session) redirect("/auth/register");
+  redirect("/inicio");
 }

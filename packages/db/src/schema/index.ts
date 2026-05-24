@@ -4,7 +4,6 @@ export * from "./extraction_review_queue";
 export * from "./loinc_ref";
 export * from "./notification_preferences";
 export * from "./observations";
-export * from "./posts";
 export * from "./push_tokens";
 export * from "./uploads";
 export * from "./users";
