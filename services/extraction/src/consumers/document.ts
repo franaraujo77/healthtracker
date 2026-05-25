@@ -314,30 +314,33 @@ export async function handleDocumentJob(
         },
       });
       // Code-review F3 (Story 4.1) — NFR-I3 hard guard around
-      // emitLetterQueued. The helper's documented contract is
-      // "never throws on skip"; but the four raw SQL queries it
-      // performs (auth.users lookup, notification_preferences,
-      // consent_grants, the audit/letters INSERTs + pg-boss INSERT)
-      // can each throw on infra fault (statement timeout, schema
-      // rename, transient connection drop). Without this try/catch
-      // the throw would abort the upload-complete sql.begin tx,
-      // rolling back the status transition + emitNotificationEvent.
-      // Catch + log here so the upload commit is preserved (Letter
-      // is silently skipped — the next confirmation can re-enqueue).
+      // emitLetterQueued, with SAVEPOINT semantics so partial Letter
+      // writes don't leak into the outer upload-complete commit.
+      //
+      // Re-review surfaced this: after F1/F2 reordered the helper to
+      // write the audit row FIRST (uploadId-keyed) and the letters
+      // row SECOND, a throw between the two would leave the audit
+      // row in the outer tx and the catch-and-continue would COMMIT
+      // it — permanently blocking any future re-enqueue (the partial
+      // unique index treats the orphan audit row as an already-
+      // queued letter). The fix: run emitLetterQueued inside a
+      // postgres-js savepoint so a throw rolls back the audit row
+      // before the catch swallows. The outer tx then commits the
+      // upload-status transition + notification audit untouched.
+      //
+      // Narrow catch: programmer errors (TypeError/ReferenceError/
+      // SyntaxError) still bubble so a code regression isn't
+      // silently swallowed.
       try {
-        const letterResult = await emitLetterQueued(tx, {
-          patientId,
-          uploadId,
-        });
+        const letterResult = await tx.savepoint((sp) =>
+          emitLetterQueued(sp, { patientId, uploadId }),
+        );
         if (!letterResult.enqueued) {
           console.log(
             `[extraction.document] uploadId=${uploadId}: letter skipped (${letterResult.reason})`,
           );
         }
       } catch (letterErr) {
-        // Narrow — programmer errors (TypeError/ReferenceError/
-        // SyntaxError) still bubble so a code regression isn't
-        // silently swallowed. Infra-shaped errors are eaten.
         if (
           letterErr instanceof TypeError ||
           letterErr instanceof ReferenceError ||

@@ -25,7 +25,8 @@ export type LetterEnqueueSkipReason =
   | "not_premium"
   | "consent_missing"
   | "preference_muted"
-  | "already_queued";
+  | "already_queued"
+  | "error";
 
 export type LetterEnqueueResult =
   | { enqueued: true; letterId: string }
@@ -92,8 +93,9 @@ export async function enqueueLetterGeneration(
     return { enqueued: false, reason: "consent_missing" };
   }
 
-  // Code-review F1 + F2 (Story 4.1) — race-safe dedup AND tx-safe
-  // 23505 handling, unified:
+  // Code-review F1 + F2 + F3 (Story 4.1) — race-safe dedup AND
+  // tx-safe failure containment, unified inside a nested
+  // transaction (SAVEPOINT semantics):
   //
   // F1 fix: the partial unique index on `audit_log(resource_id, event)`
   // dedupes on `resource_id`. The original code wrote
@@ -104,38 +106,68 @@ export async function enqueueLetterGeneration(
   // (this one + `services/extraction/.../letters-emit.ts`) attempt to
   // write the same `(uploadId, 'letter.queued')` row; only one wins.
   //
-  // F2 fix: audit goes FIRST, via `onConflictDoNothing` (no 23505 ever
-  // thrown). On conflict the helper returns `{ written: false }` — no
-  // letters row is created, no orphan, and the surrounding Drizzle
-  // transaction is never poisoned. The companion pg-boss enqueue runs
-  // only on `written: true`, so the queue mirrors the audit log.
-  const audit = await writeAuditLogIfNew(database, {
-    actorId: args.patientId,
-    actorType: "system",
-    event: LETTER_AUDIT_QUEUED,
-    resourceId: args.uploadId,
-    resourceType: "letter",
-    metadata: { uploadId: args.uploadId },
-  });
-  if (!audit.written) {
-    return { enqueued: false, reason: "already_queued" };
+  // F2 fix: audit goes FIRST, via `onConflictDoNothing` (no 23505
+  // ever thrown). On conflict the helper returns `{ written: false }`
+  // — no letters row is created, no orphan.
+  //
+  // F3 fix (post-review): wrap audit+letters+pg-boss in a nested
+  // Drizzle transaction (savepoint). If letters INSERT or pg-boss
+  // INSERT throws AFTER the audit row was successfully written, the
+  // savepoint rolls back the audit row too — preventing a permanent
+  // orphan-audit block that would make the partial unique index
+  // refuse all future re-enqueues for this upload. The outer tRPC
+  // transaction (upload-confirm) remains uncompromised. NFR-I3
+  // preserved: the caller logs and continues on `error`.
+  try {
+    return await database.transaction(async (sp) => {
+      const audit = await writeAuditLogIfNew(sp, {
+        actorId: args.patientId,
+        actorType: "system",
+        event: LETTER_AUDIT_QUEUED,
+        resourceId: args.uploadId,
+        resourceType: "letter",
+        metadata: { uploadId: args.uploadId, triggeredBy: "api" },
+      });
+      if (!audit.written) {
+        return { enqueued: false as const, reason: "already_queued" as const };
+      }
+
+      const [letterRow] = await sp
+        .insert(Letters)
+        .values({
+          patientId: args.patientId,
+          uploadId: args.uploadId,
+          status: "queued",
+        })
+        .returning({ id: Letters.id });
+      if (!letterRow) {
+        throw new Error(
+          "enqueueLetterGeneration: insert returned no letters row",
+        );
+      }
+
+      await enqueueLetterGenerationJob(sp, { letterId: letterRow.id });
+
+      return { enqueued: true as const, letterId: letterRow.id };
+    });
+  } catch (err) {
+    // Programmer errors still bubble — a code regression shouldn't
+    // be silently swallowed. Infra-shaped errors (DB blip, pg-boss
+    // INSERT failure) become a Letter-only skip; the outer
+    // upload-confirm tx is untouched and commits normally.
+    if (
+      err instanceof TypeError ||
+      err instanceof ReferenceError ||
+      err instanceof SyntaxError
+    ) {
+      throw err;
+    }
+    console.error(
+      `[enqueueLetterGeneration] patientId=${args.patientId} uploadId=${args.uploadId}: letter enqueue failed — upload commit preserved (NFR-I3)`,
+      err,
+    );
+    return { enqueued: false, reason: "error" };
   }
-
-  const [letterRow] = await database
-    .insert(Letters)
-    .values({
-      patientId: args.patientId,
-      uploadId: args.uploadId,
-      status: "queued",
-    })
-    .returning({ id: Letters.id });
-  if (!letterRow) {
-    throw new Error("enqueueLetterGeneration: insert returned no letters row");
-  }
-
-  await enqueueLetterGenerationJob(database, { letterId: letterRow.id });
-
-  return { enqueued: true, letterId: letterRow.id };
 }
 
 async function enqueueLetterGenerationJob(

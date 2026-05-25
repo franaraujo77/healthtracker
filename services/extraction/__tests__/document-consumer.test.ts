@@ -70,6 +70,15 @@ function makeSql(behavior: MockSqlBehavior) {
   (
     sql as unknown as { begin: (cb: (tx: unknown) => unknown) => unknown }
   ).begin = (cb) => Promise.resolve(cb(sql));
+  // Story 4.1 post-review — emitLetterQueued is wrapped in a
+  // SAVEPOINT (`tx.savepoint(cb)`) by the call site in document.ts.
+  // postgres-js's real `savepoint` runs the callback inside a nested
+  // BEGIN/SAVEPOINT pair; for the mock we just invoke it inline
+  // against the same sql tag (the helper's queries inside the cb
+  // hit the same template-string router above).
+  (
+    sql as unknown as { savepoint: (cb: (tx: unknown) => unknown) => unknown }
+  ).savepoint = (cb) => Promise.resolve(cb(sql));
   return Object.assign(sql, { __labNameUpdates: labNameUpdates });
 }
 
