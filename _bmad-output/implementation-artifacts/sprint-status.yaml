@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-05-15
-last_updated: 2026-05-24
+last_updated: 2026-05-25
 # Story 4.1 spec created → ready-for-dev. Epic 4 kickoff (epic-4: backlog → in-progress).
 # Story 3.4 spec created → ready-for-dev. Final story of Epic 3.
 # Adds offline-cached Fingerprint via `@tanstack/react-query-persist-client`
@@ -249,7 +249,7 @@ development_status:
   epic-3-retrospective: done
 
   # Epic 4: Patient Receives a Personal Health Narrative
-  epic-4: in-progress
+  epic-4: done
   # Story 4.1 spec created → ready-for-dev. Epic 4 kickoff. NEW services/llm
   # workspace (Anthropic Claude Sonnet + Fastify SSE + pg-boss letter.generate
   # consumer). NEW `letters` schema (id, patient_id, upload_id, status enum,
@@ -268,14 +268,14 @@ development_status:
   # prompt verbatim (no diagnosis phrasing). Infra blockers: Anthropic DPA
   # (NFR-S6 launch blocker; dev unblocked), Railway provisioning,
   # ANTHROPIC_API_KEY env. Story 4.4 will incremental-migrate prod schema.
-  4-1-patient-receives-a-streamed-letter-narrative-after-a-draw-is-confirmed: ready-for-dev
+  4-1-patient-receives-a-streamed-letter-narrative-after-a-draw-is-confirmed: done
   # Story 4.2 spec created → ready-for-dev. Stacked on Story 4.1 (PR #54).
   # Adds tRPC letter.getForDraw + LETTER_PREPARING_RETRY_PT_BR + Histórico
   # draw-detail "Ler carta" wiring. Reuses 4.1's LetterReader + SSE cached-
   # complete replay path → no LLM call on re-read. premiumProcedure-gated.
   # No new schema, no new push, no services/llm changes. AC3 audit
   # (letter.read) delegated to 4.1's SSE endpoint to avoid double-count.
-  4-2-patient-re-reads-a-previously-generated-letter: ready-for-dev
+  4-2-patient-re-reads-a-previously-generated-letter: done
   # Story 4.3 spec created → ready-for-dev. Stacks on Stories 4.1 + 4.2
   # (PR #54). Adds synchronous biomarker-suggestion path: new services/llm
   # POST endpoint + Anthropic messages.create (non-streaming) + 60s
@@ -288,7 +288,7 @@ development_status:
   # the prop unwired explicitly for this story). Tab bar persists
   # (UX-DR11 — not a fullScreenModal). Stub adapter path keeps dev/CI
   # unblocked when ANTHROPIC_API_KEY is unset.
-  4-3-patient-taps-a-biomarker-to-receive-an-explain-this-to-my-doctor-suggestion-growth: ready-for-dev
+  4-3-patient-taps-a-biomarker-to-receive-an-explain-this-to-my-doctor-suggestion-growth: done
   # Story 4.4 spec created → ready-for-dev. Two new supabase/migrations/
   # files: 0003_epic_4_letters_schema.sql (letter_status_enum + letters
   # table + letters_patient_created_idx + letters_select_own RLS) inside
@@ -303,8 +303,8 @@ development_status:
   # --force, asserts zero pending statements. NO production deploy
   # in this story — supabase-deploy is operator-supervised after PR
   # #54 merges.
-  4-4-author-incremental-supabase-migration-for-epic-4-schema: ready-for-dev
-  epic-4-retrospective: optional
+  4-4-author-incremental-supabase-migration-for-epic-4-schema: done
+  epic-4-retrospective: done
 
   # Epic 5: Patient Controls Who Sees Their Health Data
   epic-5: backlog
