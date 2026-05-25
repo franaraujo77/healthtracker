@@ -52,8 +52,17 @@ export async function registerGenerateLetterConsumer(
     llm: LLMAdapter;
   },
 ): Promise<void> {
+  // Code-review F5 — localConcurrency=4 lets four Anthropic streams
+  // run in parallel per worker process. Without this, pg-boss defaults
+  // to sequential processing and patient B waits for patient A's full
+  // ~10s stream before her own kicks off — blowing the NFR-P2
+  // first-token<3s budget under any concurrency. batchSize=1 keeps
+  // each polling batch to one job, so a slow stream doesn't hold up
+  // the others. (pg-boss v12 renamed the legacy `teamSize` to
+  // `localConcurrency`.)
   await boss.work<JobPayload<GenerateLetterPayload>>(
     "letter.generate",
+    { localConcurrency: 4, batchSize: 1 },
     async (jobs) => {
       for (const job of jobs) {
         const { letterId } = job.data.payload;
@@ -112,11 +121,15 @@ async function processOne(
       maxTokens: LETTER_MAX_TOKENS,
       callbacks: {
         onToken: (token) => publishToken(letterId, token),
-        onDone: (result) => {
-          void (async () => {
-            try {
-              await deps.sql.begin(async (tx) => {
-                await tx`
+        // Code-review F4 — `onDone` is now an async function the
+        // adapter awaits before resolving `streamLetter`. pg-boss
+        // therefore does NOT mark the job complete until these
+        // writes commit; a worker SIGTERM/crash mid-write now
+        // triggers a retry (pg-boss sees an unfinished job).
+        onDone: async (result) => {
+          try {
+            await deps.sql.begin(async (tx) => {
+              await tx`
                 UPDATE letters
                 SET status = 'complete',
                     body = ${result.body},
@@ -125,7 +138,7 @@ async function processOne(
                     generated_at = now()
                 WHERE id = ${letterId}::uuid
               `;
-                await tx`
+              await tx`
                 INSERT INTO audit_log
                   (actor_id, actor_type, event, resource_id, resource_type, metadata)
                 VALUES (
@@ -141,21 +154,21 @@ async function processOne(
                   })}::jsonb
                 )
               `;
-                // Story 4.1 — enqueue the `letter_ready` push as part
-                // of the same tx so a duplicate retry of this consumer
-                // cannot fire two pushes (singleton_key per letterId).
-                const wrapped = {
-                  jobId: crypto.randomUUID(),
-                  patientId: letter.patient_id,
-                  correlationId: letterId,
-                  payload: {
-                    uploadId: letter.upload_id,
-                    kind: "letter_ready" as const,
-                    letterId,
-                  },
-                  createdAt: new Date().toISOString(),
-                };
-                await tx`
+              // Story 4.1 — enqueue the `letter_ready` push as part
+              // of the same tx so a duplicate retry of this consumer
+              // cannot fire two pushes (singleton_key per letterId).
+              const wrapped = {
+                jobId: crypto.randomUUID(),
+                patientId: letter.patient_id,
+                correlationId: letterId,
+                payload: {
+                  uploadId: letter.upload_id,
+                  kind: "letter_ready" as const,
+                  letterId,
+                },
+                createdAt: new Date().toISOString(),
+              };
+              await tx`
                 INSERT INTO pgboss.job
                   (name, data, retry_limit, retry_delay, retry_backoff, singleton_key)
                 VALUES (
@@ -166,21 +179,24 @@ async function processOne(
                 )
                 ON CONFLICT DO NOTHING
               `;
-              });
-              publishDone(letterId);
-              if (result.firstTokenMs !== null) {
-                console.log(
-                  `[letter.generate] letterId=${letterId} letter.firstTokenMs=${result.firstTokenMs}`,
-                );
-              }
-            } catch (writeErr) {
-              console.error(
-                `[letter.generate] letterId=${letterId}: post-stream DB write failed`,
-                writeErr,
+            });
+            publishDone(letterId);
+            if (result.firstTokenMs !== null) {
+              console.log(
+                `[letter.generate] letterId=${letterId} letter.firstTokenMs=${result.firstTokenMs}`,
               );
-              publishError(letterId, "LETTER_UNAVAILABLE");
             }
-          })();
+          } catch (writeErr) {
+            console.error(
+              `[letter.generate] letterId=${letterId}: post-stream DB write failed`,
+              writeErr,
+            );
+            publishError(letterId, "LETTER_UNAVAILABLE");
+            // Rethrow so the adapter's caller (and pg-boss) see this
+            // as a job failure — pg-boss will retry instead of
+            // silently marking the job complete (F4 invariant).
+            throw writeErr;
+          }
         },
         onError: (err) => {
           console.error(
@@ -205,7 +221,27 @@ async function processOne(
       /ECONN|ENETDOWN|ETIMEDOUT|timeout|connection|fetch failed/i.test(
         err.message,
       );
-    if (!isAnthropicError && !isNetworkError) throw err;
+    // Code-review F6 — revert the `queued → generating` UPDATE
+    // *whether or not* we recognise the error shape. Without this,
+    // a non-Anthropic/non-network throw (TypeError from a missing
+    // column, AbortError from forced shutdown) rethrew while
+    // leaving `status='generating'` — and on every subsequent
+    // pg-boss retry, processOne's early-return at line ~85 short-
+    // circuits because `generating` is not in the {complete,
+    // failed} skip set, but the `WHERE status='queued'` UPDATE
+    // is a no-op — so the row sat in `generating` forever and the
+    // SSE handler subscribed to a fan-out the dead consumer never
+    // published to. Reverting to `queued` lets the next retry
+    // re-enter the happy path; only Anthropic/network errors get
+    // the terminal `failed` state.
+    if (!isAnthropicError && !isNetworkError) {
+      await deps.sql`
+        UPDATE letters
+        SET status = 'queued'
+        WHERE id = ${letterId}::uuid AND status = 'generating'
+      `;
+      throw err;
+    }
     await deps.sql`
       UPDATE letters
       SET status = 'failed',

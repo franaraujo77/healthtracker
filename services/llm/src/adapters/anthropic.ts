@@ -19,13 +19,24 @@ import Anthropic from "@anthropic-ai/sdk";
 export interface LetterStreamCallbacks {
   /** Called once for every `text_delta` event. */
   onToken: (token: string) => void;
-  /** Called once when streaming completes; `body` is the full text. */
+  /**
+   * Called once when streaming completes; `body` is the full text.
+   *
+   * **Code-review F4 (Story 4.1):** signature is `Promise<void>` and
+   * the adapter `await`s it before resolving `streamLetter`. The
+   * pg-boss consumer therefore does NOT mark the job complete until
+   * the caller's post-stream DB writes (status='complete' UPDATE +
+   * letter.generated audit + push enqueue) have committed. Without
+   * this await, a worker crash between `finalMessage()` and the DB
+   * tx commit left the letter stuck at `generating` forever and
+   * pg-boss never retried (the job was already marked done).
+   */
   onDone: (result: {
     body: string;
     model: string;
     tokensUsed: number;
     firstTokenMs: number | null;
-  }) => void;
+  }) => Promise<void> | void;
   /** Called once when streaming errors out. */
   onError: (err: unknown) => void;
 }
@@ -93,7 +104,10 @@ export function createAnthropicAdapter(opts: { apiKey: string }): LLMAdapter {
         const finalMessage = await stream.finalMessage();
         inputTokens = finalMessage.usage.input_tokens;
         outputTokens = finalMessage.usage.output_tokens;
-        args.callbacks.onDone({
+        // F4 — await onDone so the consumer's post-stream DB writes
+        // commit before this method resolves (and before pg-boss
+        // marks the job complete).
+        await args.callbacks.onDone({
           body: chunks.join(""),
           model: finalMessage.model,
           tokensUsed: inputTokens + outputTokens,
@@ -148,7 +162,7 @@ export function createStubLLMAdapter(): LLMAdapter {
           args.callbacks.onToken(tok);
           await new Promise((resolve) => setTimeout(resolve, 30));
         }
-        args.callbacks.onDone({
+        await args.callbacks.onDone({
           body: stubBody,
           model: "stub",
           tokensUsed: 0,

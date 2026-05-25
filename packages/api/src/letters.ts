@@ -13,7 +13,7 @@ import {
 } from "@healthtracker/validators";
 
 import type { AuditDb } from "./audit";
-import { writeAuditLog } from "./audit";
+import { writeAuditLog, writeAuditLogIfNew } from "./audit";
 import { isPremium } from "./middleware/entitlements";
 import { getNotificationPreferences } from "./notifications";
 
@@ -92,6 +92,35 @@ export async function enqueueLetterGeneration(
     return { enqueued: false, reason: "consent_missing" };
   }
 
+  // Code-review F1 + F2 (Story 4.1) — race-safe dedup AND tx-safe
+  // 23505 handling, unified:
+  //
+  // F1 fix: the partial unique index on `audit_log(resource_id, event)`
+  // dedupes on `resource_id`. The original code wrote
+  // `resource_id = letters.id` (a fresh UUID per call) — so two
+  // concurrent enqueues for the same upload generated two distinct
+  // resource_ids and the index never collided. Switching the dedup
+  // anchor to `uploadId` makes the index work: both enqueue sites
+  // (this one + `services/extraction/.../letters-emit.ts`) attempt to
+  // write the same `(uploadId, 'letter.queued')` row; only one wins.
+  //
+  // F2 fix: audit goes FIRST, via `onConflictDoNothing` (no 23505 ever
+  // thrown). On conflict the helper returns `{ written: false }` — no
+  // letters row is created, no orphan, and the surrounding Drizzle
+  // transaction is never poisoned. The companion pg-boss enqueue runs
+  // only on `written: true`, so the queue mirrors the audit log.
+  const audit = await writeAuditLogIfNew(database, {
+    actorId: args.patientId,
+    actorType: "system",
+    event: LETTER_AUDIT_QUEUED,
+    resourceId: args.uploadId,
+    resourceType: "letter",
+    metadata: { uploadId: args.uploadId },
+  });
+  if (!audit.written) {
+    return { enqueued: false, reason: "already_queued" };
+  }
+
   const [letterRow] = await database
     .insert(Letters)
     .values({
@@ -102,27 +131,6 @@ export async function enqueueLetterGeneration(
     .returning({ id: Letters.id });
   if (!letterRow) {
     throw new Error("enqueueLetterGeneration: insert returned no letters row");
-  }
-
-  try {
-    await writeAuditLog(database, {
-      actorId: args.patientId,
-      actorType: "system",
-      event: LETTER_AUDIT_QUEUED,
-      resourceId: letterRow.id,
-      resourceType: "letter",
-      metadata: { uploadId: args.uploadId },
-    });
-  } catch (err) {
-    // Narrow — only the partial-unique-index 23505 collision means
-    // "another writer queued first". Anything else (TypeError,
-    // network blip, real DB error) rethrows.
-    const code =
-      typeof err === "object" && err !== null && "code" in err
-        ? (err as { code?: unknown }).code
-        : undefined;
-    if (code !== "23505") throw err;
-    return { enqueued: false, reason: "already_queued" };
   }
 
   await enqueueLetterGenerationJob(database, { letterId: letterRow.id });

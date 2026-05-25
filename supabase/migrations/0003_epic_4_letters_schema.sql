@@ -18,12 +18,26 @@
 --
 -- Name: letter_status_enum; Type: TYPE; Schema: public; Owner: -
 --
-CREATE TYPE public.letter_status_enum AS ENUM (
-    'queued',
-    'generating',
-    'complete',
-    'failed'
-);
+-- DO-block IF NOT EXISTS guard for parity with the baseline migration's
+-- enum-creation pattern (every CREATE TYPE in
+-- `0001_baseline_epics_0_to_3.sql` is wrapped this way). Supabase's
+-- `schema_migrations` table normally prevents re-runs, but a manual
+-- re-apply against a DB where the enum was created via `pnpm db:push`
+-- would otherwise fail with `type "letter_status_enum" already exists`.
+--
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_type WHERE typname = 'letter_status_enum'
+    ) THEN
+        CREATE TYPE public.letter_status_enum AS ENUM (
+            'queued',
+            'generating',
+            'complete',
+            'failed'
+        );
+    END IF;
+END $$;
 
 --
 -- Name: letters; Type: TABLE; Schema: public; Owner: -

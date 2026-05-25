@@ -1,4 +1,5 @@
 import type { db } from "@healthtracker/db/client";
+import { sql } from "@healthtracker/db";
 import { AuditLog } from "@healthtracker/db/schema";
 
 /**
@@ -38,4 +39,50 @@ export async function writeAuditLog(
     resourceType: entry.resourceType,
     metadata: entry.metadata ?? {},
   });
+}
+
+/**
+ * Code-review F2 (Story 4.1) — sanctioned idempotent variant. Used by
+ * call sites whose write races against another writer on the partial
+ * unique index `audit_log(resource_id, event) WHERE event IN (...)`. A
+ * second 23505 inside an outer Drizzle transaction poisons the tx;
+ * `onConflictDoNothing` sidesteps the entire 23505 path by emitting
+ * `ON CONFLICT (resource_id, event) WHERE ... DO NOTHING` and tells the
+ * caller via the boolean return whether the row was actually written.
+ *
+ * Pass the SAME `where` predicate that the partial unique index uses,
+ * so Postgres can disambiguate which index ON CONFLICT targets. The
+ * canonical predicate today (Story 4.4 migration `0004_*.sql`) is
+ * `event IN ('notification.upload_complete',
+ *   'notification.upload_pending_review', 'notification.upload_failed',
+ *   'letter.queued')` — exposed as the `EVENT_DEDUP_VALUES` constant
+ * so call sites don't duplicate the literal.
+ */
+export const EVENT_DEDUP_VALUES = [
+  "notification.upload_complete",
+  "notification.upload_pending_review",
+  "notification.upload_failed",
+  "letter.queued",
+] as const;
+
+export async function writeAuditLogIfNew(
+  database: AuditDb,
+  entry: AuditLogEntry,
+): Promise<{ written: boolean }> {
+  const rows = await database
+    .insert(AuditLog)
+    .values({
+      actorId: entry.actorId,
+      actorType: entry.actorType,
+      event: entry.event,
+      resourceId: entry.resourceId,
+      resourceType: entry.resourceType,
+      metadata: entry.metadata ?? {},
+    })
+    .onConflictDoNothing({
+      target: [AuditLog.resourceId, AuditLog.event],
+      where: sql`${AuditLog.event} IN ('notification.upload_complete', 'notification.upload_pending_review', 'notification.upload_failed', 'letter.queued')`,
+    })
+    .returning({ id: AuditLog.id });
+  return { written: rows.length > 0 };
 }

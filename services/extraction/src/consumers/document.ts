@@ -313,19 +313,41 @@ export async function handleDocumentJob(
           conflicts: outcome.conflictCount,
         },
       });
-      // Story 4.1 — Letter enqueue piggybacks the upload-complete
-      // tx so the queue write and the status transition are atomic.
-      // `emitLetterQueued` returns `{enqueued: false, reason}` for
-      // every skip path (free tier, missing consent, muted pref,
-      // already queued by the API path); it never throws on skip
-      // (NFR-I3 — Letter failure must not block uploads).
-      const letterResult = await emitLetterQueued(tx, {
-        patientId,
-        uploadId,
-      });
-      if (!letterResult.enqueued) {
-        console.log(
-          `[extraction.document] uploadId=${uploadId}: letter skipped (${letterResult.reason})`,
+      // Code-review F3 (Story 4.1) — NFR-I3 hard guard around
+      // emitLetterQueued. The helper's documented contract is
+      // "never throws on skip"; but the four raw SQL queries it
+      // performs (auth.users lookup, notification_preferences,
+      // consent_grants, the audit/letters INSERTs + pg-boss INSERT)
+      // can each throw on infra fault (statement timeout, schema
+      // rename, transient connection drop). Without this try/catch
+      // the throw would abort the upload-complete sql.begin tx,
+      // rolling back the status transition + emitNotificationEvent.
+      // Catch + log here so the upload commit is preserved (Letter
+      // is silently skipped — the next confirmation can re-enqueue).
+      try {
+        const letterResult = await emitLetterQueued(tx, {
+          patientId,
+          uploadId,
+        });
+        if (!letterResult.enqueued) {
+          console.log(
+            `[extraction.document] uploadId=${uploadId}: letter skipped (${letterResult.reason})`,
+          );
+        }
+      } catch (letterErr) {
+        // Narrow — programmer errors (TypeError/ReferenceError/
+        // SyntaxError) still bubble so a code regression isn't
+        // silently swallowed. Infra-shaped errors are eaten.
+        if (
+          letterErr instanceof TypeError ||
+          letterErr instanceof ReferenceError ||
+          letterErr instanceof SyntaxError
+        ) {
+          throw letterErr;
+        }
+        console.error(
+          `[extraction.document] uploadId=${uploadId}: letter enqueue failed — upload commit preserved (NFR-I3)`,
+          letterErr,
         );
       }
     });

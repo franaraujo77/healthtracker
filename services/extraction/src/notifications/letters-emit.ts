@@ -84,60 +84,57 @@ export async function emitLetterQueued(
     return { enqueued: false, reason: "consent_missing" };
   }
 
-  // 4. Atomic INSERT-letter + INSERT-audit. The partial unique
-  // index on `audit_log(resource_id, event) WHERE event =
-  // 'letter.queued'` (Story 4.1 schema extension of R2-P172) keeps
-  // a concurrent API-side enqueue from creating a duplicate.
-  // ON CONFLICT DO NOTHING on the audit insert + check rowcount.
-  // If the audit insert returns zero rows, roll back the letters
-  // row by selecting only the rows we wrote successfully.
-  const inserted = await tx<{ id: string }[]>`
-    WITH new_letter AS (
-      INSERT INTO letters (patient_id, upload_id, status)
-      VALUES (${args.patientId}::uuid, ${args.uploadId}::uuid, 'queued')
-      RETURNING id
-    ),
-    new_audit AS (
-      INSERT INTO audit_log
-        (actor_id, actor_type, event, resource_id, resource_type, metadata)
-      SELECT
-        ${args.patientId}::uuid,
-        'system',
-        'letter.queued',
-        new_letter.id,
-        'letter',
-        ${JSON.stringify({ uploadId: args.uploadId, triggeredBy: "worker" })}::jsonb
-      FROM new_letter
-      ON CONFLICT ON CONSTRAINT audit_log_notification_event_unique
-      DO NOTHING
-      RETURNING resource_id
+  // Code-review F1 + F2 (Story 4.1) — race-safe dedup, no orphan rows.
+  //
+  // The original CTE created a `letters` row FIRST, then attempted the
+  // audit insert with `new_letter.id` as `resource_id`. Two flaws:
+  //   - F1: `resource_id = new_letter.id` is a fresh UUID per call, so
+  //     the partial unique index on `audit_log(resource_id, event)`
+  //     never collided between concurrent API + worker writers — both
+  //     "won" and produced duplicate Letters.
+  //   - F2 (worker-side equivalent): when ON CONFLICT fired, the CTE's
+  //     new_letter INSERT had already committed in the data-modifying
+  //     CTE's effective ordering, leaving an orphan `letters` row that
+  //     a fallback DELETE (racy with the winner's snapshot) had to
+  //     compensate for.
+  //
+  // Fix: write the audit FIRST with `resource_id = uploadId`. The
+  // partial unique index now dedupes correctly across both writers.
+  // The `letters` INSERT only happens when the audit row was actually
+  // written — no orphans, no compensating DELETE, no race with the
+  // winner's commit.
+  const auditRows = await tx<{ id: string }[]>`
+    INSERT INTO audit_log
+      (actor_id, actor_type, event, resource_id, resource_type, metadata)
+    VALUES (
+      ${args.patientId}::uuid,
+      'system',
+      'letter.queued',
+      ${args.uploadId}::uuid,
+      'letter',
+      ${JSON.stringify({ uploadId: args.uploadId, triggeredBy: "worker" })}::jsonb
     )
-    SELECT new_audit.resource_id AS id FROM new_audit
+    ON CONFLICT ON CONSTRAINT audit_log_notification_event_unique
+    DO NOTHING
+    RETURNING id
   `;
-  const letterId = inserted[0]?.id;
-  if (!letterId) {
-    // Audit row not written → API-side enqueue beat us. The
-    // letters row we INSERTed in the CTE was rolled back by the
-    // implicit transaction wrapping the statement only if the CTE
-    // is fully aborted — but a successful `INSERT … RETURNING` in
-    // the CTE persists. Roll back manually here so we don't leak
-    // an orphan `queued` row that no consumer will pick up
-    // (no audit, no pg-boss job).
-    await tx`
-      DELETE FROM letters
-      WHERE patient_id = ${args.patientId}::uuid
-        AND upload_id = ${args.uploadId}::uuid
-        AND status = 'queued'
-        AND id NOT IN (
-          SELECT resource_id FROM audit_log
-          WHERE event = 'letter.queued'
-            AND resource_id IS NOT NULL
-        )
-    `;
+  if (auditRows.length === 0) {
     return { enqueued: false, reason: "already_queued" };
   }
 
-  // 5. Enqueue the pg-boss job. Singleton-keyed on `letterId` so
+  const inserted = await tx<{ id: string }[]>`
+    INSERT INTO letters (patient_id, upload_id, status)
+    VALUES (${args.patientId}::uuid, ${args.uploadId}::uuid, 'queued')
+    RETURNING id
+  `;
+  const letterId = inserted[0]?.id;
+  if (!letterId) {
+    throw new Error(
+      `emitLetterQueued: letters INSERT returned no rows for uploadId=${args.uploadId}`,
+    );
+  }
+
+  // Enqueue the pg-boss job. Singleton-keyed on `letterId` so
   // an idempotent worker retry doesn't double-fire.
   const wrapped = {
     jobId: crypto.randomUUID(),

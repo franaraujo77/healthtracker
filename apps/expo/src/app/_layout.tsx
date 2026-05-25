@@ -221,11 +221,20 @@ function RootLayout() {
   // route never has to wait at mount. Gated alongside the persister
   // bootstrap (R1-P271 single-gate pattern) so the children subtree
   // mounts atomically once both are ready.
-  const [fontsLoaded] = useFonts({
+  // Code-review F8 — destructure the error too. `useFonts` returns
+  // `[loaded, error]`; on a flaky network or corrupted asset cache
+  // the loaded flag stays false forever. The gate below treats
+  // `error !== null` as "give up on Lora and let the app mount with
+  // system font fallback" so a font-load failure can't permanently
+  // blank the entire app. The LetterReader screen accepts a missing
+  // Lora gracefully (the `style={{ fontFamily: "Lora_400Regular" }}`
+  // falls back to the platform default if the family is unregistered).
+  const [fontsLoaded, fontError] = useFonts({
     Lora_400Regular,
     Lora_500Medium,
     Lora_700Bold,
   });
+  const fontsReady = fontsLoaded || fontError !== null;
   // Story 2.5 / F135 — push token registration + tap deep-link
   // handling. Self-skips when there's no signed-in session, no EAS
   // projectId, or on simulators (see hook for details).
@@ -371,7 +380,7 @@ function RootLayout() {
   return (
     <TamaguiProvider>
       <QueryProviderWithPersistence>
-        {persisterBootstrapped && fontsLoaded ? (
+        {persisterBootstrapped && fontsReady ? (
           <Stack
             screenOptions={{
               headerStyle: {
