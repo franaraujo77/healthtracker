@@ -1344,6 +1344,18 @@ export const LETTER_PREPARING_RETRY_PT_BR =
   "Sua carta está sendo preparada. Você receberá uma notificação quando estiver pronta.";
 
 /**
+ * Code-review F3 — terminal-failure copy for the draw-detail surface.
+ * `letters.status='failed'` is reached only after the pg-boss
+ * `letter.generate` job has exhausted retries; no further job will fire
+ * and no `letter_ready` push will arrive. Rendering the "preparing —
+ * you'll get a notification" copy in this case promises a push that
+ * will never come. Distinct, soft register: no alarm, no diagnostic
+ * language, mirrors UX-DR20 register.
+ */
+export const LETTER_FAILED_PT_BR =
+  "Não conseguimos preparar sua carta para este exame. Tente novamente em alguns instantes.";
+
+/**
  * AC7 — diagnostic-phrasing regex for the ANVISA replay test. Any
  * Letter body sampled across `services/llm`'s fixture replay MUST
  * yield zero matches. The "u" flag enables Unicode property

@@ -215,6 +215,14 @@ export async function getLetterForDraw(
     args.labName === ""
       ? isNull(Uploads.labName)
       : eq(Uploads.labName, args.labName);
+  // Code-review F2 + F4 — EXISTS subquery instead of an inner-join on
+  // `observations`. The previous shape joined every non-deleted
+  // observation (30–50 rows per upload) just to satisfy a `LIMIT 1`,
+  // AND made the Letter unreachable whenever every observation in the
+  // upload was soft-deleted (Story 2.7 BIA overwrite edge). EXISTS
+  // short-circuits on the first matching row and keeps the Letter
+  // reachable as long as at least one live observation pins the draw
+  // — same reachability as Story 3.1's draw list.
   const [row] = await database
     .select({
       id: Letters.id,
@@ -223,14 +231,17 @@ export async function getLetterForDraw(
     })
     .from(Letters)
     .innerJoin(Uploads, eq(Letters.uploadId, Uploads.id))
-    .innerJoin(Observations, eq(Observations.uploadId, Uploads.id))
     .where(
       and(
         eq(Letters.patientId, args.patientId),
-        eq(Observations.patientId, args.patientId),
-        eq(Observations.collectedAt, args.collectedAt),
-        isNull(Observations.deletedAt),
         labNamePredicate,
+        sql`EXISTS (
+          SELECT 1 FROM ${Observations}
+          WHERE ${Observations.uploadId} = ${Uploads.id}
+            AND ${Observations.patientId} = ${args.patientId}::uuid
+            AND ${Observations.collectedAt} = ${args.collectedAt}
+            AND ${Observations.deletedAt} IS NULL
+        )`,
       ),
     )
     .orderBy(desc(Letters.createdAt))

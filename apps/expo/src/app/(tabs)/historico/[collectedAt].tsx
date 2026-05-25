@@ -13,6 +13,7 @@ import {
   HISTORICO_LAB_NAME_FALLBACK_PT_BR,
   HISTORICO_RESULTS_ERROR_PT_BR,
   HISTORICO_RESULTS_LOADING_PT_BR,
+  LETTER_FAILED_PT_BR,
   LETTER_PREPARING_RETRY_PT_BR,
   LETTER_READ_CTA_PT_BR,
 } from "@healthtracker/validators";
@@ -68,7 +69,15 @@ export default function DrawDetailScreen() {
   const letterQuery = useQuery(
     trpc.letter.getForDraw.queryOptions(
       { collectedAt, labName: labParam },
-      { enabled: Boolean(collectedAt) && Boolean(draw) },
+      {
+        enabled: Boolean(collectedAt) && Boolean(draw),
+        // Code-review F1 — free-tier patients hit `premiumProcedure`'s
+        // PRECONDITION_FAILED gate. With TanStack's default `retry: 3`,
+        // each Histórico draw open triggers ~4 requests with backoff
+        // for every free-tier user — a silent retry storm. Letter
+        // metadata is non-essential UX; one failed request is enough.
+        retry: false,
+      },
     ),
   );
 
@@ -146,5 +155,12 @@ function renderLetterSlot(data: LetterForDraw): React.ReactNode {
       </Button>
     );
   }
+  // Code-review F3 — `failed` is terminal (pg-boss retries exhausted),
+  // so the "you'll get a notification" copy promises a push that will
+  // never come. Show the soft terminal-failure copy instead.
+  if (data.status === "failed") {
+    return <Text accessibilityRole="alert">{LETTER_FAILED_PT_BR}</Text>;
+  }
+  // queued | generating — the push is genuinely on the way.
   return <Text accessibilityRole="alert">{LETTER_PREPARING_RETRY_PT_BR}</Text>;
 }
