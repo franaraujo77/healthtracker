@@ -1,7 +1,7 @@
 import type { TRPCRouterRecord } from "@trpc/server";
 import { z } from "zod/v4";
 
-import { getLetterStatusForPatient } from "../letters";
+import { getLetterForDraw, getLetterStatusForPatient } from "../letters";
 import { premiumProcedure } from "../middleware/entitlements";
 
 /**
@@ -27,5 +27,32 @@ export const letterRouter = {
       // 404 surface — we deliberately do NOT distinguish "wrong
       // patient" from "missing letter" (no enumeration oracle).
       return result;
+    }),
+
+  /**
+   * Story 4.2 — map a `(collectedAt, labName)` draw to its Letter, if
+   * any. Drives the Histórico draw-detail "Ler carta" surface. Returns
+   * `null` for draws with no associated Letter (most pre-Epic-4 draws,
+   * all free-tier draws). The `labName === ""` empty-string sentinel
+   * matches Story 3.1's `historicoDrawDetailRoute` URL packing — null
+   * lab names are encoded as the empty string.
+   *
+   * NO `letter.read` audit is written here — that audit fires from the
+   * SSE endpoint on actual LetterReader open (Story 4.1 docblock,
+   * preserved to avoid double-counting).
+   */
+  getForDraw: premiumProcedure
+    .input(
+      z.object({
+        collectedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        labName: z.string(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      return getLetterForDraw(ctx.db, {
+        patientId: ctx.session.user.id,
+        collectedAt: input.collectedAt,
+        labName: input.labName,
+      });
     }),
 } satisfies TRPCRouterRecord;

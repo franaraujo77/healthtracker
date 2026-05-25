@@ -1327,10 +1327,21 @@ export const LETTER_NOTIFICATION_BODY_PT_BR =
   "Sua nova carta personalizada chegou. Toque para abrir.";
 
 /**
- * Story 4.2 (preview) — re-read CTA label. Listed here so Story 4.2
- * doesn't need to amend this section.
+ * Re-read CTA label rendered on the Histórico draw-detail screen when
+ * a Letter exists with `status='complete'`. Tap routes to CARTA_ROUTE.
  */
 export const LETTER_READ_CTA_PT_BR = "Ler carta";
+
+/**
+ * Story 4.2 AC4 — copy shown on the draw-detail screen when a Letter
+ * row exists for the draw but `status !== 'complete'` (queued,
+ * generating, failed). Distinct register from `LETTER_UNAVAILABLE_PT_BR`
+ * (Story 4.1, "demorando" reader-side retry): this surface promises a
+ * future notification rather than asking the patient to retry. Pairs
+ * with `LETTER_NOTIFICATION_TITLE_PT_BR` — the very push it promises.
+ */
+export const LETTER_PREPARING_RETRY_PT_BR =
+  "Sua carta está sendo preparada. Você receberá uma notificação quando estiver pronta.";
 
 /**
  * AC7 — diagnostic-phrasing regex for the ANVISA replay test. Any

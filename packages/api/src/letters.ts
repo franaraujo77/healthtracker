@@ -1,5 +1,10 @@
-import { and, eq, isNull, sql } from "@healthtracker/db";
-import { ConsentGrants, Letters } from "@healthtracker/db/schema";
+import { and, desc, eq, isNull, sql } from "@healthtracker/db";
+import {
+  ConsentGrants,
+  Letters,
+  Observations,
+  Uploads,
+} from "@healthtracker/db/schema";
 import { LETTER_AUDIT_QUEUED } from "@healthtracker/validators";
 
 import type { AuditDb } from "./audit";
@@ -176,4 +181,60 @@ export async function getLetterStatusForPatient(
     body: row.body,
     failureReason: row.failureReason,
   };
+}
+
+/**
+ * Story 4.2 — map a `(collected_at, lab_name)` draw to its associated
+ * Letter, if one exists. Patient-scoped by RLS plus an explicit
+ * `patient_id` predicate (defense-in-depth so the SELECT plan stays
+ * stable even if RLS context is ever misconfigured).
+ *
+ * `labName = ""` is the empty-string sentinel Story 3.1's
+ * `historicoDrawDetailRoute` packs into the URL when the underlying
+ * `uploads.lab_name` is `NULL`. We translate that sentinel here, not
+ * at the caller — Story 3.1 reuses the same convention across the
+ * Histórico → draw-detail surface.
+ *
+ * Returns the MOST RECENT `letters` row when multiple uploads exist
+ * for the same draw (AC7) — Letters are per-draw narratives, not
+ * per-upload artifacts.
+ *
+ * Returns `null` when no `letters` row exists; the caller's UX
+ * silently omits the "Ler carta" surface (AC1 — the feature does
+ * not advertise itself for pre-Epic-4 draws or for patients on the
+ * free tier whose enqueue was skipped).
+ */
+export async function getLetterForDraw(
+  database: AuditDb,
+  args: { patientId: string; collectedAt: string; labName: string },
+): Promise<{
+  letterId: string;
+  status: "queued" | "generating" | "complete" | "failed";
+} | null> {
+  const labNamePredicate =
+    args.labName === ""
+      ? isNull(Uploads.labName)
+      : eq(Uploads.labName, args.labName);
+  const [row] = await database
+    .select({
+      id: Letters.id,
+      status: Letters.status,
+      createdAt: Letters.createdAt,
+    })
+    .from(Letters)
+    .innerJoin(Uploads, eq(Letters.uploadId, Uploads.id))
+    .innerJoin(Observations, eq(Observations.uploadId, Uploads.id))
+    .where(
+      and(
+        eq(Letters.patientId, args.patientId),
+        eq(Observations.patientId, args.patientId),
+        eq(Observations.collectedAt, args.collectedAt),
+        isNull(Observations.deletedAt),
+        labNamePredicate,
+      ),
+    )
+    .orderBy(desc(Letters.createdAt))
+    .limit(1);
+  if (!row) return null;
+  return { letterId: row.id, status: row.status };
 }

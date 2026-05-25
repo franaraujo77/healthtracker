@@ -269,7 +269,13 @@ development_status:
   # (NFR-S6 launch blocker; dev unblocked), Railway provisioning,
   # ANTHROPIC_API_KEY env. Story 4.4 will incremental-migrate prod schema.
   4-1-patient-receives-a-streamed-letter-narrative-after-a-draw-is-confirmed: ready-for-dev
-  4-2-patient-re-reads-a-previously-generated-letter: backlog
+  # Story 4.2 spec created → ready-for-dev. Stacked on Story 4.1 (PR #54).
+  # Adds tRPC letter.getForDraw + LETTER_PREPARING_RETRY_PT_BR + Histórico
+  # draw-detail "Ler carta" wiring. Reuses 4.1's LetterReader + SSE cached-
+  # complete replay path → no LLM call on re-read. premiumProcedure-gated.
+  # No new schema, no new push, no services/llm changes. AC3 audit
+  # (letter.read) delegated to 4.1's SSE endpoint to avoid double-count.
+  4-2-patient-re-reads-a-previously-generated-letter: ready-for-dev
   4-3-patient-taps-a-biomarker-to-receive-an-explain-this-to-my-doctor-suggestion-growth: backlog
   epic-4-retrospective: optional
 
