@@ -1,7 +1,11 @@
 import type { TRPCRouterRecord } from "@trpc/server";
 import { z } from "zod/v4";
 
-import { getLetterForDraw, getLetterStatusForPatient } from "../letters";
+import {
+  generateBiomarkerSuggestion,
+  getLetterForDraw,
+  getLetterStatusForPatient,
+} from "../letters";
 import { premiumProcedure } from "../middleware/entitlements";
 
 /**
@@ -53,6 +57,31 @@ export const letterRouter = {
         patientId: ctx.session.user.id,
         collectedAt: input.collectedAt,
         labName: input.labName,
+      });
+    }),
+
+  /**
+   * Story 4.3 — synchronous biomarker-suggestion. premiumProcedure
+   * denies free-tier (PRECONDITION_FAILED / PREMIUM_REQUIRED) — the
+   * mobile detail screen renders the upgrade prompt in that branch.
+   * Proxies to services/llm; writes the
+   * `biomarker_suggestion.generated` audit row in the same
+   * `protectedProcedure` transaction as the response.
+   */
+  generateBiomarkerSuggestion: premiumProcedure
+    .input(
+      z.object({
+        biomarkerName: z.string().min(1).max(120),
+        value: z.number().finite(),
+        unitUcum: z.string().min(1).max(40),
+        loincCode: z.string().min(1).max(40).nullable(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      return generateBiomarkerSuggestion(ctx.db, {
+        patientId: ctx.session.user.id,
+        supabaseAccessToken: ctx.session.access_token,
+        input,
       });
     }),
 } satisfies TRPCRouterRecord;

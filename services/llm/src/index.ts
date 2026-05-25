@@ -8,6 +8,7 @@ import {
 } from "./adapters/anthropic.js";
 import { registerGenerateLetterConsumer } from "./consumers/generate-letter.js";
 import { sql } from "./db.js";
+import { registerBiomarkerSuggestionRoute } from "./routes/biomarker-suggestion.js";
 import { registerLetterStreamRoute } from "./routes/letter-stream.js";
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
@@ -46,6 +47,7 @@ await registerGenerateLetterConsumer(boss, { sql, llm });
 const app = Fastify({ logger: false });
 app.get("/healthz", () => ({ ok: true }));
 registerLetterStreamRoute(app, { sql });
+registerBiomarkerSuggestionRoute(app, { llm });
 
 await app.listen({ host: "0.0.0.0", port: PORT });
 console.log(`[llm-service] listening on :${PORT}`);

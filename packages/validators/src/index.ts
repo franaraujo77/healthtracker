@@ -1363,3 +1363,72 @@ export const LETTER_FAILED_PT_BR =
  */
 export const LETTER_DIAGNOSTIC_PHRASE_REGEX =
   /\b(você tem|isso indica|você deve)\b/iu;
+
+// =============================================================================
+// Story 4.3 — "Pergunte ao seu médico" biomarker suggestion (Growth)
+// =============================================================================
+
+/**
+ * Audit event written by the tRPC mutation when a suggestion is
+ * successfully returned to the client. Use this constant — never
+ * inline-string the event name.
+ */
+export const BIOMARKER_AUDIT_GENERATED =
+  "biomarker_suggestion.generated" as const;
+
+/** UX-DR20 — pt-BR header above the suggestion body. */
+export const BIOMARKER_SUGGESTION_HEADER_PT_BR = "Pergunte ao seu médico";
+
+/** Loading state — registered before the LLM call resolves. */
+export const BIOMARKER_SUGGESTION_LOADING_PT_BR = "Preparando sua pergunta…";
+
+/** Generic error fallback when the proxy call to services/llm fails. */
+export const BIOMARKER_SUGGESTION_ERROR_PT_BR =
+  "Não conseguimos gerar uma sugestão agora. Tente novamente em alguns instantes.";
+
+/**
+ * Cooldown copy — services/llm enforces a 60s per-(patient, biomarker)
+ * window. Soft register ("Aguarde um momento") — no action verb, the
+ * caller cannot bypass the cooldown.
+ */
+export const BIOMARKER_SUGGESTION_COOLDOWN_PT_BR =
+  "Aguarde um momento antes de gerar outra sugestão para este biomarcador.";
+
+/**
+ * AC3 — copy shown when a non-premium patient opens the detail sheet.
+ * Pairs with `LETTER_PREMIUM_UPGRADE_CTA_PT_BR` (Story 4.1) for the
+ * upgrade button — do NOT author a parallel CTA string.
+ */
+export const BIOMARKER_SUGGESTION_PREMIUM_REQUIRED_PT_BR =
+  "Sugestões personalizadas para conversas com o seu médico estão disponíveis no plano Premium.";
+
+/**
+ * AC2 — ANVISA regex post-filter fallback. Returned by services/llm
+ * when the model's output matches `LETTER_DIAGNOSTIC_PHRASE_REGEX`.
+ * **Must stay in sync with the duplicated literal in
+ * `services/llm/src/routes/biomarker-suggestion.ts`** (the LLM
+ * service cannot import this package).
+ */
+export const BIOMARKER_SUGGESTION_FALLBACK_PT_BR =
+  "Pode valer a pena discutir esse resultado com o seu médico em sua próxima consulta.";
+
+/**
+ * AC7 + AC8 — route helper for the biomarker detail screen on Expo
+ * Router 6. Mirrors Story 3.1's `historicoDrawDetailRoute` shape:
+ * one helper, two callers (Início + Histórico). The dynamic LOINC
+ * code is path-encoded; the biomarker metadata travels as query
+ * params so the detail screen can render the context header
+ * without a second tRPC round-trip.
+ */
+export function BIOMARKER_DETAIL_ROUTE(
+  loincCode: string,
+  biomarkerName: string,
+  valueNumeric: number,
+  unitUcum: string,
+): string {
+  const qs =
+    `name=${encodeURIComponent(biomarkerName)}` +
+    `&value=${encodeURIComponent(String(valueNumeric))}` +
+    `&unit=${encodeURIComponent(unitUcum)}`;
+  return `/biomarcadores/${encodeURIComponent(loincCode)}?${qs}`;
+}

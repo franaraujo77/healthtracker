@@ -1,3 +1,5 @@
+import { TRPCError } from "@trpc/server";
+
 import { and, desc, eq, isNull, sql } from "@healthtracker/db";
 import {
   ConsentGrants,
@@ -5,7 +7,10 @@ import {
   Observations,
   Uploads,
 } from "@healthtracker/db/schema";
-import { LETTER_AUDIT_QUEUED } from "@healthtracker/validators";
+import {
+  BIOMARKER_AUDIT_GENERATED,
+  LETTER_AUDIT_QUEUED,
+} from "@healthtracker/validators";
 
 import type { AuditDb } from "./audit";
 import { writeAuditLog } from "./audit";
@@ -248,4 +253,92 @@ export async function getLetterForDraw(
     .limit(1);
   if (!row) return null;
   return { letterId: row.id, status: row.status };
+}
+
+/**
+ * Story 4.3 — synchronous proxy to the `services/llm`
+ * `POST /api/biomarker-suggestion` endpoint. The mobile client never
+ * talks to `services/llm` directly for this path — the API layer
+ * applies the premium gate (via `premiumProcedure`), writes the
+ * `biomarker_suggestion.generated` audit, and forwards the patient's
+ * Supabase access token for the LLM service's own auth check.
+ *
+ * Audit row is written ONLY on a successful 200 response — premium
+ * denials, cooldown 429s, and LLM 5xx failures do not produce an
+ * audit. This keeps the audit log aligned with "the patient actually
+ * read a suggestion," not "the patient tried to."
+ */
+export interface BiomarkerSuggestionInput {
+  biomarkerName: string;
+  value: number;
+  unitUcum: string;
+  loincCode: string | null;
+}
+
+export async function generateBiomarkerSuggestion(
+  database: AuditDb,
+  args: {
+    patientId: string;
+    supabaseAccessToken: string;
+    input: BiomarkerSuggestionInput;
+  },
+): Promise<{ suggestion: string }> {
+  const llmServiceUrl = process.env.LLM_SERVICE_URL;
+  if (!llmServiceUrl) {
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "LLM_SERVICE_URL not configured",
+    });
+  }
+  let response: Response;
+  try {
+    response = await fetch(`${llmServiceUrl}/api/biomarker-suggestion`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${args.supabaseAccessToken}`,
+      },
+      body: JSON.stringify(args.input),
+    });
+  } catch (err) {
+    console.error(
+      `[biomarker-suggestion] fetch to services/llm failed for patient=${args.patientId}`,
+      err,
+    );
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "LLM_UNAVAILABLE",
+    });
+  }
+  if (response.status === 429) {
+    throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "COOLDOWN" });
+  }
+  if (!response.ok) {
+    console.warn(
+      `[biomarker-suggestion] services/llm returned ${response.status} for patient=${args.patientId}`,
+    );
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "LLM_UNAVAILABLE",
+    });
+  }
+  const body = (await response.json()) as { suggestion?: unknown };
+  if (typeof body.suggestion !== "string" || body.suggestion.length === 0) {
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "LLM_UNAVAILABLE",
+    });
+  }
+  await writeAuditLog(database, {
+    actorId: args.patientId,
+    actorType: "patient",
+    event: BIOMARKER_AUDIT_GENERATED,
+    resourceId: crypto.randomUUID(),
+    resourceType: "biomarker_suggestion",
+    metadata: {
+      loincCode: args.input.loincCode,
+      biomarkerName: args.input.biomarkerName,
+    },
+  });
+  return { suggestion: body.suggestion };
 }

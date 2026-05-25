@@ -30,6 +30,12 @@ export interface LetterStreamCallbacks {
   onError: (err: unknown) => void;
 }
 
+export interface BiomarkerSuggestionResult {
+  body: string;
+  model: string;
+  tokensUsed: number;
+}
+
 export interface LLMAdapter {
   streamLetter(args: {
     system: string;
@@ -39,6 +45,18 @@ export interface LLMAdapter {
     callbacks: LetterStreamCallbacks;
     abortSignal?: AbortSignal;
   }): Promise<void>;
+  /**
+   * Story 4.3 — synchronous (non-streaming) Anthropic call for the
+   * biomarker-suggestion path. ~50-word output; Anthropic
+   * `messages.create` returns a single completion. The caller applies
+   * any post-filter (ANVISA regex) on the returned body.
+   */
+  generateBiomarkerSuggestion(args: {
+    system: string;
+    userPrompt: string;
+    model: string;
+    maxTokens: number;
+  }): Promise<BiomarkerSuggestionResult>;
 }
 
 export function createAnthropicAdapter(opts: { apiKey: string }): LLMAdapter {
@@ -86,6 +104,22 @@ export function createAnthropicAdapter(opts: { apiKey: string }): LLMAdapter {
         throw err;
       }
     },
+    async generateBiomarkerSuggestion(args) {
+      const response = await client.messages.create({
+        model: args.model,
+        max_tokens: args.maxTokens,
+        system: args.system,
+        messages: [{ role: "user", content: args.userPrompt }],
+      });
+      const text = response.content
+        .map((c) => (c.type === "text" ? c.text : ""))
+        .join("");
+      return {
+        body: text.trim(),
+        model: response.model,
+        tokensUsed: response.usage.input_tokens + response.usage.output_tokens,
+      };
+    },
   };
 }
 
@@ -124,6 +158,19 @@ export function createStubLLMAdapter(): LLMAdapter {
         args.callbacks.onError(err);
         throw err;
       }
+    },
+    // eslint-disable-next-line @typescript-eslint/require-await -- stub returns instantly; the real adapter is async
+    async generateBiomarkerSuggestion() {
+      // Story 4.3 — pt-BR placeholder used when ANTHROPIC_API_KEY is
+      // unset (dev/CI). Contains the "pode valer a pena discutir"
+      // anchor so the AC2 regex post-filter never strips it.
+      return {
+        body:
+          "Pode valer a pena discutir esse resultado com o seu médico " +
+          "para entender o que essa tendência significa no seu caso.",
+        model: "stub",
+        tokensUsed: 0,
+      };
     },
   };
 }

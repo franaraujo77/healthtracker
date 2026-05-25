@@ -6,6 +6,7 @@ import { Text, YStack } from "tamagui";
 
 import { BiomarkerCard, Button } from "@healthtracker/ui";
 import {
+  BIOMARKER_DETAIL_ROUTE,
   CARTA_ROUTE,
   formatCollectedAtPtBr,
   HISTORICO_DRAW_DETAIL_BACK_PT_BR,
@@ -125,6 +126,25 @@ export default function DrawDetailScreen() {
               unitUcum={obs.unitUcum}
               referenceRangeLow={obs.referenceRangeLow}
               referenceRangeHigh={obs.referenceRangeHigh}
+              // Story 4.3 — tap routes to "Pergunte ao seu médico".
+              // Skip the tap surface when loincCode is null (Story 2.3
+              // R1-P102 — no LLM anchor exists for unresolved LOINC).
+              onPress={
+                obs.loincCode === null
+                  ? undefined
+                  : () => {
+                      const loinc = obs.loincCode;
+                      if (loinc === null) return;
+                      router.push(
+                        BIOMARKER_DETAIL_ROUTE(
+                          loinc,
+                          obs.biomarkerName,
+                          obs.valueNumeric,
+                          obs.unitUcum,
+                        ),
+                      );
+                    }
+              }
             />
           ))}
           {/* Story 4.2 — Letter entry point. Append below the

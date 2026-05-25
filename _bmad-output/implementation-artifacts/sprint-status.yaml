@@ -276,7 +276,19 @@ development_status:
   # No new schema, no new push, no services/llm changes. AC3 audit
   # (letter.read) delegated to 4.1's SSE endpoint to avoid double-count.
   4-2-patient-re-reads-a-previously-generated-letter: ready-for-dev
-  4-3-patient-taps-a-biomarker-to-receive-an-explain-this-to-my-doctor-suggestion-growth: backlog
+  # Story 4.3 spec created → ready-for-dev. Stacks on Stories 4.1 + 4.2
+  # (PR #54). Adds synchronous biomarker-suggestion path: new services/llm
+  # POST endpoint + Anthropic messages.create (non-streaming) + 60s
+  # in-memory cooldown + LETTER_DIAGNOSTIC_PHRASE_REGEX post-filter
+  # (wires the Story 4.1 unused constant). New tRPC mutation
+  # letter.generateBiomarkerSuggestion (premium-gated, proxies to
+  # services/llm, writes biomarker_suggestion.generated audit). New
+  # mobile route apps/expo/src/app/biomarcadores/[loincCode].tsx.
+  # BiomarkerCard.onPress wired at Início + Histórico (Story 3.1 left
+  # the prop unwired explicitly for this story). Tab bar persists
+  # (UX-DR11 — not a fullScreenModal). Stub adapter path keeps dev/CI
+  # unblocked when ANTHROPIC_API_KEY is unset.
+  4-3-patient-taps-a-biomarker-to-receive-an-explain-this-to-my-doctor-suggestion-growth: ready-for-dev
   epic-4-retrospective: optional
 
   # Epic 5: Patient Controls Who Sees Their Health Data
