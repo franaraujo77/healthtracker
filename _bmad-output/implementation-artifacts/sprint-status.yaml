@@ -289,6 +289,21 @@ development_status:
   # (UX-DR11 — not a fullScreenModal). Stub adapter path keeps dev/CI
   # unblocked when ANTHROPIC_API_KEY is unset.
   4-3-patient-taps-a-biomarker-to-receive-an-explain-this-to-my-doctor-suggestion-growth: ready-for-dev
+  # Story 4.4 spec created → ready-for-dev. Two new supabase/migrations/
+  # files: 0003_epic_4_letters_schema.sql (letter_status_enum + letters
+  # table + letters_patient_created_idx + letters_select_own RLS) inside
+  # the auto-wrapped tx; 0004_epic_4_audit_index_letter_queued.sql with
+  # `-- supabase: no-transaction` directive performing the partial-
+  # unique-index WHERE-clause swap via CREATE/DROP CONCURRENTLY (per
+  # CLAUDE.md ops note — direct DROP+CREATE not safe in prod). Order-
+  # safe: create _v2 first, drop original, rename to preserve the
+  # ON CONFLICT ON CONSTRAINT symbol used by services/extraction/src/
+  # notifications/emit.ts. Integration test boots Postgres 16
+  # testcontainer, applies all migrations, runs drizzle-kit push
+  # --force, asserts zero pending statements. NO production deploy
+  # in this story — supabase-deploy is operator-supervised after PR
+  # #54 merges.
+  4-4-author-incremental-supabase-migration-for-epic-4-schema: ready-for-dev
   epic-4-retrospective: optional
 
   # Epic 5: Patient Controls Who Sees Their Health Data
