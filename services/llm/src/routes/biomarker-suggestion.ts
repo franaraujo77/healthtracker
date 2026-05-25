@@ -74,31 +74,22 @@ export function registerBiomarkerSuggestionRoute(
   deps: { llm: LLMAdapter },
 ): void {
   const cooldown = new Map<string, number>();
-  // Code-review F4 — GC checks the bucket timestamp against the
-  // current time before deleting. If a subsequent hit refreshed the
-  // timestamp, the bucket is still active; we re-arm a new timer for
-  // the remaining window instead of deleting. Without this, a
-  // refreshed cooldown gets prematurely deleted by the original
-  // setTimeout, letting a third hit bypass the window.
+  // Per-key handle to the active GC timer. Cleared and replaced on
+  // every cooldown bump so the timer always reflects the latest
+  // bucket timestamp. Without this, a 60s setTimeout from t=0 would
+  // delete a bucket refreshed at t=30s (premature delete), AND a
+  // refresh chain longer than two events would leave bucket entries
+  // un-GC'd (slow memory leak on hot keys). Story 4.3 code-review F4.
+  const gcTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const scheduleGc = (key: string): void => {
-    setTimeout(() => {
-      const ts = cooldown.get(key);
-      if (ts === undefined) return;
-      const elapsed = Date.now() - ts;
-      if (elapsed >= COOLDOWN_MS) {
-        cooldown.delete(key);
-        return;
-      }
-      // Bucket was refreshed since this timer was scheduled — re-arm
-      // for the remaining window. Subsequent refreshes will replace
-      // this timer in turn.
-      setTimeout(() => {
-        const ts2 = cooldown.get(key);
-        if (ts2 !== undefined && Date.now() - ts2 >= COOLDOWN_MS) {
-          cooldown.delete(key);
-        }
-      }, COOLDOWN_MS - elapsed).unref();
-    }, COOLDOWN_MS).unref();
+    const existing = gcTimers.get(key);
+    if (existing !== undefined) clearTimeout(existing);
+    const handle = setTimeout(() => {
+      gcTimers.delete(key);
+      cooldown.delete(key);
+    }, COOLDOWN_MS);
+    handle.unref();
+    gcTimers.set(key, handle);
   };
 
   app.post(

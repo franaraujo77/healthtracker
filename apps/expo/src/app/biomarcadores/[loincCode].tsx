@@ -18,7 +18,7 @@ import {
 } from "@healthtracker/validators";
 
 import type { RouterInputs } from "~/utils/api";
-import { trpcClient } from "~/utils/api";
+import { trpc, trpcClient } from "~/utils/api";
 
 type SuggestionInput = RouterInputs["letter"]["generateBiomarkerSuggestion"];
 
@@ -58,7 +58,14 @@ export default function BiomarkerDetailScreen(): React.ReactNode {
   // the audit row is never written, and Anthropic stops streaming.
   // (Cooldown bumping is also gated on success after the F1 fix.)
   const abortRef = useRef<AbortController | null>(null);
+  // Spread the tRPC mutationOptions so the mutation keeps its
+  // `mutationKey` ([['letter','generateBiomarkerSuggestion']]) —
+  // restored for devtools grouping and any future
+  // `useIsMutating({ mutationKey })` filter. Override only the
+  // `mutationFn` so we can thread the AbortSignal for F2 unmount-
+  // cancellation.
   const mutation = useMutation({
+    ...trpc.letter.generateBiomarkerSuggestion.mutationOptions(),
     mutationFn: (input: SuggestionInput) => {
       abortRef.current?.abort();
       const ctrl = new AbortController();
