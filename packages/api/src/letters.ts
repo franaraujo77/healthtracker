@@ -267,6 +267,23 @@ export async function getLetterForDraw(
  * denials, cooldown 429s, and LLM 5xx failures do not produce an
  * audit. This keeps the audit log aligned with "the patient actually
  * read a suggestion," not "the patient tried to."
+ *
+ * **Optimism on audit-write failure (code-review F5).** The audit
+ * INSERT happens AFTER the LLM service has returned a usable body
+ * and AFTER `services/llm` has already bumped its in-memory
+ * cooldown and Anthropic has been billed for tokens. If the audit
+ * INSERT throws (DB blip, Postgres connection drop), we rethrow as
+ * `INTERNAL_SERVER_ERROR` and the mobile client renders the generic
+ * error message — the patient never sees the suggestion. The
+ * server-side cost (cooldown bump + Anthropic spend) is intentionally
+ * NOT rolled back: the cooldown lives in another process (services/
+ * llm), and Anthropic doesn't refund. We accept this asymmetry
+ * because (a) audit writes are highly reliable in practice (Story
+ * 0.4 RLS + Drizzle tx), (b) the next retry will succeed unless the
+ * DB outage persists past the 60 s cooldown — at which point the
+ * user gets a fresh attempt — and (c) the alternative (writing the
+ * audit BEFORE the LLM call) violates the "patient actually read a
+ * suggestion" invariant the docblock above commits to.
  */
 export interface BiomarkerSuggestionInput {
   biomarkerName: string;

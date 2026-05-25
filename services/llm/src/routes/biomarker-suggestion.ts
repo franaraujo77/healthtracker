@@ -4,18 +4,10 @@ import type { LLMAdapter } from "../adapters/anthropic.js";
 import { verifyJwt } from "../auth.js";
 import { ANVISA_SYSTEM_PROMPT } from "../prompts/anvisa-system.js";
 import { buildBiomarkerSuggestionPrompt } from "../prompts/biomarker-suggestion-prompt.js";
+import { DIAGNOSTIC_PHRASE_REGEX } from "./biomarker-suggestion-regex.js";
 
 const BIOMARKER_MODEL_ID = "claude-sonnet-4-6";
 const BIOMARKER_MAX_TOKENS = 200;
-
-/**
- * Story 4.3 — diagnostic-phrasing regex (mirrors the constant in
- * `@healthtracker/validators` — services/llm cannot import the
- * validators package, so the regex is duplicated here. The two
- * literals MUST stay in sync; a snapshot test in
- * `__tests__/biomarker-suggestion.test.ts` pins both halves.
- */
-const DIAGNOSTIC_PHRASE_REGEX = /\b(você tem|isso indica|você deve)\b/iu;
 
 const COOLDOWN_MS = 60_000;
 
@@ -82,8 +74,31 @@ export function registerBiomarkerSuggestionRoute(
   deps: { llm: LLMAdapter },
 ): void {
   const cooldown = new Map<string, number>();
+  // Code-review F4 — GC checks the bucket timestamp against the
+  // current time before deleting. If a subsequent hit refreshed the
+  // timestamp, the bucket is still active; we re-arm a new timer for
+  // the remaining window instead of deleting. Without this, a
+  // refreshed cooldown gets prematurely deleted by the original
+  // setTimeout, letting a third hit bypass the window.
   const scheduleGc = (key: string): void => {
-    setTimeout(() => cooldown.delete(key), COOLDOWN_MS).unref();
+    setTimeout(() => {
+      const ts = cooldown.get(key);
+      if (ts === undefined) return;
+      const elapsed = Date.now() - ts;
+      if (elapsed >= COOLDOWN_MS) {
+        cooldown.delete(key);
+        return;
+      }
+      // Bucket was refreshed since this timer was scheduled — re-arm
+      // for the remaining window. Subsequent refreshes will replace
+      // this timer in turn.
+      setTimeout(() => {
+        const ts2 = cooldown.get(key);
+        if (ts2 !== undefined && Date.now() - ts2 >= COOLDOWN_MS) {
+          cooldown.delete(key);
+        }
+      }, COOLDOWN_MS - elapsed).unref();
+    }, COOLDOWN_MS).unref();
   };
 
   app.post(
@@ -106,8 +121,6 @@ export function registerBiomarkerSuggestionRoute(
         await reply.code(429).send({ code: "COOLDOWN" });
         return;
       }
-      cooldown.set(key, Date.now());
-      scheduleGc(key);
 
       try {
         const result = await deps.llm.generateBiomarkerSuggestion({
@@ -120,6 +133,11 @@ export function registerBiomarkerSuggestionRoute(
           model: BIOMARKER_MODEL_ID,
           maxTokens: BIOMARKER_MAX_TOKENS,
         });
+        // Code-review F1 — set cooldown ONLY on successful generation.
+        // A 502/network blip used to bump the bucket too, locking the
+        // patient out for 60 s on a failed request they never received.
+        cooldown.set(key, Date.now());
+        scheduleGc(key);
         const sanitised = DIAGNOSTIC_PHRASE_REGEX.test(result.body)
           ? FALLBACK_PT_BR
           : result.body;

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
@@ -17,7 +17,10 @@ import {
   LETTER_PREMIUM_UPGRADE_CTA_PT_BR,
 } from "@healthtracker/validators";
 
-import { trpc } from "~/utils/api";
+import type { RouterInputs } from "~/utils/api";
+import { trpcClient } from "~/utils/api";
+
+type SuggestionInput = RouterInputs["letter"]["generateBiomarkerSuggestion"];
 
 const BACKGROUND_PRIMARY = "#F9F7F4";
 
@@ -48,9 +51,23 @@ export default function BiomarkerDetailScreen(): React.ReactNode {
   const valueNumeric = Number(params.value ?? "NaN");
   const unitUcum = params.unit ?? "";
 
-  const mutation = useMutation(
-    trpc.letter.generateBiomarkerSuggestion.mutationOptions(),
-  );
+  // Code-review F2 — cancel the in-flight request when the screen
+  // unmounts. tRPC v11's per-call `signal` plumbs straight into the
+  // underlying fetch, so a back-navigation mid-call aborts the HTTP
+  // round-trip cleanly; the API helper's `await fetch(...)` throws,
+  // the audit row is never written, and Anthropic stops streaming.
+  // (Cooldown bumping is also gated on success after the F1 fix.)
+  const abortRef = useRef<AbortController | null>(null);
+  const mutation = useMutation({
+    mutationFn: (input: SuggestionInput) => {
+      abortRef.current?.abort();
+      const ctrl = new AbortController();
+      abortRef.current = ctrl;
+      return trpcClient.letter.generateBiomarkerSuggestion.mutate(input, {
+        signal: ctrl.signal,
+      });
+    },
+  });
 
   useEffect(() => {
     if (!biomarkerName || !Number.isFinite(valueNumeric) || !unitUcum) return;
@@ -64,6 +81,15 @@ export default function BiomarkerDetailScreen(): React.ReactNode {
     // (its identity changes on every render and would re-trigger).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loincCode]);
+
+  // Cleanup separate from the auto-fire effect so unmount always
+  // aborts, even when the auto-fire early-returned on bad params.
+  useEffect(
+    () => () => {
+      abortRef.current?.abort();
+    },
+    [],
+  );
 
   // The TRPCClientError shape lets us key on the server message we
   // set in `entitlements.ts` and `letters.ts`.
