@@ -36,6 +36,21 @@
 
 generated: 2026-05-15
 last_updated: 2026-05-25
+# Story 5.1 spec created → ready-for-dev. Epic 5 kickoff (epic-5: backlog → in-progress).
+# Lands the load-bearing data model for the whole Epic-5 surface: pending_invites,
+# share_tokens, share_token_biomarkers (junction table — ADR locked, NOT JSONB).
+# NEW tRPC router: sharingRouter (createPendingInvite, createShareToken,
+# configureBiomarkers, getDraftConfig, listShares). NEW audit kinds:
+# pending_invite.created, share_token.created, sharing.configured. NEW UI:
+# ShareBiomarkerToggle (packages/ui), compartilhar/* expo + web routes.
+# RLS principal model for doctor access: SET LOCAL app.current_share_token_id
+# (mirrors current app.current_patient_id). pending_invites.resolved_user_id
+# nullable to unblock Epic 6 doctor magic-link flow before doctor signup.
+# NEW env: SHARE_TOKEN_HMAC_SECRET (dev fallback; prod-gated).
+# Migration deferred to last story of Epic 5 (per user direction, mirrors
+# Story 3.5 / 4.4 batched-migration pattern). Dev path: pnpm db:push +
+# psql -f packages/db/policies/custom_rls_share_*.sql. Sharing is
+# premium-tier-gated (NFR-S3) — reuses premiumProcedure from Story 4.1.
 # Story 4.1 spec created → ready-for-dev. Epic 4 kickoff (epic-4: backlog → in-progress).
 # Story 3.4 spec created → ready-for-dev. Final story of Epic 3.
 # Adds offline-cached Fingerprint via `@tanstack/react-query-persist-client`
@@ -307,8 +322,8 @@ development_status:
   epic-4-retrospective: done
 
   # Epic 5: Patient Controls Who Sees Their Health Data
-  epic-5: backlog
-  5-1-patient-configures-per-biomarker-sharing-with-a-named-doctor: backlog
+  epic-5: in-progress
+  5-1-patient-configures-per-biomarker-sharing-with-a-named-doctor: ready-for-dev
   5-2-patient-generates-a-time-limited-sharing-link-with-duration-selection: backlog
   5-3-patient-views-the-access-log: backlog
   5-4-patient-revokes-a-doctors-access-to-their-record: backlog
