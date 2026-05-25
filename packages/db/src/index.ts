@@ -1,5 +1,5 @@
 export * from "drizzle-orm/sql";
-export { alias } from "drizzle-orm/pg-core";
+export { alias, PgDialect } from "drizzle-orm/pg-core";
 // SQL comparison/composition operators consumed by `@healthtracker/api`
 // resolvers and middleware. Re-exported from the db package so consumers
 // don't need their own `drizzle-orm` dependency. Add to this list only

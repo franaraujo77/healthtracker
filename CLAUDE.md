@@ -118,7 +118,22 @@ pnpm --filter @healthtracker/db test:integration  # requires Docker (testcontain
 > (non-`CONCURRENTLY`), which takes a `ShareLock` and opens a window for a
 > concurrent insert to violate the new constraint. For those changes write a
 > migration file with `CREATE UNIQUE INDEX CONCURRENTLY ... ; DROP INDEX
-CONCURRENTLY ...` and apply in a maintenance window.
+CONCURRENTLY ...` and apply via `psql` directly (Supabase CLI's
+> migration runner wraps every file in an implicit transaction —
+> `CONCURRENTLY` fails inside it with SQLSTATE 25001; there is **no**
+> `-- supabase: no-transaction` directive despite community lore).
+>
+> **Ops note (Epic 4 retro / Story 4.4):** the above ShareLock risk
+> applies only to **narrowing** or **shifting** WHERE-clause changes.
+> A **strict-superset widening** (e.g. adding a new event value to an
+> `event IN (...)` predicate) is safe non-CONCURRENTLY: any row that
+> lands during the swap window is either (a) already-valid under the
+> wider constraint because it was valid under the narrower one, or
+> (b) a value no production code writes yet. Widening migrations
+> can ship as a normal Supabase CLI migration file. See
+> `supabase/migrations/0004_epic_4_audit_index_letter_queued.sql`
+> for the canonical 3-step pattern (create `_v2` → drop original →
+> rename to preserve `ON CONFLICT ON CONSTRAINT <name>` symbols).
 
 **UI components**
 
@@ -134,7 +149,7 @@ pnpm dev:ios       # iOS simulator
 pnpm dev:android   # Android emulator
 ```
 
-**Environment**: Copy `.env.example` to `.env` at the repo root before running anything. Required vars: `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `CORS_ORIGIN`. Web scripts use `with-env` to inject these.
+**Environment**: Copy `.env.example` to `.env` at the repo root before running anything. Required vars: `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `CORS_ORIGIN`. Web scripts use `with-env` to inject these. Story 4.1 adds `ANTHROPIC_API_KEY` (NFR-S6: empty in dev → stub adapter; non-empty in prod → real Claude Sonnet, DPA-gated), `LLM_SERVICE_URL`, and `EXPO_PUBLIC_LLM_SERVICE_URL` for the persistent `services/llm` SSE server (`pnpm --filter @healthtracker/llm-service dev` on `:3001`).
 
 ## Architecture
 

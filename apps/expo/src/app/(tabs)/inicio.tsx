@@ -14,6 +14,7 @@ import {
 import { FingerprintChart } from "@healthtracker/ui/fingerprint-chart";
 import { UploadSourceSheet } from "@healthtracker/ui/upload-source-sheet";
 import {
+  BIOMARKER_DETAIL_ROUTE,
   FINGERPRINT_CACHE_FRESH_A11Y_PT_BR,
   FINGERPRINT_CACHE_STALE_A11Y_PT_BR,
   FINGERPRINT_CACHE_STALE_HINT_PT_BR,
@@ -363,6 +364,10 @@ export default function Inicio() {
       zScore?: number | null;
       personalBaselineMean?: number;
       personalBaselineStddev?: number;
+      // Story 4.3 — null when LOINC is unresolved (Story 2.3 R1-P102);
+      // BiomarkerCard.onPress stays undefined for these rows, so tap
+      // is a no-op (no LLM anchor exists).
+      loincCode: string | null;
     }[] = [];
     baselines.forEach((b, idx) => {
       // Look up the latest population reference range from the most-
@@ -384,6 +389,7 @@ export default function Inicio() {
         zScore: b.zScore,
         personalBaselineMean: b.mean,
         personalBaselineStddev: b.stddev,
+        loincCode: b.loincCode,
       });
     });
     // Cold-start fallback for single-history biomarkers in the
@@ -403,6 +409,7 @@ export default function Inicio() {
         referenceRangeHigh: o.referenceRangeHigh,
         // `zScore` undefined → BiomarkerCard falls back to
         // population-range state (AC3 fallback contract).
+        loincCode: o.loincCode,
       });
     });
     return cards;
@@ -608,6 +615,26 @@ export default function Inicio() {
                       zScore={c.zScore}
                       personalBaselineMean={c.personalBaselineMean}
                       personalBaselineStddev={c.personalBaselineStddev}
+                      // Story 4.3 — tap routes to the "Pergunte ao seu
+                      // médico" detail. Skip the surface entirely when
+                      // loincCode is null (Story 2.3 R1-P102 — observation
+                      // rows can have null loinc; no LLM anchor exists).
+                      onPress={
+                        c.loincCode === null
+                          ? undefined
+                          : () => {
+                              const loinc = c.loincCode;
+                              if (loinc === null) return;
+                              router.push(
+                                BIOMARKER_DETAIL_ROUTE(
+                                  loinc,
+                                  c.biomarkerName,
+                                  c.valueNumeric,
+                                  c.unitUcum,
+                                ),
+                              );
+                            }
+                      }
                     />
                   ))}
                 </YStack>

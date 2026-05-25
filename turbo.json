@@ -78,7 +78,10 @@
     "EXTRACTION_ADAPTER",
     "EXPO_PUSH_ACCESS_TOKEN",
     "NFR_SC4_FULL",
-    "SKIP_NFR_SC4"
+    "SKIP_NFR_SC4",
+    "ANTHROPIC_API_KEY",
+    "LLM_SERVICE_URL",
+    "EXPO_PUBLIC_LLM_SERVICE_URL"
   ],
   "globalPassThroughEnv": [
     "NODE_ENV",

@@ -1,0 +1,32 @@
+{
+  "name": "@healthtracker/llm-service",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "node --experimental-strip-types --watch src/index.ts",
+    "start": "node --experimental-strip-types src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "test:unit": "vitest run"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@healthtracker/types": "workspace:*",
+    "@supabase/supabase-js": "catalog:",
+    "fastify": "^5.2.0",
+    "pg-boss": "12.18.2",
+    "postgres": "catalog:"
+  },
+  "devDependencies": {
+    "@healthtracker/eslint-config": "workspace:*",
+    "@healthtracker/validators": "workspace:*",
+    "@types/node": "catalog:",
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

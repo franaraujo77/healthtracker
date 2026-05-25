@@ -1,6 +1,7 @@
 import { accountRouter } from "./router/account";
 import { authRouter } from "./router/auth";
 import { consentRouter } from "./router/consent";
+import { letterRouter } from "./router/letter";
 import { notificationsRouter } from "./router/notifications";
 import { observationsRouter } from "./router/observations";
 import { uploadsRouter } from "./router/uploads";
@@ -10,6 +11,7 @@ export const appRouter = createTRPCRouter({
   account: accountRouter,
   auth: authRouter,
   consent: consentRouter,
+  letter: letterRouter,
   notifications: notificationsRouter,
   observations: observationsRouter,
   uploads: uploadsRouter,

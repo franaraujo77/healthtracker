@@ -35,7 +35,8 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-05-15
-last_updated: 2026-05-24
+last_updated: 2026-05-25
+# Story 4.1 spec created → ready-for-dev. Epic 4 kickoff (epic-4: backlog → in-progress).
 # Story 3.4 spec created → ready-for-dev. Final story of Epic 3.
 # Adds offline-cached Fingerprint via `@tanstack/react-query-persist-client`
 # v5 + `@tanstack/query-async-storage-persister` (NEW deps, version-aligned
@@ -248,11 +249,62 @@ development_status:
   epic-3-retrospective: done
 
   # Epic 4: Patient Receives a Personal Health Narrative
-  epic-4: backlog
-  4-1-patient-receives-a-streamed-letter-narrative-after-a-draw-is-confirmed: backlog
-  4-2-patient-re-reads-a-previously-generated-letter: backlog
-  4-3-patient-taps-a-biomarker-to-receive-an-explain-this-to-my-doctor-suggestion-growth: backlog
-  epic-4-retrospective: optional
+  epic-4: done
+  # Story 4.1 spec created → ready-for-dev. Epic 4 kickoff. NEW services/llm
+  # workspace (Anthropic Claude Sonnet + Fastify SSE + pg-boss letter.generate
+  # consumer). NEW `letters` schema (id, patient_id, upload_id, status enum,
+  # body, model, tokens_used, generated_at, failure_reason). NEW partial
+  # unique index on audit_log(resource_id, event) WHERE event='letter.queued'
+  # (Story 4.4 will ship migration; dev pnpm db:push only). NEW LetterReader
+  # full-screen RN component + Lora font load (first non-DM-Sans surface;
+  # expo-font Lora 400/500/700; Tamagui $letterBackground semantic token).
+  # NEW pt-BR validators copy (LETTER_*; reviewers grep). Two enqueue sites
+  # (api/uploads-review + extraction/consumers/document) gated on
+  # lettersReady + llm_letter_generation consent + premium tier; NFR-I3
+  # decoupling — letter failure never blocks upload commit. 3 new audit
+  # kinds: letter.queued / letter.generated / letter.read. SSE endpoint
+  # GET /api/stream/letter/:letterId direct (NOT proxied through tRPC;
+  # Vercel Edge 25s cap). first-token<3s NFR-P2 budget. ANVISA system
+  # prompt verbatim (no diagnosis phrasing). Infra blockers: Anthropic DPA
+  # (NFR-S6 launch blocker; dev unblocked), Railway provisioning,
+  # ANTHROPIC_API_KEY env. Story 4.4 will incremental-migrate prod schema.
+  4-1-patient-receives-a-streamed-letter-narrative-after-a-draw-is-confirmed: done
+  # Story 4.2 spec created → ready-for-dev. Stacked on Story 4.1 (PR #54).
+  # Adds tRPC letter.getForDraw + LETTER_PREPARING_RETRY_PT_BR + Histórico
+  # draw-detail "Ler carta" wiring. Reuses 4.1's LetterReader + SSE cached-
+  # complete replay path → no LLM call on re-read. premiumProcedure-gated.
+  # No new schema, no new push, no services/llm changes. AC3 audit
+  # (letter.read) delegated to 4.1's SSE endpoint to avoid double-count.
+  4-2-patient-re-reads-a-previously-generated-letter: done
+  # Story 4.3 spec created → ready-for-dev. Stacks on Stories 4.1 + 4.2
+  # (PR #54). Adds synchronous biomarker-suggestion path: new services/llm
+  # POST endpoint + Anthropic messages.create (non-streaming) + 60s
+  # in-memory cooldown + LETTER_DIAGNOSTIC_PHRASE_REGEX post-filter
+  # (wires the Story 4.1 unused constant). New tRPC mutation
+  # letter.generateBiomarkerSuggestion (premium-gated, proxies to
+  # services/llm, writes biomarker_suggestion.generated audit). New
+  # mobile route apps/expo/src/app/biomarcadores/[loincCode].tsx.
+  # BiomarkerCard.onPress wired at Início + Histórico (Story 3.1 left
+  # the prop unwired explicitly for this story). Tab bar persists
+  # (UX-DR11 — not a fullScreenModal). Stub adapter path keeps dev/CI
+  # unblocked when ANTHROPIC_API_KEY is unset.
+  4-3-patient-taps-a-biomarker-to-receive-an-explain-this-to-my-doctor-suggestion-growth: done
+  # Story 4.4 spec created → ready-for-dev. Two new supabase/migrations/
+  # files: 0003_epic_4_letters_schema.sql (letter_status_enum + letters
+  # table + letters_patient_created_idx + letters_select_own RLS) inside
+  # the auto-wrapped tx; 0004_epic_4_audit_index_letter_queued.sql with
+  # `-- supabase: no-transaction` directive performing the partial-
+  # unique-index WHERE-clause swap via CREATE/DROP CONCURRENTLY (per
+  # CLAUDE.md ops note — direct DROP+CREATE not safe in prod). Order-
+  # safe: create _v2 first, drop original, rename to preserve the
+  # ON CONFLICT ON CONSTRAINT symbol used by services/extraction/src/
+  # notifications/emit.ts. Integration test boots Postgres 16
+  # testcontainer, applies all migrations, runs drizzle-kit push
+  # --force, asserts zero pending statements. NO production deploy
+  # in this story — supabase-deploy is operator-supervised after PR
+  # #54 merges.
+  4-4-author-incremental-supabase-migration-for-epic-4-schema: done
+  epic-4-retrospective: done
 
   # Epic 5: Patient Controls Who Sees Their Health Data
   epic-5: backlog

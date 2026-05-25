@@ -11,6 +11,12 @@ export const env = {
   EXPO_PUBLIC_SUPABASE_URL: get("EXPO_PUBLIC_SUPABASE_URL"),
   EXPO_PUBLIC_SUPABASE_ANON_KEY: get("EXPO_PUBLIC_SUPABASE_ANON_KEY"),
   EXPO_PUBLIC_SENTRY_DSN: process.env.EXPO_PUBLIC_SENTRY_DSN, // undefined = Sentry no-ops
+  // Story 4.1 — base URL of the persistent `services/llm` server.
+  // Default points to the dev server's localhost listener; CI/staging/
+  // prod must set explicitly. The SSE endpoint is direct (NOT
+  // proxied through tRPC) — architecture.md §3 lines 247–253.
+  EXPO_PUBLIC_LLM_SERVICE_URL:
+    process.env.EXPO_PUBLIC_LLM_SERVICE_URL ?? "http://localhost:3001",
   NODE_ENV: (process.env.NODE_ENV ?? "development") as
     | "development"
     | "production"

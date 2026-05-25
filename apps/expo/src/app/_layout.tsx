@@ -1,10 +1,16 @@
 import type { AuthChangeEvent } from "@supabase/supabase-js";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
+import { useFonts } from "expo-font";
 import * as Linking from "expo-linking";
 import { router, Stack } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { StatusBar } from "expo-status-bar";
+import {
+  Lora_400Regular,
+  Lora_500Medium,
+  Lora_700Bold,
+} from "@expo-google-fonts/lora";
 import * as Sentry from "@sentry/react-native";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
@@ -209,6 +215,26 @@ function RootLayout() {
   // `QueryClientProvider` before the persister binds. Cold-launch
   // with no session also flips the flag (anonymous flows unblocked).
   const { bootstrapped: persisterBootstrapped } = useQueryCacheLifecycle();
+  // Story 4.1 — Lora serif is the LetterReader's signature surface
+  // (UX spec lines 309/330/540 — the typeface switch IS the narrative-
+  // mode signal). Load all three weights once at root so the Letter
+  // route never has to wait at mount. Gated alongside the persister
+  // bootstrap (R1-P271 single-gate pattern) so the children subtree
+  // mounts atomically once both are ready.
+  // Code-review F8 — destructure the error too. `useFonts` returns
+  // `[loaded, error]`; on a flaky network or corrupted asset cache
+  // the loaded flag stays false forever. The gate below treats
+  // `error !== null` as "give up on Lora and let the app mount with
+  // system font fallback" so a font-load failure can't permanently
+  // blank the entire app. The LetterReader screen accepts a missing
+  // Lora gracefully (the `style={{ fontFamily: "Lora_400Regular" }}`
+  // falls back to the platform default if the family is unregistered).
+  const [fontsLoaded, fontError] = useFonts({
+    Lora_400Regular,
+    Lora_500Medium,
+    Lora_700Bold,
+  });
+  const fontsReady = fontsLoaded || fontError !== null;
   // Story 2.5 / F135 — push token registration + tap deep-link
   // handling. Self-skips when there's no signed-in session, no EAS
   // projectId, or on simulators (see hook for details).
@@ -354,7 +380,7 @@ function RootLayout() {
   return (
     <TamaguiProvider>
       <QueryProviderWithPersistence>
-        {persisterBootstrapped ? (
+        {persisterBootstrapped && fontsReady ? (
           <Stack
             screenOptions={{
               headerStyle: {

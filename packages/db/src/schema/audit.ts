@@ -15,6 +15,21 @@ import { index, pgTable, uniqueIndex } from "drizzle-orm/pg-core";
  * to two push notifications for the same upload/kind. Index is
  * partial so non-notification audit rows (the common case) keep
  * append-only semantics with no de-dup overhead.
+ *
+ * Story 4.1 — extended to also cover `letter.queued`. Two enqueue
+ * sites can race (patient-confirm path in `uploads-review.ts` and
+ * worker direct-publish path in `extraction/src/consumers/document.ts`)
+ * — same TOCTOU shape as Story 2.5's notification fanout. `letter.read`
+ * and `letter.generated` are NOT in the WHERE clause: `letter.read`
+ * has legitimate multiple events (re-reads), and `letter.generated`
+ * is written only from the LLM consumer, which is already singleton-
+ * keyed on the pg-boss job.
+ *
+ * **Ops note (CLAUDE.md):** changing the WHERE clause of a partial
+ * unique index in production requires `CREATE UNIQUE INDEX
+ * CONCURRENTLY` + `DROP INDEX CONCURRENTLY` in a maintenance window.
+ * Story 4.4 will ship that incremental migration; dev environments
+ * pick this up via `pnpm db:push` (R2-P213 ops note acknowledged).
  */
 export const AuditLog = pgTable(
   "audit_log",
@@ -35,7 +50,7 @@ export const AuditLog = pgTable(
     uniqueIndex("audit_log_notification_event_unique")
       .on(table.resourceId, table.event)
       .where(
-        sql`${table.event} IN ('notification.upload_complete', 'notification.upload_pending_review', 'notification.upload_failed')`,
+        sql`${table.event} IN ('notification.upload_complete', 'notification.upload_pending_review', 'notification.upload_failed', 'letter.queued')`,
       ),
     // Epic 2 retro action item — anticipatory index for Story 5.3's
     // doctor-access-log SELECT ("show me every actor that touched my

@@ -5,6 +5,7 @@ import type { ExtractDocumentPayload, JobPayload } from "@healthtracker/types";
 
 import type { TextractAdapter } from "../textract/adapter.js";
 import { emitNotificationEvent } from "../notifications/emit.js";
+import { emitLetterQueued } from "../notifications/letters-emit.js";
 import { dispatchExtractedFields } from "../pipeline/dispatch.js";
 import {
   applyDeadLetter,
@@ -312,6 +313,46 @@ export async function handleDocumentJob(
           conflicts: outcome.conflictCount,
         },
       });
+      // Code-review F3 (Story 4.1) — NFR-I3 hard guard around
+      // emitLetterQueued, with SAVEPOINT semantics so partial Letter
+      // writes don't leak into the outer upload-complete commit.
+      //
+      // Re-review surfaced this: after F1/F2 reordered the helper to
+      // write the audit row FIRST (uploadId-keyed) and the letters
+      // row SECOND, a throw between the two would leave the audit
+      // row in the outer tx and the catch-and-continue would COMMIT
+      // it — permanently blocking any future re-enqueue (the partial
+      // unique index treats the orphan audit row as an already-
+      // queued letter). The fix: run emitLetterQueued inside a
+      // postgres-js savepoint so a throw rolls back the audit row
+      // before the catch swallows. The outer tx then commits the
+      // upload-status transition + notification audit untouched.
+      //
+      // Narrow catch: programmer errors (TypeError/ReferenceError/
+      // SyntaxError) still bubble so a code regression isn't
+      // silently swallowed.
+      try {
+        const letterResult = await tx.savepoint((sp) =>
+          emitLetterQueued(sp, { patientId, uploadId }),
+        );
+        if (!letterResult.enqueued) {
+          console.log(
+            `[extraction.document] uploadId=${uploadId}: letter skipped (${letterResult.reason})`,
+          );
+        }
+      } catch (letterErr) {
+        if (
+          letterErr instanceof TypeError ||
+          letterErr instanceof ReferenceError ||
+          letterErr instanceof SyntaxError
+        ) {
+          throw letterErr;
+        }
+        console.error(
+          `[extraction.document] uploadId=${uploadId}: letter enqueue failed — upload commit preserved (NFR-I3)`,
+          letterErr,
+        );
+      }
     });
   } catch (err) {
     console.error(

@@ -321,6 +321,11 @@ export const uploadsRouter = {
     )
     .mutation(async ({ ctx, input }) => {
       const patientId = ctx.session.user.id;
-      return confirmReviewFieldAsPatient(ctx.db, patientId, input);
+      return confirmReviewFieldAsPatient(
+        ctx.db,
+        patientId,
+        input,
+        ctx.session.user,
+      );
     }),
 } satisfies TRPCRouterRecord;

@@ -13,6 +13,7 @@ import {
 
 import type { AuditDb } from "./audit";
 import { writeAuditLog } from "./audit";
+import { enqueueLetterGeneration } from "./letters";
 import { resolveLoincCode } from "./loinc";
 import { enqueueNotificationSend } from "./notifications";
 import { writeObservation } from "./observations";
@@ -171,6 +172,14 @@ export async function confirmReviewFieldAsPatient(
   database: AuditDb,
   patientId: string,
   input: ConfirmReviewFieldInput,
+  /**
+   * Story 4.1 — full Supabase user object, threaded so
+   * `enqueueLetterGeneration` can read `app_metadata.subscriptionTier`.
+   * Optional for back-compat with existing tests that pass only the
+   * patientId; in that case the premium gate falls back to "free"
+   * and the Letter enqueue is skipped (safe default).
+   */
+  sessionUser?: unknown,
 ): Promise<ConfirmReviewFieldResult> {
   const [reviewRow] = await database
     .select({
@@ -538,6 +547,23 @@ export async function confirmReviewFieldAsPatient(
       patientId,
       kind: "complete",
     });
+    // Story 4.1 — Letter enqueue lives in the SAME tx as the
+    // notification enqueue so a Letter for this confirmation either
+    // queues atomically with the upload-complete transition or
+    // (per NFR-I3) is silently skipped without blocking the commit.
+    // `enqueueLetterGeneration` returns `{enqueued: false, reason}`
+    // for every skip path (free tier, missing consent, muted
+    // preference, already queued) — caller does not throw.
+    const letterResult = await enqueueLetterGeneration(database, {
+      patientId,
+      uploadId: reviewRow.uploadId,
+      sessionUser,
+    });
+    if (!letterResult.enqueued) {
+      console.log(
+        `[confirmReviewField] uploadId=${reviewRow.uploadId}: letter skipped (${letterResult.reason})`,
+      );
+    }
   }
 
   return {
