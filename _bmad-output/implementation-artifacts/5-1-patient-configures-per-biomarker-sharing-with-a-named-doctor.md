@@ -1,6 +1,6 @@
 # Story 5.1: Patient configures per-biomarker sharing with a named doctor
 
-Status: ready-for-review
+Status: review
 
 > **Epic 5 kickoff.** First story of "Patient Controls Who Sees Their Health Data." This story lands the **load-bearing data model** for the whole Epic 5 surface — `pending_invites`, `share_tokens`, `share_token_biomarkers` — plus the first `sharingRouter` tRPC procedures, the `ShareBiomarkerToggle` component, and the patient-side sharing ceremony scaffolding. Every downstream Epic-5 story (5.2 duration picker, 5.3 access log, 5.4 revoke, 5.5 export, 5.6 delete) builds on the schema + RLS principal model landed here. **Treat scaffolding decisions as load-bearing — get them right the first time.**
 >
