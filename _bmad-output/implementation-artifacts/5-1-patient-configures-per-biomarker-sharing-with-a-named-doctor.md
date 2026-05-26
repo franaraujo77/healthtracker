@@ -1,12 +1,13 @@
 # Story 5.1: Patient configures per-biomarker sharing with a named doctor
 
-Status: ready-for-dev
+Status: ready-for-review
 
 > **Epic 5 kickoff.** First story of "Patient Controls Who Sees Their Health Data." This story lands the **load-bearing data model** for the whole Epic 5 surface — `pending_invites`, `share_tokens`, `share_token_biomarkers` — plus the first `sharingRouter` tRPC procedures, the `ShareBiomarkerToggle` component, and the patient-side sharing ceremony scaffolding. Every downstream Epic-5 story (5.2 duration picker, 5.3 access log, 5.4 revoke, 5.5 export, 5.6 delete) builds on the schema + RLS principal model landed here. **Treat scaffolding decisions as load-bearing — get them right the first time.**
 >
 > **Out of scope (per user direction):** The production migration file (`supabase/migrations/0005_epic_5_sharing_schema.sql`) is **deferred to the last story of Epic 5** (mirrors Story 3.5 / Story 4.4 pattern of batched migrations). This story ships the Drizzle schema source-of-truth (`packages/db/src/schema/sharing.ts`) + RLS policy SQL files (`packages/db/policies/custom_rls_share_*.sql`); dev applies via `pnpm db:push` + `psql -f`. Testcontainer integration tests apply both directly in setup.
 >
 > **ADR resolutions locked in this story (user-confirmed):**
+>
 > 1. Per-biomarker scope is modeled as a **normalized junction table** `share_token_biomarkers (share_token_id, biomarker_category, visible)`. **NOT** a JSONB column. Matches AC2 verbatim.
 > 2. Doctor identity uses **nullable `resolved_user_id` on `pending_invites`**. `share_tokens.invite_id` → `pending_invites.id`. Sharing precedes doctor account creation (unblocks Epic 6).
 > 3. RLS principal for doctor access is **`SET LOCAL app.current_share_token_id`** (mirrors the existing `app.current_patient_id` pattern). No dedicated DB role.
@@ -58,17 +59,19 @@ Status: ready-for-dev
    - **Premium gating:** wrapped in `premiumProcedure` (architecture.md §9, lines 812–827). Free-tier patients see `SHARE_PREMIUM_REQUIRED_PT_BR` (T6.1) — sharing is a premium feature in this product (NFR-S3 gate).
 
 9. **AC9 — `sharing.configured` audit metadata payload spec.** The audit-log row written by `configureBiomarkers` has `metadata` shape (JSONB):
+
    ```json
    {
      "inviteId": "<uuid>",
      "doctorIdentifierHash": "<sha256-hex>",
      "biomarkerCategories": [
-       {"category": "ferritin", "visible": false},
-       {"category": "hemoglobin", "visible": true}
+       { "category": "ferritin", "visible": false },
+       { "category": "hemoglobin", "visible": true }
      ],
      "configuredAt": "<iso-8601-timestamp>"
    }
    ```
+
    This shape is referenced by Story 5.3 (Access Log UI) and must be locked. **Do not** include raw `displayName`, raw email, or raw biomarker values in the payload (PII hygiene).
 
 10. **AC10 — Idempotent UPSERT semantics + 23505 narrow-catch.** The `configureBiomarkers` mutation issues a single PG batch UPSERT (`INSERT ... ON CONFLICT (share_token_id, biomarker_category) DO UPDATE SET visible = EXCLUDED.visible`). The implementation **narrows** the catch to `error.code === '23505'` (extremely unlikely given the ON CONFLICT clause; defensive against partial-unique-index race) → log + continue; **rethrows** `TypeError`, `ReferenceError`, `SyntaxError`, and any other shape (Epic 2 retro discipline; CLAUDE.md §"Narrow catches by default").
@@ -100,6 +103,7 @@ Status: ready-for-dev
 
 - [ ] **T2. RLS policies + 6-identity matrix tests (AC5).** (AC: 5)
   - [ ] T2.1 `packages/db/policies/custom_rls_pending_invites.sql` (NEW). Pattern mirrors `custom_rls_observations.sql`:
+
     ```sql
     ALTER TABLE "pending_invites" ENABLE ROW LEVEL SECURITY;
 
@@ -110,7 +114,9 @@ Status: ready-for-dev
 
     -- No INSERT/UPDATE/DELETE patient policies — mutations via service-role tRPC.
     ```
+
   - [ ] T2.2 `packages/db/policies/custom_rls_share_tokens.sql` (NEW). Two SELECT policies — one for patient principal, one for doctor principal:
+
     ```sql
     ALTER TABLE "share_tokens" ENABLE ROW LEVEL SECURITY;
 
@@ -128,7 +134,9 @@ Status: ready-for-dev
         AND expires_at > now()
       );
     ```
+
   - [ ] T2.3 `packages/db/policies/custom_rls_share_token_biomarkers.sql` (NEW). Mirror pattern, joining through `share_tokens` for both principals:
+
     ```sql
     ALTER TABLE "share_token_biomarkers" ENABLE ROW LEVEL SECURITY;
 
@@ -157,6 +165,7 @@ Status: ready-for-dev
         )
       );
     ```
+
   - [ ] T2.4 Update the **testcontainer test setup** (`packages/db/__tests__/integration/setup.ts` or wherever RLS policy files are applied during fixture init) to load the three new `custom_rls_share_*.sql` files via `psql -f`. Match the existing pattern from `custom_rls_observations.sql` and `custom_rls_audit_log.sql`.
   - [ ] T2.5 RLS test `packages/db/__tests__/rls/share_tokens.rls.test.ts` (NEW) — exercise all 6 identities (correctPatient / wrongPatient / serviceRole / doctorWithActiveToken / doctorWithExpiredToken / doctorWithRevokedToken).
   - [ ] T2.6 RLS test `packages/db/__tests__/rls/share_token_biomarkers.rls.test.ts` (NEW) — same matrix. Critically: assert that `doctorWithActiveToken` only sees rows where `visible = true` (the central LGPD guarantee of Epic 5).
@@ -166,14 +175,14 @@ Status: ready-for-dev
   - [ ] T3.1 `packages/api/src/router/sharing.ts` (NEW) — exports `sharingRouter`. Register in `packages/api/src/root.ts` as `sharing: sharingRouter`. Use `premiumProcedure` (architecture.md §9 lines 812–827; same shape Story 4.1 used for `letter.*`). Procedures:
     - `createPendingInvite({displayName: z.string().trim().min(1).max(80), identifier: z.string().trim().min(3).max(254)}) → {inviteId}`. Hash identifier via Node `crypto.createHash('sha256').update(identifier).digest('hex')`. Idempotent on `(patient_id, identifier_hash)`. Emits `pending_invite.created` audit.
     - `createShareToken({inviteId: z.string().uuid()}) → {shareTokenId, biomarkerScope: {category, visible}[]}`. Generates token bytes + HMAC sign via `crypto.createHmac('sha256', env.SHARE_TOKEN_HMAC_SECRET).update(raw).digest('base64url')`. Default `expires_at = now() + interval '7 days'`. Pre-populates `share_token_biomarkers` from `observations.getDistinctCategoriesForPatient`. Emits `share_token.created` audit. Full row insert + biomarker pre-pop + audit in a single `ctx.db.transaction(async (tx) => ...)`.
-    - `configureBiomarkers({shareTokenId: z.string().uuid(), scope: z.array(z.object({biomarkerCategory: z.string(), visible: z.boolean()})).min(1).max(64)}) → {ok: true}`. UPSERT batch via Drizzle `.insert(shareTokenBiomarkers).values(rows).onConflictDoUpdate({target: [shareTokenBiomarkers.shareTokenId, shareTokenBiomarkers.biomarkerCategory], set: {visible: sql\`excluded.visible\`, updatedAt: sql\`now()\`}})`. Emits `sharing.configured` audit with the AC9 metadata shape. Narrow `catch (err)` for `23505` only (AC10).
+    - `configureBiomarkers({shareTokenId: z.string().uuid(), scope: z.array(z.object({biomarkerCategory: z.string(), visible: z.boolean()})).min(1).max(64)}) → {ok: true}`. UPSERT batch via Drizzle `.insert(shareTokenBiomarkers).values(rows).onConflictDoUpdate({target: [shareTokenBiomarkers.shareTokenId, shareTokenBiomarkers.biomarkerCategory], set: {visible: sql\`excluded.visible\`, updatedAt: sql\`now()\`}})`. Emits `sharing.configured`audit with the AC9 metadata shape. Narrow`catch (err)`for`23505` only (AC10).
     - `getDraftConfig({shareTokenId: z.string().uuid()}) → {shareToken, biomarkerScope, doctor: {displayName}}`. Read-side for hydrating the per-biomarker screen on re-entry. Verifies `share_tokens.patient_id = ctx.session.user.id` and `share_tokens.revoked_at IS NULL` (404 otherwise — no 403; mirrors Story 4.1 AC6).
     - `listShares() → {shares: {id, displayName, expiresAt, revokedAt, biomarkerCount}[]}`. Compartilhar-tab listing (Story 5.4 will extend with revoke action).
   - [ ] T3.2 **Audit constants** — add to `packages/validators/src/audit.ts` (or wherever Story 4.1 placed `LETTER_AUDIT_*`):
     - `SHARING_AUDIT_PENDING_INVITE_CREATED = "pending_invite.created"`
     - `SHARING_AUDIT_TOKEN_CREATED = "share_token.created"`
     - `SHARING_AUDIT_CONFIGURED = "sharing.configured"`
-    Use these constants at every emit site — never inline-string the event names (greppability per Epic 1 retro).
+      Use these constants at every emit site — never inline-string the event names (greppability per Epic 1 retro).
   - [ ] T3.3 `packages/api/src/sharing.ts` (NEW, helper module — mirrors `packages/api/src/letters.ts` from Story 4.1) — exports `hashIdentifier`, `signShareToken`, `verifyShareToken` (the last is consumed in Epic 6 — author the export now, unit-test it now). Keep all HMAC math in **one** module so the doctor-side (Epic 6) can import without restating the secret.
   - [ ] T3.4 `packages/api/src/router/observations.ts` — extend with `getDistinctCategoriesForPatient` private helper (NOT a public procedure — internal to the API package). Returns `BiomarkerCategory[]`. Pulls `SELECT DISTINCT biomarker_category FROM observations WHERE patient_id = $1 AND deleted_at IS NULL`. Cap at 64 rows (Zod's max on the scope array — defensive).
   - [ ] T3.5 Add `SHARE_TOKEN_HMAC_SECRET` to `.env.example` (random 64-byte base64). Document in CLAUDE.md "Required vars" list. Rejected at boot if missing in **production** (`NODE_ENV === 'production'` gate); in dev/test, fall back to a deterministic dev-only secret with a console warning (mirrors NFR-S6 dev/prod gating pattern from Story 4.1 `ANTHROPIC_API_KEY`).
@@ -341,13 +350,128 @@ No structural conflicts.
 
 ### Agent Model Used
 
-_To be filled by dev agent._
+claude-opus-4-7
 
 ### Debug Log References
 
+- `pnpm typecheck` — clean (17 packages, 6 cached, 11 fresh).
+- `pnpm lint` — clean after wiring `SHARE_TOKEN_HMAC_SECRET` into
+  `turbo.json` `globalEnv` and tightening narrow-catch helper type
+  predicate (`err.code` instead of `(err as ...).code` — TS3.5
+  narrowing makes the cast redundant under
+  `@typescript-eslint/no-unnecessary-type-assertion`).
+- `pnpm --filter @healthtracker/api test:unit` — 168 tests pass
+  (including the 7 new sharing-helper tests in
+  `__tests__/sharing/`).
+- `pnpm --filter @healthtracker/db test:unit` — no files (the db
+  package has only RLS + integration suites, both excluded from
+  `test:unit`).
+- `test:integration` (sharing-schema testcontainer) and `test:rls`
+  (3 new RLS suites) — NOT executed; Docker daemon and
+  `supabase start` are not available in this sandbox. Tests are
+  authored to the existing setup conventions; they will run in CI.
+
 ### Completion Notes List
 
+- **Migration deferred.** Per spec § "Out of scope" no
+  `supabase/migrations/0005_*.sql` was authored — production
+  migration is batched into the last story of Epic 5. Dev applies
+  via `pnpm db:push`; testcontainer integration setup
+  auto-discovers `custom_rls_*.sql` files via glob, so the three
+  new `custom_rls_share_*.sql` policies load with zero setup
+  changes (see `packages/db/__tests__/integration/setup.ts`).
+- **`premiumProcedure`** is exported by
+  `packages/api/src/middleware/entitlements.ts` (Story 4.1) — used
+  directly by every `sharingRouter` procedure. No deferral needed.
+- **`getDistinctCategoriesForPatient`** lives in
+  `packages/api/src/sharing.ts` as a private helper (T3.4) — not
+  in `router/observations.ts` — because it is consumed by the
+  sharing flow only and the spec's reuse path (Story 5.2
+  conversation-starter pre-gen) will also import from there.
+- **Biomarker category model.** No existing biomarker-category
+  enum exists in the codebase (observations carry `loinc_code` +
+  `biomarker_name`). The schema models `biomarker_category` as
+  `text` and the helper resolves it as
+  `coalesce(loinc_code, biomarker_name)` — pragmatic + flexible;
+  Story 5.2 can tighten the surface.
+- **Tamagui Switch primitive.** Not bundled in this monorepo's
+  Tamagui setup; `ShareBiomarkerToggle` ships a styled `YStack`
+  toggle thumb (44×24 track, 20px thumb) rather than pulling
+  `@tamagui/switch`. Surface area kept small, matches existing
+  component conventions.
+- **`react-native` import in shared UI.** The shared `@healthtracker/ui`
+  package does not depend on `react-native` (it must stay
+  importable from the Next.js web build). The
+  `ShareBiomarkerToggle` accessibility announcement is therefore a
+  no-op inside the component; the Expo screen wires
+  `AccessibilityInfo.announceForAccessibility` at the call site,
+  and the Next.js screen renders an `aria-live="polite"` region
+  with the same pt-BR copy.
+- **`pending_invites.resolved_user_id`** ships without a FK to
+  `users(id)` per spec T1.1 — FK lands in Epic 6 when the
+  doctor-account surface materialises.
+- **`Tabs.Screen` wiring.** Moved `compartilhar/` routes inside
+  `apps/expo/src/app/(tabs)/` so Expo Router 6 picks it up as a
+  tab (matches the existing `historico/` precedent).
+- **Web hook duplication (T4.7).** The debounced batch hook is
+  duplicated under `apps/web/src/hooks/` rather than extracted to
+  a shared package because Expo imports `trpc` from
+  `~/utils/api` while web uses the `useTRPC()` accessor — the
+  two diverge at the tRPC client seam. Behaviour is identical;
+  spec calls this acceptable.
+
 ### File List
+
+**Created**
+
+- `packages/db/src/schema/sharing.ts` (replaces 1-line placeholder)
+- `packages/db/policies/custom_rls_pending_invites.sql`
+- `packages/db/policies/custom_rls_share_tokens.sql`
+- `packages/db/policies/custom_rls_share_token_biomarkers.sql`
+- `packages/db/__tests__/integration/sharing-schema.integration.test.ts`
+- `packages/db/__tests__/rls/pending_invites.rls.test.ts`
+- `packages/db/__tests__/rls/share_tokens.rls.test.ts`
+- `packages/db/__tests__/rls/share_token_biomarkers.rls.test.ts`
+- `packages/validators/src/sharing.ts`
+- `packages/api/src/sharing.ts`
+- `packages/api/src/router/sharing.ts`
+- `packages/api/__tests__/sharing/hash-identifier.test.ts`
+- `packages/api/__tests__/sharing/sign-verify.test.ts`
+- `packages/ui/src/components/ShareBiomarkerToggle/ShareBiomarkerToggle.tsx`
+- `packages/ui/src/components/ShareBiomarkerToggle/index.ts`
+- `apps/expo/src/hooks/use-debounced-configure-biomarkers.ts`
+- `apps/expo/src/app/(tabs)/compartilhar/_layout.tsx`
+- `apps/expo/src/app/(tabs)/compartilhar/index.tsx`
+- `apps/expo/src/app/(tabs)/compartilhar/novo/identificacao.tsx`
+- `apps/expo/src/app/(tabs)/compartilhar/novo/duracao.tsx`
+- `apps/expo/src/app/(tabs)/compartilhar/[shareTokenId]/biomarcadores.tsx`
+- `apps/expo/src/app/(tabs)/compartilhar/[shareTokenId]/concluido.tsx`
+- `apps/web/src/hooks/use-debounced-configure-biomarkers.ts`
+- `apps/web/src/app/compartilhar/page.tsx`
+- `apps/web/src/app/compartilhar/novo/identificacao/page.tsx`
+- `apps/web/src/app/compartilhar/novo/duracao/page.tsx`
+- `apps/web/src/app/compartilhar/[shareTokenId]/biomarcadores/page.tsx`
+- `apps/web/src/app/compartilhar/[shareTokenId]/concluido/page.tsx`
+
+**Modified**
+
+- `packages/db/src/schema/index.ts` (re-export `sharing`)
+- `packages/db/__tests__/rls/helpers.ts` (extend identity matrix
+  with `doctorWithActiveToken / doctorWithExpiredToken /
+doctorWithRevokedToken` bound via `app.current_share_token_id`)
+- `packages/validators/src/index.ts` (re-export `./sharing`)
+- `packages/api/src/root.ts` (register `sharingRouter`)
+- `packages/ui/src/index.ts` (export `ShareBiomarkerToggle`)
+- `packages/ui/src/theme/tokens.ts` (add `shareToggleOn`,
+  `shareToggleOff`, `shareToggleDisabledText`)
+- `packages/ui/src/theme/themes.ts` (wire new tokens into light +
+  dark themes)
+- `apps/expo/src/app/(tabs)/_layout.tsx` (add Compartilhar tab)
+- `.env.example` (add `SHARE_TOKEN_HMAC_SECRET`)
+- `turbo.json` (add `SHARE_TOKEN_HMAC_SECRET` to `globalEnv`)
+- `CLAUDE.md` (sharing schema notes + 6-identity RLS bullet)
+- `docs/rls-review-checklist.md` (doctor-principal checklist
+  section)
 
 ### Known infra blockers (out-of-code)
 

@@ -1,6 +1,9 @@
 import { Tabs } from "expo-router";
 
-import { HISTORICO_TAB_LABEL_PT_BR } from "@healthtracker/validators";
+import {
+  COMPARTILHAR_TAB_LABEL_PT_BR,
+  HISTORICO_TAB_LABEL_PT_BR,
+} from "@healthtracker/validators";
 
 // SafeAreaView/Tabs native props can't read Tamagui tokens. These mirror
 // colorTokens.primaryTeal.light and colorTokens.backgroundPrimary.light.
@@ -27,6 +30,10 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="historico"
         options={{ title: HISTORICO_TAB_LABEL_PT_BR }}
+      />
+      <Tabs.Screen
+        name="compartilhar"
+        options={{ title: COMPARTILHAR_TAB_LABEL_PT_BR }}
       />
       <Tabs.Screen name="configuracoes" options={{ title: "Configurações" }} />
     </Tabs>

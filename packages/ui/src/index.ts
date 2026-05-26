@@ -36,6 +36,12 @@ export { Input } from "./input";
 export { Label } from "./label";
 export { TamaguiProvider } from "./providers/TamaguiProvider";
 export { Separator } from "./separator";
+export { ShareBiomarkerToggle } from "./components/ShareBiomarkerToggle";
+export type {
+  ShareBiomarkerToggleProps,
+  ShareBiomarkerToggleState,
+  ShareBiomarkerToggleVariant,
+} from "./components/ShareBiomarkerToggle";
 export {
   Toast,
   ToastProvider,

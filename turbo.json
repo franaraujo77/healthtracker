@@ -81,7 +81,8 @@
     "SKIP_NFR_SC4",
     "ANTHROPIC_API_KEY",
     "LLM_SERVICE_URL",
-    "EXPO_PUBLIC_LLM_SERVICE_URL"
+    "EXPO_PUBLIC_LLM_SERVICE_URL",
+    "SHARE_TOKEN_HMAC_SECRET"
   ],
   "globalPassThroughEnv": [
     "NODE_ENV",

@@ -6,5 +6,6 @@ export * from "./loinc_ref";
 export * from "./notification_preferences";
 export * from "./observations";
 export * from "./push_tokens";
+export * from "./sharing";
 export * from "./uploads";
 export * from "./users";

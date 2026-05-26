@@ -32,6 +32,16 @@ export const colorTokens = {
   errorBg: { light: "#FEF2F2", dark: "#450A0A" },
   success: { light: "#16A34A", dark: "#4ADE80" },
   backgroundDark: { light: "#1C1917", dark: "#1C1917" },
+
+  // Story 5.1 — ShareBiomarkerToggle row backgrounds (UX spec lines
+  // 948–965). `shareToggleOn` mirrors `primaryTealLight` for the
+  // muted-teal "shared" surface; `shareToggleOff` is a warm neutral
+  // for the "hidden" state (NEVER red — UX-DR13);
+  // `shareToggleDisabledText` is a low-contrast grey for the
+  // disabled "Sem dados ainda" row.
+  shareToggleOn: { light: "#E0F2F1", dark: "#134E4A" },
+  shareToggleOff: { light: "#F3EFE7", dark: "#3C3836" },
+  shareToggleDisabledText: { light: "#9E9E9E", dark: "#78716C" },
 } as const;
 
 export const fontSizeTokens = {

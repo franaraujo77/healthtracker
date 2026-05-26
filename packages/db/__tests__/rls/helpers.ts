@@ -13,7 +13,13 @@ export type IdentityType =
   | "doctorWithAccess"
   | "doctorWithoutAccess"
   | "expiredToken"
-  | "revokedToken";
+  | "revokedToken"
+  // Story 5.1 — doctor principal under the `app.current_share_token_id`
+  // GUC. Pass `shareTokenId` to bind. These three identities are
+  // adversarial RLS surfaces used by `share_*.rls.test.ts`.
+  | "doctorWithActiveToken"
+  | "doctorWithExpiredToken"
+  | "doctorWithRevokedToken";
 
 export interface IdentityOptions {
   patientId: string;
@@ -21,6 +27,8 @@ export interface IdentityOptions {
   doctorId?: string;
   otherDoctorId?: string;
   shareToken?: string;
+  /** Story 5.1 — doctor-principal GUC value (`app.current_share_token_id`). */
+  shareTokenId?: string;
 }
 
 function getDbUrl(): string {
@@ -159,6 +167,19 @@ async function applyClaims(
         opts.shareToken ?? "revoked-share-token",
       );
       await setLocal(tx, "app.token_revoked", "true");
+      break;
+
+    // Story 5.1 — share-token-principal identities. Bind via
+    // `app.current_share_token_id` (mirrors `app.current_patient_id`).
+    // The `expires_at` / `revoked_at` predicates are enforced inside
+    // the RLS policy SQL — caller seeds the appropriate row state.
+    case "doctorWithActiveToken":
+    case "doctorWithExpiredToken":
+    case "doctorWithRevokedToken":
+      await setLocal(tx, "app.current_user_role", "doctor");
+      if (opts.shareTokenId) {
+        await setLocal(tx, "app.current_share_token_id", opts.shareTokenId);
+      }
       break;
   }
 }

@@ -4,6 +4,7 @@ import { formatBrazilianDecimal } from "./decimal";
 
 export { formatBrazilianDecimal, parseBrazilianDecimal } from "./decimal";
 export { parseCollectedAt } from "./collected-at";
+export * from "./sharing";
 
 /**
  * Story 2.4 — pt-BR copy + route constants for the upload detail

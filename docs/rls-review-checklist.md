@@ -31,6 +31,25 @@ Use this checklist when reviewing any PR that touches tRPC procedures, Drizzle q
 - [ ] No test case is left as `it.todo(...)` — stubs must be implemented before merge
 - [ ] Adversarial RLS tests use `DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres` (local Supabase) — tests must never run against the remote database
 
+## Doctor principal (`app.current_share_token_id`) checks
+
+Story 5.1 introduced a second RLS principal for the doctor-side of
+the sharing surface. Any new table that participates in patient↔doctor
+data flow must cover all six identities below:
+
+- [ ] `correctPatient` — patient who owns the row, expects access
+- [ ] `wrongPatient` — different patient, expects denial
+- [ ] `serviceRole` — extraction worker / `sharingRouter`, RLS bypassed
+- [ ] `doctorWithActiveToken` — `app.current_share_token_id` matches
+      an unrevoked + unexpired share_tokens row; expects access ONLY
+      to rows where `visible = true` (LGPD per-biomarker scope; NFR-S3)
+- [ ] `doctorWithExpiredToken` — `expires_at < now()`; expects denial
+- [ ] `doctorWithRevokedToken` — `revoked_at IS NOT NULL`; expects denial
+
+The RLS test helper at `packages/db/__tests__/rls/helpers.ts` exposes
+these identities; bind via `asIdentity('doctorWithActiveToken', {
+patientId, shareTokenId })`.
+
 ## Database Migrations
 
 - [ ] Every `DROP TABLE`, `DROP COLUMN`, or `DROP POLICY` statement is accompanied by the comment `-- healthtracker-migration-safe: drop` on the same line; grep the diff for bare `DROP` without this comment
