@@ -197,6 +197,22 @@ export function SHARE_SUMMARY_PT_BR_FN(
 export const SHARE_SUBMIT_BUTTON_PT_BR = "Enviar";
 export const CONTINUE_BUTTON_PT_BR = "Continuar";
 
+/**
+ * Story 5.2 review-fix Patch #7 — toast surface when
+ * `createShareToken` fails. Distinct from
+ * `BIOMARKER_TOGGLE_FAILED_PT_BR` (which is the per-biomarker
+ * toggle's copy — wrong shape for the create-token error path).
+ */
+export const SHARE_TOKEN_CREATE_FAILED_PT_BR =
+  "Não foi possível criar o compartilhamento. Tente novamente.";
+
+/**
+ * Story 5.2 review-fix Patch #15 — `accessibilityLabel` on the
+ * `radiogroup`-wrapped DurationOption list so VoiceOver / TalkBack
+ * announce the group context ("Duração do compartilhamento — X of 4").
+ */
+export const DURATION_GROUP_A11Y_LABEL_PT_BR = "Duração do compartilhamento";
+
 /** AC7 — clipboard fallback Toast when `navigator.share` is unavailable. */
 export const SHARE_URL_COPIED_PT_BR = "Link copiado.";
 /** AC7 — Toast when the share-sheet call fails outright. */

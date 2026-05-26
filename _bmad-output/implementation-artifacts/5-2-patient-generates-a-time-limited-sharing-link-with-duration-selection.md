@@ -1,6 +1,6 @@
 # Story 5.2: Patient generates a time-limited sharing link with duration selection
 
-Status: ready-for-dev
+Status: review
 
 > **Stacked on Story 5.1.** This story finishes the sharing ceremony's first half: the duration picker, the "Sem prazo" confirmation, the share-token expiry logic, and the Conversation Starter pre-gen cache. It replaces Story 5.1's placeholder `duracao.tsx` (Expo + web) with the real picker and extends `createShareToken` to accept a duration. Stacks onto branch `worktree-story-5-1` / PR #56 (per the user's stacked-PR convention).
 >
@@ -448,6 +448,80 @@ pgboss.job ... ON CONFLICT DO NOTHING`). Singleton key
 
 - `apps/expo/src/app/(tabs)/compartilhar/[shareTokenId]/concluido.tsx`
 - `apps/web/src/app/compartilhar/[shareTokenId]/concluido/page.tsx`
+
+### Review Findings (2026-05-26)
+
+Three-layer adversarial review (Blind Hunter + Edge Case Hunter + Acceptance Auditor).
+
+#### Decision-needed
+
+- [ ] [Review][Decision] **How to make the resumo screen's duration label authoritative** — The current `deriveDurationFromExpiresAt` bucket math (Expo + web `resumo`) silently loses info: a 30-day token on day 16 labels as "7 dias"; an expired token labels as "24 horas"; the route is reachable directly by URL, not just immediately after creation. Three options: (a) add a `duration` enum column on `share_tokens` (denormalized but trivially correct on read; needs schema + RLS update); (b) extend `getDraftConfig` to JOIN `audit_log` and read the `share_token.created` row's `metadata->>'duration'`; (c) just hide the duration label on re-entry from history (only render it when the token was created in the current ceremony session). Need a product/architecture call.
+
+#### Patch (apply before merge)
+
+- [ ] [Review][Patch] **CRITICAL — `configureBiomarkers` SELECT FOR UPDATE breaks for `no_expiry` tokens** — `packages/api/src/router/sharing.ts:361`. The raw-SQL predicate still uses `AND expires_at > now()`. `NULL > now()` is UNKNOWN in Postgres → no rows → 404 → the per-biomarker step fails for every "Sem prazo" share. Replace with `AND (expires_at IS NULL OR expires_at > now())` to mirror the RLS update.
+- [ ] [Review][Patch] **CRITICAL — `getShareUrl` does not filter on expiry** — `packages/api/src/router/sharing.ts:528-549`. Patient who comes back after the window can still pull a usable HMAC URL. Add `or(isNull(ShareTokens.expiresAt), gt(ShareTokens.expiresAt, new Date()))` to the WHERE clause; 404 on expired.
+- [ ] [Review][Patch] **CRITICAL — `createShareToken` TOCTOU on concurrent calls** — `packages/api/src/router/sharing.ts:188-211`. The active-token short-circuit is a SELECT-then-INSERT pattern with no `FOR UPDATE` on `pending_invites` and no partial unique index. Two concurrent calls (mobile↔web double-tap, or retry race) can both miss, both insert tokens + cache rows + jobs + audit. Add partial unique index `share_tokens_invite_active_active_uq` on `(patient_id, invite_id) WHERE revoked_at IS NULL` in the Drizzle schema and catch the 23505 collision on insert.
+- [ ] [Review][Patch] **HIGH — Duration round-trip lossy on resumo re-entry** — `apps/expo/.../resumo.tsx:368-377`, web `:676-685`. Resolved per the decision above; apply the chosen fix. Also: extract `deriveDurationFromExpiresAt` to `packages/validators/src/sharing.ts` so the fix lands in one place.
+- [ ] [Review][Patch] **HIGH — `isEconnReset` guard excludes Node undici `TypeError: fetch failed`** — `services/llm/src/consumers/generate-conversation-starter.ts:2347-2351`. The `TypeError === false` short-circuit drops the most common Node 20+ fetch-failure shape; the regex never gets a chance to match. Remove the type-name short-circuits and just match the message; OR keep them but check the message first.
+- [ ] [Review][Patch] **HIGH — Consumer's `failed`-status early-return wastes pg-boss retries** — `services/llm/src/consumers/generate-conversation-starter.ts:2316-2321`. First failure → status=failed → next pg-boss retry → sees `failed` → no-ops → pg-boss marks job complete. Retries are dead-letter without ever running. Fix: rethrow from the narrow-catch arm so pg-boss actually retries; only persist `failed` on the final attempt (check `job.retrycount === retryLimit`).
+- [ ] [Review][Patch] **MEDIUM — Wrong copy constant on `createShareToken` failure** — `apps/expo/.../novo/duracao.tsx:443-445`. Toast uses `BIOMARKER_TOGGLE_FAILED_PT_BR` (a per-biomarker-toggle string). Add `SHARE_TOKEN_CREATE_FAILED_PT_BR` to validators and use it here.
+- [ ] [Review][Patch] **MEDIUM — `WEB_APP_URL` boot-gate is lazy** — `packages/api/src/sharing.ts:1097-1113`. Docstring says "boot fails fast in staging/preview/prod if missing" but it only throws on first call. Add an eager `validateSharingEnv()` invoked from server bootstrap (matching the precedent for `SHARE_TOKEN_HMAC_SECRET`).
+- [ ] [Review][Patch] **MEDIUM — `navigator.share` user-cancel surfaces error toast** — `apps/web/.../resumo/page.tsx:632-651` and `apps/expo/.../resumo.tsx:322-337`. User dismissal rejects with `AbortError` (web) / can throw on Expo too. Check `err.name === 'AbortError'` and silently no-op; only show toast for real failures.
+- [ ] [Review][Patch] **MEDIUM — `getShareUrl` (protected) vs `getDraftConfig` (premium) asymmetry on the same screen** — `packages/api/src/router/sharing.ts:455,528`. If a patient downgrades between create and resumo, `getDraftConfig` 412s while `getShareUrl` 200s — broken loading state. Align: make `getShareUrl` also `premiumProcedure`, OR demote `getDraftConfig` read-path to `protectedProcedure` (consent already given at create-time).
+- [ ] [Review][Patch] **MEDIUM — pg-boss `singleton_key` prevents retry recovery** — `packages/api/src/router/sharing.ts:284`. Key is `conversation_starter.<tokenId>` for the job's whole lifecycle. Once it completes, no second enqueue is possible until archive. If an operator wants to retry a failed cache row, there's no path. Either include a generation counter in the key or document the manual archive+reset workflow.
+- [ ] [Review][Patch] **MEDIUM — `share_token_biomarkers.rls.test.ts` missing `doctorWithNoExpiryToken` case** — required by spec T2.6 but not authored. Add the test row asserting an active no-expiry doctor sees `visible=true` biomarkers.
+- [ ] [Review][Patch] **MEDIUM — Audit event names hardcoded in consumer** — `services/llm/src/consumers/generate-conversation-starter.ts:170,144`. Strings `"conversation_starter.generated"` and `".failed"` should reference the validators constants. Either wire `@healthtracker/validators` into `services/llm` (cleanest) or import the constants via a thin re-export shim if the boundary should stay decoupled. Letter consumer has the same gap — document as precedent or fix both.
+- [ ] [Review][Patch] **MEDIUM — Cache row `expires_at` column is dead weight** — `packages/db/src/schema/sharing.ts:1663`. RLS predicates join back to `share_tokens`; nothing reads the cache's own expires_at. Per CLAUDE.md "Simplicity First", remove the column (and update the integration test). If kept, document why.
+- [ ] [Review][Patch] **MEDIUM — `DurationOption` accessibility missing `radiogroup` parent** — `apps/expo/.../duracao.tsx:472-483`, web equivalent. The four options are `accessibilityRole="radio"` but the wrapping container is not a `radiogroup`. VoiceOver won't announce "X of 4". Wrap the map in a `YStack` (or `View`) with `accessibilityRole="radiogroup"` + `accessibilityLabel="Duração do compartilhamento"`.
+- [ ] [Review][Patch] **LOW — Extract `deriveDurationFromExpiresAt` to validators** — currently duplicated verbatim across Expo + web resumo screens. Move to `packages/validators/src/sharing.ts` as `deriveDurationFromExpiresAt(expiresAt: Date | null): ShareDuration`. Tied to the decision above; if (c) is picked, the helper goes away entirely.
+- [ ] [Review][Patch] **LOW — T8.7 behavior test for no_expiry modal flow missing** — required by spec; only the Zod enum is tested.
+- [ ] [Review][Patch] **LOW — T8.2 fake-timer duration mapping test missing** — required by spec; only the Zod accept/reject is tested.
+
+#### Review fixes applied (2026-05-26)
+
+All 17 patches + Decision A applied. Verification gates: `pnpm typecheck`
+(17/17), `pnpm lint`, `pnpm --filter @healthtracker/api test:unit`
+(181 pass, +4 cases for the new fake-timer duration→expires_at mapping),
+`pnpm --filter @healthtracker/llm-service test:unit` (20 pass).
+
+Judgment calls:
+
+- **Decision A (duration column) — `pgEnum`.** Followed the
+  `letterStatusEnum` precedent. `shareDurationEnum` lives at the top of
+  `packages/db/src/schema/sharing.ts` and constrains the new
+  `share_tokens.duration` column. `getDraftConfig` now exposes the
+  enum directly; the lossy `deriveDurationFromExpiresAt` bucket math is
+  deleted from both resumo screens. **Note: dev environment needs
+  `pnpm db:push` post-merge** to apply the new enum + column +
+  `share_tokens_patient_invite_active_uq` partial index. Production
+  migration stays deferred to the last story of Epic 5.
+
+- **Patch #6 (consumer retry path) — rethrow until budget exhausted.**
+  On the narrow-catch arm the consumer now rethrows when
+  `retrycount + 1 < RETRY_LIMIT` (pg-boss retries). Only on the final
+  attempt does it persist `failed` + emit the failure audit. This
+  matches the spec's "actually-retry" intent and matches pg-boss's
+  retry-budget semantics.
+
+- **Patch #13 (consumer audit constants) — kept hardcoded, documented.**
+  Wiring `@healthtracker/validators` as a runtime dep in
+  `services/llm` surfaces a NodeNext-vs-Bundler module-resolution
+  mismatch: the validators dist `index.d.ts` re-exports `./sharing`
+  without the `.js` extension that NodeNext strictly requires.
+  Switching the whole monorepo's validators re-exports to `.js`
+  paths is outside Story 5.2's surgical scope. Letter consumer has
+  the same hardcoded-string posture today; both will batch into a
+  future cleanup. Audit-name strings remain string literals here.
+
+#### Deferred (pre-existing or out-of-scope)
+
+- [x] [Review][Defer] **Web `navigator.share` omits `text` vs Expo includes `message`** — cosmetic platform asymmetry; Story 5.x polish.
+- [x] [Review][Defer] **Empty visible-biomarkers cache payload** — Story 6.2 (doctor-side render) territory.
+- [x] [Review][Defer] **Premium downgrade between create and worker run** — LGPD consent at create-time stands; worker uses service_role.
+- [x] [Review][Defer] **Web/Expo `trpcClient` pattern asymmetry** — cosmetic; new dev navigates one extra layer.
+- [x] [Review][Defer] **`DurationOption.value` prop only used in testID** — pre-existing convention; not a regression.
+- [x] [Review][Defer] **`DURATION_LABEL_PT_BR_FN("no_expiry")` lowercase vs sentence-case in DURATION_OPTIONS** — intentional for in-sentence flow.
 
 ### Known infra blockers (out-of-code)
 

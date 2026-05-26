@@ -54,15 +54,33 @@ export async function registerGenerateConversationStarterConsumer(
     async (jobs) => {
       for (const job of jobs) {
         const { shareTokenId } = job.data.payload;
-        await processOne(deps, shareTokenId);
+        // Story 5.2 review-fix Patch #6 — pass `retrycount` so the
+        // catch arm can distinguish "transient failure, let pg-boss
+        // retry" from "retry budget exhausted, persist `failed`".
+        // pg-boss types `retrycount` as number on the job object;
+        // fall back to 0 for the very-first run.
+        const rawRetrycount = (job as unknown as { retrycount?: unknown })
+          .retrycount;
+        const retrycount =
+          typeof rawRetrycount === "number" ? rawRetrycount : 0;
+        await processOne(deps, shareTokenId, retrycount);
       }
     },
   );
 }
 
+/**
+ * pg-boss queue retry budget for `conversation_starter.generate`.
+ * Mirrors the producer (`packages/api/src/router/sharing.ts` — the
+ * `INSERT INTO pgboss.job ... retry_limit = 3` line) and the queue's
+ * `createQueue(..., { retryLimit: 3 })` registration.
+ */
+const RETRY_LIMIT = 3;
+
 async function processOne(
   deps: { sql: postgres.Sql; llm: LLMAdapter },
   shareTokenId: string,
+  retrycount: number,
 ): Promise<void> {
   const tokenRows = await deps.sql<ShareTokenRow[]>`
     SELECT id, patient_id
@@ -117,24 +135,36 @@ async function processOne(
       })),
     });
   } catch (err) {
-    // Narrow catch — Anthropic / network errors mark the row `failed`
-    // and emit the failure audit. Everything else (TypeError etc.)
-    // rethrows so pg-boss retries surface the bug.
+    // Story 5.2 review-fix Patch #5 — drop the TypeError/Reference/
+    // Syntax short-circuits. Node 20+ undici surfaces fetch failures
+    // as a bare `TypeError: fetch failed`, which the previous guard
+    // mis-classified as a programmer error and rethrew. Match on the
+    // message regex instead; programmer errors that don't match the
+    // network-shape regex still rethrow (intended — pg-boss retries
+    // will surface the bug rather than silently mark `failed`).
     const isAnthropicError =
       err instanceof Anthropic.APIError ||
       err instanceof Anthropic.APIConnectionError;
-    const isEconnReset =
+    const isNetworkError =
       err instanceof Error &&
-      err instanceof TypeError === false &&
-      err instanceof ReferenceError === false &&
-      err instanceof SyntaxError === false &&
-      /ECONNRESET|ECONN|ETIMEDOUT|fetch failed/i.test(err.message);
-    if (!isAnthropicError && !isEconnReset) throw err;
+      /ECONNRESET|ECONN|ETIMEDOUT|fetch failed|network/i.test(err.message);
+    if (!isAnthropicError && !isNetworkError) throw err;
 
     console.error(
-      `[conversation_starter.generate] shareTokenId=${shareTokenId}: adapter failure`,
+      `[conversation_starter.generate] shareTokenId=${shareTokenId}: adapter failure (retrycount=${retrycount})`,
       err,
     );
+
+    // Story 5.2 review-fix Patch #6 — only persist `failed` + emit
+    // audit on the LAST attempt (retry budget exhausted). Earlier
+    // attempts rethrow so pg-boss actually retries; the previous
+    // implementation marked `failed` on first error, then every
+    // retry saw `status='failed'` in the idempotency skip-guard and
+    // no-op'd — burning the retry budget without ever re-running.
+    if (retrycount + 1 < RETRY_LIMIT) {
+      throw err;
+    }
+
     await deps.sql.begin(async (tx) => {
       await tx`
         UPDATE conversation_starter_cache

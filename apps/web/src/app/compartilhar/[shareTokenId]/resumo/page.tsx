@@ -4,7 +4,6 @@ import { use, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 
-import type { ShareDuration } from "@healthtracker/validators";
 import { Button } from "@healthtracker/ui/button";
 import {
   COMPARTILHAR_BACK_PT_BR,
@@ -57,7 +56,8 @@ export default function ResumoPage(props: {
     return <main style={{ padding: 24 }}>{COMPARTILHAR_LOADING_PT_BR}</main>;
   }
 
-  const duration = deriveDurationFromExpiresAt(draft.data.shareToken.expiresAt);
+  // Story 5.2 review-fix Decision A — read persisted duration enum.
+  const duration = draft.data.shareToken.duration;
   const visibleLabels = draft.data.biomarkerScope
     .filter((s) => s.visible)
     .map((s) => s.label);
@@ -87,7 +87,11 @@ export default function ResumoPage(props: {
           setStatus(SHARE_URL_ERROR_PT_BR);
         }
       }
-    } catch {
+    } catch (err) {
+      // Story 5.2 review-fix Patch #9 — `navigator.share` rejects
+      // with `AbortError` when the user dismisses the OS share sheet.
+      // That's not an error condition — silently no-op.
+      if (err instanceof Error && err.name === "AbortError") return;
       setStatus(SHARE_URL_ERROR_PT_BR);
     } finally {
       setSubmitting(false);
@@ -114,15 +118,4 @@ export default function ResumoPage(props: {
       ) : null}
     </main>
   );
-}
-
-function deriveDurationFromExpiresAt(
-  expiresAt: Date | null | undefined,
-): ShareDuration {
-  if (!expiresAt) return "no_expiry";
-  const remainingMs = new Date(expiresAt).getTime() - Date.now();
-  const hours = remainingMs / (60 * 60 * 1000);
-  if (hours <= 36) return "24h";
-  if (hours <= 14 * 24) return "7d";
-  return "30d";
 }

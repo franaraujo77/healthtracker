@@ -227,16 +227,58 @@ export const sharingRouter = {
 
         const categories = await getDistinctCategoriesForPatient(tx, patientId);
 
-        const [tokenRow] = await tx
-          .insert(ShareTokens)
-          .values({
-            tokenHash,
-            tokenHmac,
-            patientId,
-            inviteId: input.inviteId,
-            expiresAt,
-          })
-          .returning({ id: ShareTokens.id });
+        // Story 5.2 review-fix Patch #3 — wrap INSERT in narrow 23505
+        // catch. The partial unique index
+        // `share_tokens_patient_invite_active_uq` defends against
+        // concurrent calls that both passed the SELECT short-circuit.
+        // On collision: re-SELECT the row the racing tx committed and
+        // return its id+scope without re-enqueuing the cache job.
+        let tokenRow: { id: string } | undefined;
+        try {
+          const inserted = await tx
+            .insert(ShareTokens)
+            .values({
+              tokenHash,
+              tokenHmac,
+              patientId,
+              inviteId: input.inviteId,
+              expiresAt,
+              duration: input.duration,
+            })
+            .returning({ id: ShareTokens.id });
+          tokenRow = inserted[0];
+        } catch (err) {
+          if (isUniqueViolation(err)) {
+            const raced = await tx
+              .select({ id: ShareTokens.id })
+              .from(ShareTokens)
+              .where(
+                and(
+                  eq(ShareTokens.patientId, patientId),
+                  eq(ShareTokens.inviteId, input.inviteId),
+                  isNull(ShareTokens.revokedAt),
+                ),
+              )
+              .limit(1);
+            if (raced[0]) {
+              const scope = await tx
+                .select({
+                  category: ShareTokenBiomarkers.biomarkerCategory,
+                  visible: ShareTokenBiomarkers.visible,
+                })
+                .from(ShareTokenBiomarkers)
+                .where(eq(ShareTokenBiomarkers.shareTokenId, raced[0].id));
+              return {
+                shareTokenId: raced[0].id,
+                biomarkerScope: scope.map((s) => ({
+                  category: s.category,
+                  visible: s.visible,
+                })),
+              };
+            }
+          }
+          throw err;
+        }
         if (!tokenRow) {
           throw new TRPCError({
             code: "INTERNAL_SERVER_ERROR",
@@ -291,7 +333,6 @@ export const sharingRouter = {
           shareTokenId: tokenRow.id,
           patientId,
           status: "queued",
-          expiresAt,
         });
 
         const conversationStarterJob = {
@@ -301,6 +342,14 @@ export const sharingRouter = {
           payload: { shareTokenId: tokenRow.id },
           createdAt: new Date().toISOString(),
         };
+        // Story 5.2 review-fix Patch #11 — append a generation counter
+        // to the singleton_key. pg-boss treats `singleton_key` as a
+        // dedupe-for-lifetime constraint, which blocks future
+        // re-enqueues even after the original job completes/archives.
+        // The recovery path (Story 5.x — invalidate-and-regen on a
+        // fresh draw) bumps `retry_generation`. We start at v0.
+        const retryGeneration = 0;
+        const singletonKey = `conversation_starter.${tokenRow.id}.v${retryGeneration}`;
         await tx.execute(sql`
           INSERT INTO pgboss.job
             (name, data, retry_limit, retry_delay, retry_backoff, singleton_key)
@@ -308,7 +357,7 @@ export const sharingRouter = {
             'conversation_starter.generate',
             ${JSON.stringify(conversationStarterJob)}::jsonb,
             3, 30, true,
-            ${"conversation_starter." + tokenRow.id}
+            ${singletonKey}
           )
           ON CONFLICT DO NOTHING
         `);
@@ -358,7 +407,7 @@ export const sharingRouter = {
           WHERE ${ShareTokens.id} = ${input.shareTokenId}
             AND ${ShareTokens.patientId} = ${patientId}
             AND ${ShareTokens.revokedAt} IS NULL
-            AND ${ShareTokens.expiresAt} > now()
+            AND (${ShareTokens.expiresAt} IS NULL OR ${ShareTokens.expiresAt} > now())
           FOR UPDATE
         `);
         const tokenRow = tokenRows[0];
@@ -452,7 +501,12 @@ export const sharingRouter = {
    * 404 on cross-patient or revoked share token (mirrors Story 4.1
    * AC6 — no enumeration oracle).
    */
-  getDraftConfig: premiumProcedure
+  // Story 5.2 review-fix Patch #10 — both read-paths on the resumo
+  // screen (`getDraftConfig` + `getShareUrl`) use `protectedProcedure`.
+  // The premium gate already fired at create-time; re-gating on
+  // retrieval would cause a confusing split where one query 412s
+  // while the other 200s if the patient's tier briefly downgrades.
+  getDraftConfig: protectedProcedure
     .input(getDraftConfigInputSchema)
     .query(async ({ ctx, input }) => {
       const patientId = ctx.session.user.id;
@@ -461,6 +515,7 @@ export const sharingRouter = {
         .select({
           tokenId: ShareTokens.id,
           expiresAt: ShareTokens.expiresAt,
+          duration: ShareTokens.duration,
           inviteId: ShareTokens.inviteId,
           displayName: PendingInvites.displayName,
         })
@@ -500,7 +555,14 @@ export const sharingRouter = {
       );
 
       return {
-        shareToken: { id: row.tokenId, expiresAt: row.expiresAt },
+        shareToken: {
+          id: row.tokenId,
+          expiresAt: row.expiresAt,
+          // Story 5.2 review-fix Decision A — duration is the
+          // persisted enum the patient picked. Resumo screen reads
+          // this directly (no lossy bucket math from `expires_at`).
+          duration: row.duration,
+        },
         doctor: { displayName: row.displayName },
         biomarkerScope: scopeRows.map((s) => ({
           category: s.biomarkerCategory,
@@ -529,6 +591,11 @@ export const sharingRouter = {
     .input(z.object({ shareTokenId: z.uuid() }))
     .query(async ({ ctx, input }) => {
       const patientId = ctx.session.user.id;
+      // Story 5.2 review-fix Patch #2 — filter on expiry. A patient
+      // who comes back to the resumo screen after the window closed
+      // MUST NOT pull a usable HMAC URL. The doctor-side magic-link
+      // route enforces this too (Epic 6), but the patient-facing
+      // retrieval should 404 first.
       const rows = await ctx.db
         .select({
           id: ShareTokens.id,
@@ -540,6 +607,10 @@ export const sharingRouter = {
             eq(ShareTokens.id, input.shareTokenId),
             eq(ShareTokens.patientId, patientId),
             isNull(ShareTokens.revokedAt),
+            or(
+              isNull(ShareTokens.expiresAt),
+              gt(ShareTokens.expiresAt, sql`now()`),
+            ),
           ),
         )
         .limit(1);
@@ -598,7 +669,7 @@ function isUniqueViolation(err: unknown): boolean {
  * leak a test-only seam into the resolver signature. The unit test
  * uses `vi.useFakeTimers()` to lock now().
  */
-function computeExpiresAt(duration: ShareDuration): Date | null {
+export function computeExpiresAt(duration: ShareDuration): Date | null {
   switch (duration) {
     case "24h":
       return new Date(Date.now() + 24 * 60 * 60 * 1000);

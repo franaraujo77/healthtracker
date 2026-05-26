@@ -2,12 +2,27 @@ import { sql } from "drizzle-orm";
 import {
   check,
   index,
+  pgEnum,
   pgTable,
   primaryKey,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 import { Users } from "./users";
+
+/**
+ * Story 5.2 review-fix — `shareDurationEnum`. Persisting the duration
+ * the patient picked at create-time eliminates the lossy
+ * `expires_at`-bucket round-trip on the resumo screen (a 30-day token
+ * re-entered on day 16 was previously labelled "7 dias"; an expired
+ * token labelled "24 horas"). Mirrors the `letterStatusEnum` precedent.
+ */
+export const shareDurationEnum = pgEnum("share_duration_enum", [
+  "24h",
+  "7d",
+  "30d",
+  "no_expiry",
+]);
 
 /**
  * Story 5.1 — Epic 5 sharing schema. Three tables land here:
@@ -103,6 +118,12 @@ export const ShareTokens = pgTable(
      * (NOT a server-side default — that would mask callers that forgot to pick).
      */
     expiresAt: t.timestamp({ mode: "date", withTimezone: true }),
+    /**
+     * Story 5.2 review-fix — persisted enum the patient picked. The
+     * resumo screen reads this directly instead of bucket-deriving
+     * from `expires_at`. CHECK constraint via `pgEnum`.
+     */
+    duration: shareDurationEnum("duration").notNull(),
     /** AC11 — soft-delete signal owned by Story 5.4 revoke flow. */
     revokedAt: t.timestamp({ mode: "date", withTimezone: true }),
     createdAt: t
@@ -123,6 +144,15 @@ export const ShareTokens = pgTable(
     // check would miss a concurrent INSERT.
     uniqueIndex("share_tokens_invite_active_uq")
       .on(table.inviteId)
+      .where(sql`${table.revokedAt} IS NULL`),
+    // Story 5.2 review-fix Patch #3 — close TOCTOU on the
+    // `(patient_id, invite_id)` SELECT-then-INSERT short-circuit in
+    // `createShareToken`. Two concurrent calls (mobile↔web double-tap)
+    // can both miss the SELECT and both INSERT; this partial unique
+    // index pins exactly one active token per (patient, invite). The
+    // resolver narrow-catches `23505` and re-SELECTs.
+    uniqueIndex("share_tokens_patient_invite_active_uq")
+      .on(table.patientId, table.inviteId)
       .where(sql`${table.revokedAt} IS NULL`),
   ],
 );
@@ -188,8 +218,10 @@ export const ConversationStarterCache = pgTable(
     payload: t.jsonb(),
     failureReason: t.text(),
     generatedAt: t.timestamp({ mode: "date", withTimezone: true }),
-    /** Inherits share_tokens.expires_at — NULL means no expiry. */
-    expiresAt: t.timestamp({ mode: "date", withTimezone: true }),
+    // Story 5.2 review-fix Patch #14 — `expires_at` removed. RLS
+    // predicates JOIN back to `share_tokens` for the expiry check;
+    // nothing read this cache's own column. CLAUDE.md "Simplicity
+    // First".
     createdAt: t
       .timestamp({ mode: "date", withTimezone: true })
       .defaultNow()

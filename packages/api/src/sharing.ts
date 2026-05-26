@@ -163,6 +163,24 @@ function getWebAppUrl(): string {
   return DEV_FALLBACK_WEB_APP_URL;
 }
 
+/**
+ * Story 5.2 review-fix Patch #8 — eager boot-gate for sharing env
+ * vars. Invoked at module-load (below) so a missing `WEB_APP_URL` /
+ * `SHARE_TOKEN_HMAC_SECRET` in staging/preview/prod fails fast at
+ * import time rather than on the first share request. Mirrors the
+ * NFR-S6 dev-vs-prod gating posture.
+ */
+export function validateSharingEnv(): void {
+  getHmacSecret();
+  getWebAppUrl();
+}
+
+// Module-load eager check. In dev/test this exercises (and stores) the
+// dev fallback warning at most once; in staging/preview/prod it throws
+// if either env var is missing. If a downstream caller needs to opt out
+// for a unit test, they should set NODE_ENV=test before importing.
+validateSharingEnv();
+
 export async function getDistinctCategoriesForPatient(
   database: AuditDb,
   patientId: string,

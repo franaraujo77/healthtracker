@@ -54,10 +54,10 @@ describe("sharing schema — Story 5.1 (testcontainer)", () => {
     const inviteId = invite.id;
     const [token] = await db.sql<{ id: string }[]>`
       INSERT INTO share_tokens
-        (token_hash, token_hmac, patient_id, invite_id, expires_at)
+        (token_hash, token_hmac, patient_id, invite_id, expires_at, duration)
       VALUES (
         'hash-1', 'hmac-1', ${PATIENT_A}::uuid, ${inviteId}::uuid,
-        now() + interval '7 days')
+        now() + interval '7 days', '7d')
       RETURNING id`;
     if (!token) throw new Error("share_tokens insert returned no row");
     const tokenId = token.id;
@@ -89,10 +89,10 @@ describe("sharing schema — Story 5.1 (testcontainer)", () => {
     const inviteId = invite.id;
     const [token] = await db.sql<{ id: string; expires_at: Date | null }[]>`
       INSERT INTO share_tokens
-        (token_hash, token_hmac, patient_id, invite_id, expires_at)
+        (token_hash, token_hmac, patient_id, invite_id, expires_at, duration)
       VALUES (
         'hash-noexp', 'hmac-noexp', ${PATIENT_A}::uuid,
-        ${inviteId}::uuid, NULL)
+        ${inviteId}::uuid, NULL, 'no_expiry')
       RETURNING id, expires_at`;
     expect(token?.expires_at).toBeNull();
   });
@@ -108,9 +108,9 @@ describe("sharing schema — Story 5.1 (testcontainer)", () => {
     if (!invite) throw new Error("invite insert returned no row");
     const [token] = await db.sql<{ id: string }[]>`
       INSERT INTO share_tokens
-        (token_hash, token_hmac, patient_id, invite_id, expires_at)
+        (token_hash, token_hmac, patient_id, invite_id, expires_at, duration)
       VALUES ('hash-cs1', 'hmac-cs1', ${PATIENT_A}::uuid,
-        ${invite.id}::uuid, NULL)
+        ${invite.id}::uuid, NULL, 'no_expiry')
       RETURNING id`;
     if (!token) throw new Error("share_tokens insert returned no row");
 
@@ -137,9 +137,9 @@ describe("sharing schema — Story 5.1 (testcontainer)", () => {
     if (!invite) throw new Error("invite insert returned no row");
     const [token] = await db.sql<{ id: string }[]>`
       INSERT INTO share_tokens
-        (token_hash, token_hmac, patient_id, invite_id, expires_at)
+        (token_hash, token_hmac, patient_id, invite_id, expires_at, duration)
       VALUES ('hash-cs2', 'hmac-cs2', ${PATIENT_A}::uuid,
-        ${invite.id}::uuid, now() + interval '7 days')
+        ${invite.id}::uuid, now() + interval '7 days', '7d')
       RETURNING id`;
     if (!token) throw new Error("share_tokens insert returned no row");
     await db.sql`INSERT INTO conversation_starter_cache
@@ -163,10 +163,10 @@ describe("sharing schema — Story 5.1 (testcontainer)", () => {
     const inviteId = invite.id;
     const [token] = await db.sql<{ id: string }[]>`
       INSERT INTO share_tokens
-        (token_hash, token_hmac, patient_id, invite_id, expires_at)
+        (token_hash, token_hmac, patient_id, invite_id, expires_at, duration)
       VALUES (
         'hash-cascade', 'hmac-cascade', ${PATIENT_A}::uuid,
-        ${inviteId}::uuid, now() + interval '7 days')
+        ${inviteId}::uuid, now() + interval '7 days', '7d')
       RETURNING id`;
     if (!token) throw new Error("share_tokens insert returned no row");
     const tokenId = token.id;

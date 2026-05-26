@@ -8,11 +8,12 @@ import { DurationOption, NoExpiryConfirmDialog } from "@healthtracker/ui";
 import { Button } from "@healthtracker/ui/button";
 import { useToastController } from "@healthtracker/ui/toast";
 import {
-  BIOMARKER_TOGGLE_FAILED_PT_BR,
   COMPARTILHAR_NOVO_DURACAO_TITLE_PT_BR,
   compartilharBiomarcadoresRoute,
   CONTINUE_BUTTON_PT_BR,
+  DURATION_GROUP_A11Y_LABEL_PT_BR,
   DURATION_OPTIONS,
+  SHARE_TOKEN_CREATE_FAILED_PT_BR,
 } from "@healthtracker/validators";
 
 import { trpc } from "~/utils/api";
@@ -37,7 +38,7 @@ export default function DuracaoScreen(): React.ReactNode {
         router.replace(compartilharBiomarcadoresRoute(data.shareTokenId));
       },
       onError: () => {
-        toast.show(BIOMARKER_TOGGLE_FAILED_PT_BR);
+        toast.show(SHARE_TOKEN_CREATE_FAILED_PT_BR);
       },
     }),
   );
@@ -59,15 +60,21 @@ export default function DuracaoScreen(): React.ReactNode {
     <ScrollView contentContainerStyle={{ padding: 16 }}>
       <YStack gap="$3">
         <Text fontSize="$5">{COMPARTILHAR_NOVO_DURACAO_TITLE_PT_BR}</Text>
-        {DURATION_OPTIONS.map((opt) => (
-          <DurationOption
-            key={opt.value}
-            value={opt.value}
-            label={opt.labelPtBr}
-            selected={selectedDuration === opt.value}
-            onSelect={() => setSelectedDuration(opt.value)}
-          />
-        ))}
+        <YStack
+          gap="$2"
+          accessibilityRole="radiogroup"
+          accessibilityLabel={DURATION_GROUP_A11Y_LABEL_PT_BR}
+        >
+          {DURATION_OPTIONS.map((opt) => (
+            <DurationOption
+              key={opt.value}
+              value={opt.value}
+              label={opt.labelPtBr}
+              selected={selectedDuration === opt.value}
+              onSelect={() => setSelectedDuration(opt.value)}
+            />
+          ))}
+        </YStack>
         <Button
           variant="secondary"
           disabled={mutation.isPending}

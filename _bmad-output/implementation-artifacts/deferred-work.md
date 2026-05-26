@@ -350,3 +350,12 @@
 - `DATABASE_URL` role-bypass risk if `postgres` superuser used — Epic 0 connection-string discipline; broader than Story 5.1.
 - `ShareBiomarkerToggle` `variant` prop accepted but unused — Story 5.2 will branch on `setup` vs `edit`.
 - Lock-icon uses emoji `🔒` rather than a vector icon — cosmetic; Story 5.2 polish.
+
+## Deferred from: code review of story-5.2 (2026-05-26)
+
+- Web `navigator.share` omits `text` vs Expo includes `message` — cosmetic platform asymmetry.
+- Empty visible-biomarkers cache payload — Story 6.2 (doctor-side render) territory.
+- Premium downgrade between create and worker run — LGPD consent at create-time stands.
+- Web/Expo `trpcClient` pattern asymmetry — cosmetic.
+- `DurationOption.value` prop only used in testID — pre-existing convention.
+- `DURATION_LABEL_PT_BR_FN("no_expiry")` lowercase vs sentence-case in DURATION_OPTIONS — intentional for in-sentence flow.

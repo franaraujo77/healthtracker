@@ -11,6 +11,7 @@ import {
   COMPARTILHAR_NOVO_DURACAO_TITLE_PT_BR,
   compartilharBiomarcadoresRoute,
   CONTINUE_BUTTON_PT_BR,
+  DURATION_GROUP_A11Y_LABEL_PT_BR,
   DURATION_OPTIONS,
 } from "@healthtracker/validators";
 
@@ -48,15 +49,17 @@ function DuracaoBody(): React.ReactElement {
   return (
     <main style={{ padding: 24, maxWidth: 720, margin: "0 auto" }}>
       <h1>{COMPARTILHAR_NOVO_DURACAO_TITLE_PT_BR}</h1>
-      {DURATION_OPTIONS.map((opt) => (
-        <DurationOption
-          key={opt.value}
-          value={opt.value}
-          label={opt.labelPtBr}
-          selected={selectedDuration === opt.value}
-          onSelect={() => setSelectedDuration(opt.value)}
-        />
-      ))}
+      <div role="radiogroup" aria-label={DURATION_GROUP_A11Y_LABEL_PT_BR}>
+        {DURATION_OPTIONS.map((opt) => (
+          <DurationOption
+            key={opt.value}
+            value={opt.value}
+            label={opt.labelPtBr}
+            selected={selectedDuration === opt.value}
+            onSelect={() => setSelectedDuration(opt.value)}
+          />
+        ))}
+      </div>
       <Button
         variant="secondary"
         disabled={mutation.isPending}

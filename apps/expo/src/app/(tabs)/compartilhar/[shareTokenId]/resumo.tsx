@@ -4,7 +4,6 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { ScrollView, Text, YStack } from "tamagui";
 
-import type { ShareDuration } from "@healthtracker/validators";
 import { Button } from "@healthtracker/ui/button";
 import { useToastController } from "@healthtracker/ui/toast";
 import {
@@ -58,7 +57,10 @@ export default function ResumoScreen(): React.ReactNode {
     );
   }
 
-  const duration = deriveDurationFromExpiresAt(draft.data.shareToken.expiresAt);
+  // Story 5.2 review-fix Decision A — the picked duration is now
+  // persisted on `share_tokens.duration`; read it directly instead of
+  // bucket-deriving from `expires_at` (lossy on resumo re-entry).
+  const duration = draft.data.shareToken.duration;
   const visibleLabels = draft.data.biomarkerScope
     .filter((s) => s.visible)
     .map((s) => s.label);
@@ -77,8 +79,14 @@ export default function ResumoScreen(): React.ReactNode {
       });
       // React Native's Share API is the native share-sheet trigger
       // (no extra dep). On failure we surface a Toast.
-      await Share.share({ url, message: url });
-    } catch {
+      const result = await Share.share({ url, message: url });
+      // Story 5.2 review-fix Patch #9 — user-cancellation is not a
+      // failure. RN `Share.share` returns `{action: 'dismissedAction'}`
+      // on cancel; some platforms throw `AbortError`-shaped errors
+      // too — both should silently no-op rather than toast an error.
+      if (result.action === Share.dismissedAction) return;
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") return;
       toast.show(SHARE_URL_ERROR_PT_BR);
     } finally {
       setSubmitting(false);
@@ -104,23 +112,4 @@ export default function ResumoScreen(): React.ReactNode {
       </YStack>
     </ScrollView>
   );
-}
-
-/**
- * Story 5.2 — derive the duration enum value from the persisted
- * `expires_at` so the summary screen can render the right label.
- * NULL → `no_expiry`; non-null → pick the closest of 24h/7d/30d by
- * remaining-window approximation (the share token was created
- * recently — getDraftConfig is called moments later in the ceremony,
- * so this approximation is accurate enough to render the label).
- */
-function deriveDurationFromExpiresAt(
-  expiresAt: Date | null | undefined,
-): ShareDuration {
-  if (!expiresAt) return "no_expiry";
-  const remainingMs = new Date(expiresAt).getTime() - Date.now();
-  const hours = remainingMs / (60 * 60 * 1000);
-  if (hours <= 36) return "24h";
-  if (hours <= 14 * 24) return "7d";
-  return "30d";
 }

@@ -36,6 +36,23 @@
 
 generated: 2026-05-15
 last_updated: 2026-05-26
+# Story 5.2 implementation + R1 review complete → review. PR #56 (stacked).
+# Headline R1 fixes: (a) CRITICAL configureBiomarkers SELECT FOR UPDATE
+# now handles nullable expires_at — previously silently rejected every
+# no_expiry token; (b) CRITICAL getShareUrl now 404s on expired tokens —
+# no more usable-after-expiry HMAC leak; (c) CRITICAL createShareToken
+# TOCTOU shielded via partial unique index share_tokens_patient_invite
+# _active_uq + narrow 23505 catch with re-SELECT; (d) duration persisted
+# as pgEnum column on share_tokens (deriveDurationFromExpiresAt deleted —
+# resumo reads authoritative value); (e) consumer retry-budget-aware
+# failure (rethrow until budget exhausted, persist failed only on last
+# attempt); (f) isEconnReset matches Node undici TypeError fetch-failed;
+# (g) getDraftConfig demoted protected (matches getShareUrl); (h) pg-boss
+# singleton_key includes retry generation; (i) WEB_APP_URL eager validate
+# at module load. Cache.expires_at dead column removed. RLS test
+# matrix extended (share_token_biomarkers noExpiry case). 4 new
+# tests; 7 patches landed in same fix-up commit. typecheck 17/17;
+# lint 15/15; api test:unit 181 PASS (+4); llm-service test:unit 20.
 # Story 5.2 spec created → ready-for-dev. Stacks on Story 5.1 / PR #56
 # per user's stacked-PR convention. Lands the real duration picker
 # (replacing Story 5.1's auto-fire placeholder), "Sem prazo" extra-
@@ -362,7 +379,7 @@ development_status:
   # Epic 5: Patient Controls Who Sees Their Health Data
   epic-5: in-progress
   5-1-patient-configures-per-biomarker-sharing-with-a-named-doctor: review
-  5-2-patient-generates-a-time-limited-sharing-link-with-duration-selection: ready-for-dev
+  5-2-patient-generates-a-time-limited-sharing-link-with-duration-selection: review
   5-3-patient-views-the-access-log: backlog
   5-4-patient-revokes-a-doctors-access-to-their-record: backlog
   5-5-patient-exports-their-complete-health-record-as-json-or-pdf: backlog

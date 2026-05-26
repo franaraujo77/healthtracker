@@ -40,6 +40,7 @@ async function seedToken(args: {
       args.expiresAt ?? new Date(Date.now() + 7 * 86_400_000)
     ).toISOString(),
     revoked_at: args.revokedAt ? args.revokedAt.toISOString() : null,
+    duration: "7d",
   });
   if (e2) throw new Error(`share_tokens seed failed: ${e2.message}`);
   seededTokenIds.push(tokenId);
@@ -155,6 +156,7 @@ describe("share_tokens RLS", () => {
       invite_id: inviteId,
       expires_at: null,
       revoked_at: null,
+      duration: "no_expiry",
     });
     seededTokenIds.push(tokenId);
     const run = asIdentity("doctorWithNoExpiryToken", {

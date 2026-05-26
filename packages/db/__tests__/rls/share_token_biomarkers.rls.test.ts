@@ -16,7 +16,8 @@ const seededInviteIds: string[] = [];
 async function seedTokenWithBiomarkers(args: {
   patientId: string;
   biomarkers: { category: string; visible: boolean }[];
-  expiresAt?: Date;
+  /** `null` = no-expiry token; omit = default 7-day future. */
+  expiresAt?: Date | null;
   revokedAt?: Date | null;
   identifierHash?: string;
 }): Promise<string> {
@@ -35,10 +36,14 @@ async function seedTokenWithBiomarkers(args: {
     token_hmac: `hmac-${tokenId}`,
     patient_id: args.patientId,
     invite_id: inviteId,
-    expires_at: (
-      args.expiresAt ?? new Date(Date.now() + 7 * 86_400_000)
-    ).toISOString(),
+    expires_at:
+      args.expiresAt === null
+        ? null
+        : (
+            args.expiresAt ?? new Date(Date.now() + 7 * 86_400_000)
+          ).toISOString(),
     revoked_at: args.revokedAt ? args.revokedAt.toISOString() : null,
+    duration: args.expiresAt === null ? "no_expiry" : "7d",
   });
   seededTokenIds.push(tokenId);
   await serviceClient.from("share_token_biomarkers").insert(
@@ -146,6 +151,32 @@ describe("share_token_biomarkers RLS — LGPD per-biomarker scope (NFR-S3)", () 
     `,
     );
     expect(rows).toHaveLength(0);
+  });
+
+  // Story 5.2 review-fix Patch #12 — `expires_at IS NULL` no-expiry
+  // tokens MUST still surface visible biomarker rows under the
+  // updated RLS predicate `(IS NULL OR > now())`.
+  it("doctorWithNoExpiryToken sees visible biomarker rows when expires_at IS NULL", async () => {
+    const patientId = crypto.randomUUID();
+    const tokenId = await seedTokenWithBiomarkers({
+      patientId,
+      biomarkers: [
+        { category: "ferritin", visible: false },
+        { category: "hemoglobin", visible: true },
+      ],
+      expiresAt: null,
+    });
+    const run = asIdentity("doctorWithNoExpiryToken", {
+      patientId,
+      shareTokenId: tokenId,
+    });
+    const rows = await run(
+      (tx) => tx<{ biomarker_category: string }[]>`
+      SELECT biomarker_category FROM share_token_biomarkers
+      WHERE share_token_id = ${tokenId}::uuid
+    `,
+    );
+    expect(rows.map((r) => r.biomarker_category)).toEqual(["hemoglobin"]);
   });
 
   it("doctorWithRevokedToken sees zero biomarker rows", async () => {
