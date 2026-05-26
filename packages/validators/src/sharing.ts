@@ -53,7 +53,16 @@ export const configureBiomarkersInputSchema = z.object({
       }),
     )
     .min(1)
-    .max(64),
+    .max(64)
+    // Per-batch dedup: ON CONFLICT can't resolve duplicates within the
+    // same INSERT statement (Postgres raises 23505 on the second row in
+    // the values list). Reject duplicates at the boundary so the
+    // resolver doesn't have to last-write-wins post-hoc.
+    .refine(
+      (rows) =>
+        new Set(rows.map((r) => r.biomarkerCategory)).size === rows.length,
+      { message: "Duplicate biomarkerCategory in scope" },
+    ),
 });
 export type ConfigureBiomarkersInput = z.infer<
   typeof configureBiomarkersInputSchema
@@ -76,26 +85,31 @@ export const SHARE_PREMIUM_REQUIRED_PT_BR =
 
 export const NO_DATA_YET_PT_BR = "Sem dados ainda";
 
+// Neutral copy (Review 2026-05-26 decision A): drop the "Dr." prefix
+// (patient may already have typed "Dra. Renata") and use the
+// gender-neutral past-participle "compartilhada" (concords with
+// "informação" — implicit subject). Avoids the masculine/feminine
+// agreement trap on biomarker names ("Colesterol oculta" was wrong).
 export function BIOMARKER_HIDDEN_PT_BR_FN(
   biomarker: string,
-  doctorName: string,
+  displayName: string,
 ): string {
-  return `${biomarker} oculta do Dr. ${doctorName}`;
+  return `${biomarker} não compartilhada com ${displayName}`;
 }
 
 export function BIOMARKER_VISIBLE_PT_BR_FN(
   biomarker: string,
-  doctorName: string,
+  displayName: string,
 ): string {
-  return `${biomarker} visível ao Dr. ${doctorName}`;
+  return `${biomarker} compartilhada com ${displayName}`;
 }
 
 export function SHARE_TOGGLE_A11Y_LABEL_PT_BR_FN(
   biomarkerLabel: string,
   visible: boolean,
-  doctorName: string,
+  displayName: string,
 ): string {
-  return `${biomarkerLabel}: atualmente ${visible ? "visível" : "oculto"} do Dr. ${doctorName}`;
+  return `${biomarkerLabel}: atualmente ${visible ? "compartilhada" : "não compartilhada"} com ${displayName}`;
 }
 
 export const BIOMARKER_TOGGLE_FAILED_PT_BR =
@@ -147,3 +161,4 @@ export const COMPARTILHAR_BIOMARCADORES_TITLE_PT_BR =
   "O que o médico poderá ver?";
 export const COMPARTILHAR_BIOMARCADORES_DONE_CTA_PT_BR = "Concluir";
 export const COMPARTILHAR_CONCLUIDO_PT_BR = "Pronto.";
+export const COMPARTILHAR_BACK_PT_BR = "← Voltar";

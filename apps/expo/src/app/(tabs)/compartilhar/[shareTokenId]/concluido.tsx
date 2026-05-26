@@ -3,6 +3,7 @@ import { Text, YStack } from "tamagui";
 
 import { Button } from "@healthtracker/ui/button";
 import {
+  COMPARTILHAR_BACK_PT_BR,
   COMPARTILHAR_CONCLUIDO_PT_BR,
   COMPARTILHAR_ROUTE,
 } from "@healthtracker/validators";
@@ -20,7 +21,7 @@ export default function ConcluidoScreen(): React.ReactNode {
         variant="secondary"
         onPress={() => router.replace(COMPARTILHAR_ROUTE)}
       >
-        ← Voltar
+        {COMPARTILHAR_BACK_PT_BR}
       </Button>
     </YStack>
   );

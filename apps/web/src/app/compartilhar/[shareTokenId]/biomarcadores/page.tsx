@@ -1,6 +1,6 @@
 "use client";
 
-import { use } from "react";
+import { use, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 
@@ -9,8 +9,10 @@ import { Button } from "@healthtracker/ui/button";
 import {
   BIOMARKER_HIDDEN_PT_BR_FN,
   BIOMARKER_VISIBLE_PT_BR_FN,
+  COMPARTILHAR_BACK_PT_BR,
   COMPARTILHAR_BIOMARCADORES_DONE_CTA_PT_BR,
   COMPARTILHAR_BIOMARCADORES_TITLE_PT_BR,
+  COMPARTILHAR_LOADING_PT_BR,
   COMPARTILHAR_ROUTE,
   compartilharConcluidoRoute,
   SHARE_TOKEN_INVALID_PT_BR,
@@ -37,13 +39,13 @@ export default function BiomarcadoresPage(props: {
           variant="secondary"
           onPress={() => router.replace(COMPARTILHAR_ROUTE)}
         >
-          ← Voltar
+          {COMPARTILHAR_BACK_PT_BR}
         </Button>
       </main>
     );
   }
   if (!query.data) {
-    return <main style={{ padding: 24 }}>Carregando…</main>;
+    return <main style={{ padding: 24 }}>{COMPARTILHAR_LOADING_PT_BR}</main>;
   }
 
   return (
@@ -59,13 +61,25 @@ export default function BiomarcadoresPage(props: {
 function Body(props: {
   shareTokenId: string;
   doctorName: string;
-  initialScope: { category: string; visible: boolean }[];
+  initialScope: { category: string; label: string; visible: boolean }[];
   onDone: () => void;
 }): React.ReactElement {
-  const { scope, toggle, flushPending } = useDebouncedConfigureBiomarkers({
+  const { scope, toggle, flushAsync } = useDebouncedConfigureBiomarkers({
     shareTokenId: props.shareTokenId,
     initialScope: props.initialScope,
   });
+
+  // Patch #3 — await the in-flight flush before navigating away.
+  const [submitting, setSubmitting] = useState(false);
+  const handleDone = async (): Promise<void> => {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      await flushAsync();
+    } finally {
+      props.onDone();
+    }
+  };
 
   return (
     <main style={{ padding: 24, maxWidth: 720, margin: "0 auto" }}>
@@ -77,8 +91,8 @@ function Body(props: {
           .map((entry) => {
             const v = scope.get(entry.category) ?? entry.visible;
             return v
-              ? BIOMARKER_VISIBLE_PT_BR_FN(entry.category, props.doctorName)
-              : BIOMARKER_HIDDEN_PT_BR_FN(entry.category, props.doctorName);
+              ? BIOMARKER_VISIBLE_PT_BR_FN(entry.label, props.doctorName)
+              : BIOMARKER_HIDDEN_PT_BR_FN(entry.label, props.doctorName);
           })
           .join(". ")}
       </div>
@@ -87,7 +101,7 @@ function Body(props: {
         <ShareBiomarkerToggle
           key={entry.category}
           biomarkerCategory={entry.category}
-          biomarkerLabel={entry.category}
+          biomarkerLabel={entry.label}
           visible={scope.get(entry.category) ?? entry.visible}
           doctorName={props.doctorName}
           onToggle={(next) => toggle(entry.category, next)}
@@ -96,12 +110,14 @@ function Body(props: {
 
       <Button
         variant="secondary"
+        disabled={submitting}
         onPress={() => {
-          flushPending();
-          props.onDone();
+          void handleDone();
         }}
       >
-        {COMPARTILHAR_BIOMARCADORES_DONE_CTA_PT_BR}
+        {submitting
+          ? COMPARTILHAR_LOADING_PT_BR
+          : COMPARTILHAR_BIOMARCADORES_DONE_CTA_PT_BR}
       </Button>
     </main>
   );

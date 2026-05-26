@@ -1,7 +1,7 @@
 import type { TRPCRouterRecord } from "@trpc/server";
 import { TRPCError } from "@trpc/server";
 
-import { and, desc, eq, isNull, sql } from "@healthtracker/db";
+import { and, desc, eq, gt, isNull, sql } from "@healthtracker/db";
 import {
   PendingInvites,
   ShareTokenBiomarkers,
@@ -53,7 +53,13 @@ export const sharingRouter = {
     .input(createPendingInviteInputSchema)
     .mutation(async ({ ctx, input }) => {
       const patientId = ctx.session.user.id;
-      const identifierHash = hashIdentifier(input.identifier);
+      // Review 2026-05-26 Patch #6 — lowercase email-shaped identifiers
+      // BEFORE hashing so AC7 idempotency survives mixed-case input.
+      // CRMs (no `@`) keep their original case (uppercase convention).
+      const normalizedIdentifier = input.identifier.includes("@")
+        ? input.identifier.toLowerCase()
+        : input.identifier;
+      const identifierHash = hashIdentifier(normalizedIdentifier);
 
       // Idempotent SELECT-then-INSERT: cheap SELECT, INSERT-on-miss.
       // The unique index is the source of truth on the race — we
@@ -116,7 +122,10 @@ export const sharingRouter = {
         event: SHARING_AUDIT_PENDING_INVITE_CREATED,
         resourceId: inviteId,
         resourceType: "pending_invite",
-        metadata: { identifierHash },
+        // Review 2026-05-26 Patch #12 — standardize on
+        // `doctorIdentifierHash` everywhere (Story 5.3 access-log
+        // consumes one shape).
+        metadata: { doctorIdentifierHash: identifierHash },
       });
 
       return { inviteId };
@@ -128,6 +137,13 @@ export const sharingRouter = {
    * category for the patient (all `visible = true`). Default 7-day
    * expiry (Story 5.2 will add the duration picker).
    *
+   * Review 2026-05-26 Patch #1 + #4: the token INSERT + biomarker
+   * pre-pop + audit MUST live in a single tx (AC8 + T3.1). And
+   * before the INSERT we short-circuit on an existing active token
+   * for the same (patient_id, invite_id) — defends against the
+   * Fast-Concluir re-mount race that would otherwise emit two
+   * tokens per invite.
+   *
    * TODO Story 5.2: trigger conversation-starter pre-generation here
    * (architecture.md lines 413–420).
    */
@@ -136,79 +152,111 @@ export const sharingRouter = {
     .mutation(async ({ ctx, input }) => {
       const patientId = ctx.session.user.id;
 
-      // Verify invite belongs to this patient (404, not 403 — AC2 of
-      // Story 4.1 precedent: no enumeration oracle for cross-patient
-      // resource probes).
-      const inviteRows = await ctx.db
-        .select({ id: PendingInvites.id })
-        .from(PendingInvites)
-        .where(
-          and(
-            eq(PendingInvites.id, input.inviteId),
-            eq(PendingInvites.patientId, patientId),
-          ),
-        )
-        .limit(1);
-      if (inviteRows.length === 0) {
-        throw new TRPCError({ code: "NOT_FOUND" });
-      }
+      return ctx.db.transaction(async (tx) => {
+        // Verify invite belongs to this patient (404, not 403 — AC2 of
+        // Story 4.1 precedent: no enumeration oracle for cross-patient
+        // resource probes).
+        const inviteRows = await tx
+          .select({ id: PendingInvites.id })
+          .from(PendingInvites)
+          .where(
+            and(
+              eq(PendingInvites.id, input.inviteId),
+              eq(PendingInvites.patientId, patientId),
+            ),
+          )
+          .limit(1);
+        if (inviteRows.length === 0) {
+          throw new TRPCError({ code: "NOT_FOUND" });
+        }
 
-      const { tokenHash, tokenHmac } = generateShareToken();
-      const expiresAt = new Date(
-        Date.now() + SHARE_DEFAULT_DURATION_DAYS * 24 * 60 * 60 * 1000,
-      );
+        // Patch #4 — idempotency on `(patient_id, invite_id)`. If an
+        // active (non-revoked, non-expired) token already exists for
+        // this invite, short-circuit. Do NOT re-emit the audit row or
+        // re-INSERT biomarker scope.
+        const existingToken = await tx
+          .select({ id: ShareTokens.id })
+          .from(ShareTokens)
+          .where(
+            and(
+              eq(ShareTokens.patientId, patientId),
+              eq(ShareTokens.inviteId, input.inviteId),
+              isNull(ShareTokens.revokedAt),
+              gt(ShareTokens.expiresAt, new Date()),
+            ),
+          )
+          .limit(1);
+        if (existingToken.length > 0 && existingToken[0]) {
+          const scope = await tx
+            .select({
+              category: ShareTokenBiomarkers.biomarkerCategory,
+              visible: ShareTokenBiomarkers.visible,
+            })
+            .from(ShareTokenBiomarkers)
+            .where(eq(ShareTokenBiomarkers.shareTokenId, existingToken[0].id));
+          return {
+            shareTokenId: existingToken[0].id,
+            biomarkerScope: scope.map((s) => ({
+              category: s.category,
+              visible: s.visible,
+            })),
+          };
+        }
 
-      const categories = await getDistinctCategoriesForPatient(
-        ctx.db,
-        patientId,
-      );
-
-      const [tokenRow] = await ctx.db
-        .insert(ShareTokens)
-        .values({
-          tokenHash,
-          tokenHmac,
-          patientId,
-          inviteId: input.inviteId,
-          expiresAt,
-        })
-        .returning({ id: ShareTokens.id });
-      if (!tokenRow) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: "createShareToken: insert returned no row",
-        });
-      }
-
-      const biomarkerScope = categories.map((category) => ({
-        category,
-        visible: true,
-      }));
-
-      if (categories.length > 0) {
-        await ctx.db.insert(ShareTokenBiomarkers).values(
-          categories.map((category) => ({
-            shareTokenId: tokenRow.id,
-            biomarkerCategory: category,
-            visible: true,
-          })),
+        const { tokenHash, tokenHmac } = generateShareToken();
+        const expiresAt = new Date(
+          Date.now() + SHARE_DEFAULT_DURATION_DAYS * 24 * 60 * 60 * 1000,
         );
-      }
 
-      await writeAuditLog(ctx.db, {
-        actorId: patientId,
-        actorType: "patient",
-        event: SHARING_AUDIT_TOKEN_CREATED,
-        resourceId: tokenRow.id,
-        resourceType: "share_token",
-        metadata: {
-          inviteId: input.inviteId,
-          defaultExpiresAt: expiresAt.toISOString(),
-          biomarkerCount: categories.length,
-        },
+        const categories = await getDistinctCategoriesForPatient(tx, patientId);
+
+        const [tokenRow] = await tx
+          .insert(ShareTokens)
+          .values({
+            tokenHash,
+            tokenHmac,
+            patientId,
+            inviteId: input.inviteId,
+            expiresAt,
+          })
+          .returning({ id: ShareTokens.id });
+        if (!tokenRow) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "createShareToken: insert returned no row",
+          });
+        }
+
+        const biomarkerScope = categories.map((entry) => ({
+          category: entry.category,
+          visible: true,
+        }));
+
+        if (categories.length > 0) {
+          await tx.insert(ShareTokenBiomarkers).values(
+            categories.map((entry) => ({
+              shareTokenId: tokenRow.id,
+              biomarkerCategory: entry.category,
+              visible: true,
+            })),
+          );
+        }
+
+        await writeAuditLog(tx, {
+          actorId: patientId,
+          actorType: "patient",
+          event: SHARING_AUDIT_TOKEN_CREATED,
+          resourceId: tokenRow.id,
+          resourceType: "share_token",
+          metadata: {
+            inviteId: input.inviteId,
+            defaultExpiresAt: expiresAt.toISOString(),
+            biomarkerCount: categories.length,
+          },
+        });
+
+        return { shareTokenId: tokenRow.id, biomarkerScope };
       });
-
-      return { shareTokenId: tokenRow.id, biomarkerScope };
     }),
 
   /**
@@ -216,92 +264,120 @@ export const sharingRouter = {
    * the full new-scope diff. Narrow catch for `23505` only (defensive
    * against partial-unique-index race; ON CONFLICT should preclude
    * this in practice).
+   *
+   * Review 2026-05-26 Patch #2 + #5 + #7: the share-token validity
+   * check, the UPSERT, and the audit row all live in one tx. The
+   * share_tokens row is SELECT ... FOR UPDATE-locked inside the tx
+   * to close the TOCTOU window against concurrent revoke. Unknown
+   * biomarker categories (not in the seeded set for this token) are
+   * rejected with BAD_REQUEST / UNKNOWN_BIOMARKER_CATEGORY.
    */
   configureBiomarkers: premiumProcedure
     .input(configureBiomarkersInputSchema)
     .mutation(async ({ ctx, input }) => {
       const patientId = ctx.session.user.id;
 
-      // 404 on cross-patient or revoked share token (no enumeration
-      // oracle).
-      const tokenRows = await ctx.db
-        .select({
-          id: ShareTokens.id,
-          inviteId: ShareTokens.inviteId,
-        })
-        .from(ShareTokens)
-        .where(
-          and(
-            eq(ShareTokens.id, input.shareTokenId),
-            eq(ShareTokens.patientId, patientId),
-            isNull(ShareTokens.revokedAt),
-          ),
-        )
-        .limit(1);
-      if (tokenRows.length === 0 || !tokenRows[0]) {
-        throw new TRPCError({ code: "NOT_FOUND" });
-      }
-      const tokenRow = tokenRows[0];
-
-      // Pull the invite for the audit metadata (AC9 — doctorIdentifierHash).
-      const inviteRows = await ctx.db
-        .select({ identifierHash: PendingInvites.identifierHash })
-        .from(PendingInvites)
-        .where(eq(PendingInvites.id, tokenRow.inviteId))
-        .limit(1);
-      const identifierHash = inviteRows[0]?.identifierHash ?? null;
-
-      const rows = input.scope.map((entry) => ({
-        shareTokenId: tokenRow.id,
-        biomarkerCategory: entry.biomarkerCategory,
-        visible: entry.visible,
-      }));
-
-      try {
-        await ctx.db
-          .insert(ShareTokenBiomarkers)
-          .values(rows)
-          .onConflictDoUpdate({
-            target: [
-              ShareTokenBiomarkers.shareTokenId,
-              ShareTokenBiomarkers.biomarkerCategory,
-            ],
-            set: {
-              visible: sql`excluded.visible`,
-              updatedAt: sql`now()`,
-            },
-          });
-      } catch (err) {
-        // AC10 — narrow to `23505` (extremely unlikely given the
-        // ON CONFLICT clause; defensive). Programmer errors and
-        // every other shape rethrow per CLAUDE.md §"Narrow catches".
-        if (isUniqueViolation(err)) {
-          console.warn(
-            "[configureBiomarkers] 23505 despite ON CONFLICT — continuing",
-          );
-        } else {
-          throw err;
+      return ctx.db.transaction(async (tx) => {
+        // 404 on cross-patient or revoked share token (no enumeration
+        // oracle). `FOR UPDATE` locks the row for the rest of the tx
+        // so a concurrent revoke can't land between this check and
+        // the UPSERT (TOCTOU close).
+        const tokenRows = await tx.execute<{
+          id: string;
+          invite_id: string;
+        }>(sql`
+          SELECT id, invite_id
+          FROM ${ShareTokens}
+          WHERE ${ShareTokens.id} = ${input.shareTokenId}
+            AND ${ShareTokens.patientId} = ${patientId}
+            AND ${ShareTokens.revokedAt} IS NULL
+            AND ${ShareTokens.expiresAt} > now()
+          FOR UPDATE
+        `);
+        const tokenRow = tokenRows[0];
+        if (!tokenRow) {
+          throw new TRPCError({ code: "NOT_FOUND" });
         }
-      }
 
-      await writeAuditLog(ctx.db, {
-        actorId: patientId,
-        actorType: "patient",
-        event: SHARING_AUDIT_CONFIGURED,
-        resourceId: tokenRow.id,
-        resourceType: "share_token",
-        metadata: {
-          inviteId: tokenRow.inviteId,
-          doctorIdentifierHash: identifierHash,
-          biomarkerCategories: input.scope.map((entry) => ({
-            category: entry.biomarkerCategory,
-            visible: entry.visible,
-          })),
-          configuredAt: new Date().toISOString(),
-        },
+        // Patch #7 — validate every incoming category was in the
+        // seeded set for this share token. Buggy / malicious clients
+        // can't poison the table with arbitrary strings.
+        const seededRows = await tx
+          .select({
+            biomarkerCategory: ShareTokenBiomarkers.biomarkerCategory,
+          })
+          .from(ShareTokenBiomarkers)
+          .where(eq(ShareTokenBiomarkers.shareTokenId, tokenRow.id));
+        const seededSet = new Set(seededRows.map((r) => r.biomarkerCategory));
+        for (const entry of input.scope) {
+          if (!seededSet.has(entry.biomarkerCategory)) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "UNKNOWN_BIOMARKER_CATEGORY",
+            });
+          }
+        }
+
+        // Pull the invite for the audit metadata (AC9 — doctorIdentifierHash).
+        const inviteRows = await tx
+          .select({ identifierHash: PendingInvites.identifierHash })
+          .from(PendingInvites)
+          .where(eq(PendingInvites.id, tokenRow.invite_id))
+          .limit(1);
+        const identifierHash = inviteRows[0]?.identifierHash ?? null;
+
+        const rows = input.scope.map((entry) => ({
+          shareTokenId: tokenRow.id,
+          biomarkerCategory: entry.biomarkerCategory,
+          visible: entry.visible,
+        }));
+
+        try {
+          await tx
+            .insert(ShareTokenBiomarkers)
+            .values(rows)
+            .onConflictDoUpdate({
+              target: [
+                ShareTokenBiomarkers.shareTokenId,
+                ShareTokenBiomarkers.biomarkerCategory,
+              ],
+              set: {
+                visible: sql`excluded.visible`,
+                updatedAt: sql`now()`,
+              },
+            });
+        } catch (err) {
+          // AC10 — narrow to `23505` (extremely unlikely given the
+          // ON CONFLICT clause; defensive). Programmer errors and
+          // every other shape rethrow per CLAUDE.md §"Narrow catches".
+          if (isUniqueViolation(err)) {
+            console.warn(
+              "[configureBiomarkers] 23505 despite ON CONFLICT — continuing",
+            );
+          } else {
+            throw err;
+          }
+        }
+
+        await writeAuditLog(tx, {
+          actorId: patientId,
+          actorType: "patient",
+          event: SHARING_AUDIT_CONFIGURED,
+          resourceId: tokenRow.id,
+          resourceType: "share_token",
+          metadata: {
+            inviteId: tokenRow.invite_id,
+            doctorIdentifierHash: identifierHash,
+            biomarkerCategories: input.scope.map((entry) => ({
+              category: entry.biomarkerCategory,
+              visible: entry.visible,
+            })),
+            configuredAt: new Date().toISOString(),
+          },
+        });
+
+        return { ok: true as const };
       });
-
-      return { ok: true as const };
     }),
 
   /**
@@ -344,11 +420,25 @@ export const sharingRouter = {
         .from(ShareTokenBiomarkers)
         .where(eq(ShareTokenBiomarkers.shareTokenId, row.tokenId));
 
+      // Patch #11 — surface a separate human-readable `label` per
+      // scope row so the UI can render "Hemoglobina" instead of
+      // "718-7". The category key remains the stable LOINC-preferred
+      // id used as the UPSERT join key.
+      const labelRows = await getDistinctCategoriesForPatient(
+        ctx.db,
+        patientId,
+      );
+      const labelByCategory = new Map(
+        labelRows.map((r) => [r.category, r.label]),
+      );
+
       return {
         shareToken: { id: row.tokenId, expiresAt: row.expiresAt },
         doctor: { displayName: row.displayName },
         biomarkerScope: scopeRows.map((s) => ({
           category: s.biomarkerCategory,
+          label:
+            labelByCategory.get(s.biomarkerCategory) ?? s.biomarkerCategory,
           visible: s.visible,
         })),
       };
@@ -358,6 +448,10 @@ export const sharingRouter = {
   listShares: premiumProcedure.query(async ({ ctx }) => {
     const patientId = ctx.session.user.id;
 
+    // Review 2026-05-26 decision B — count ALL biomarker rows in the
+    // share (not visible-only). UI copy "X biomarcadores" describes
+    // the share's total scope; the visible/hidden split lives per-row
+    // on the detail screen.
     const rows = await ctx.db
       .select({
         id: ShareTokens.id,
@@ -368,7 +462,6 @@ export const sharingRouter = {
         biomarkerCount: sql<number>`(
           SELECT count(*)::int FROM ${ShareTokenBiomarkers}
           WHERE ${ShareTokenBiomarkers.shareTokenId} = ${ShareTokens.id}
-            AND ${ShareTokenBiomarkers.visible} = true
         )`,
       })
       .from(ShareTokens)

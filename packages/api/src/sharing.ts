@@ -38,12 +38,22 @@ export function hashIdentifier(identifier: string): string {
 const DEV_FALLBACK_HMAC_SECRET =
   "dev-only-share-token-hmac-secret-not-for-production-use";
 
+// Patch #14 — declared BEFORE `getHmacSecret` to avoid the TDZ
+// footgun (function declarations hoist; `let` bindings don't).
+let warnedAboutDevSecret = false;
+
 function getHmacSecret(): string {
   const fromEnv = process.env.SHARE_TOKEN_HMAC_SECRET;
   if (fromEnv && fromEnv.length > 0) return fromEnv;
-  if (process.env.NODE_ENV === "production") {
+  // Patch #8 — deny-by-default outside development/test. Empty
+  // NODE_ENV (or staging / preview / anything else) MUST refuse boot;
+  // staging-with-no-secret was silently signing tokens with the
+  // source-controlled dev fallback under the previous `=== "production"`
+  // gate. Mirrors NFR-S6.
+  const env = process.env.NODE_ENV;
+  if (env !== "development" && env !== "test") {
     throw new Error(
-      "SHARE_TOKEN_HMAC_SECRET is required in production (Story 5.1 / NFR-S6)",
+      "SHARE_TOKEN_HMAC_SECRET is required outside development/test (Story 5.1 / NFR-S6)",
     );
   }
   if (!warnedAboutDevSecret) {
@@ -54,7 +64,6 @@ function getHmacSecret(): string {
   }
   return DEV_FALLBACK_HMAC_SECRET;
 }
-let warnedAboutDevSecret = false;
 
 /**
  * Generates a fresh opaque share token. Returns the raw token (for
@@ -103,13 +112,29 @@ export function verifyShareToken(raw: string, signature: string): boolean {
  * falls back to `biomarker_name` so manual / unmapped rows still
  * surface. Private helper — NOT exposed as a public tRPC procedure.
  */
+/**
+ * Patch #11 — returns both the stable category id (LOINC code when
+ * present, falling back to `biomarker_name` — the UPSERT join key)
+ * AND a human-readable patient-facing `label` (always
+ * `biomarker_name`). The screen renders `label`; the
+ * `share_token_biomarkers.biomarker_category` column persists
+ * `category`. Decoupling these two keeps the join key stable across
+ * biomarker-name renames while letting the UI show "Hemoglobina"
+ * instead of "718-7".
+ */
+export interface PatientCategoryRow {
+  category: string;
+  label: string;
+}
+
 export async function getDistinctCategoriesForPatient(
   database: AuditDb,
   patientId: string,
-): Promise<string[]> {
+): Promise<PatientCategoryRow[]> {
   const rows = await database
     .select({
       category: sql<string>`coalesce(${Observations.loincCode}, ${Observations.biomarkerName})`,
+      label: sql<string>`min(${Observations.biomarkerName})`,
     })
     .from(Observations)
     .where(
@@ -123,6 +148,12 @@ export async function getDistinctCategoriesForPatient(
     )
     .limit(64);
   return rows
-    .map((r) => r.category)
-    .filter((c): c is string => typeof c === "string" && c.length > 0);
+    .filter(
+      (r): r is { category: string; label: string } =>
+        typeof r.category === "string" &&
+        r.category.length > 0 &&
+        typeof r.label === "string" &&
+        r.label.length > 0,
+    )
+    .map((r) => ({ category: r.category, label: r.label }));
 }

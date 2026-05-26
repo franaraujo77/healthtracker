@@ -62,4 +62,28 @@ describe("pending_invites RLS", () => {
     );
     expect(rows).toHaveLength(0);
   });
+
+  // Patch #13 — serviceRole bypass. `serviceClient` is the
+  // service-role identity (SUPABASE_SERVICE_ROLE_KEY); it MUST see
+  // every row regardless of RLS predicates (background workers and
+  // admin tooling depend on it).
+  it("serviceRole bypasses RLS and sees every pending_invites row", async () => {
+    const patientId = crypto.randomUUID();
+    const otherPatientId = crypto.randomUUID();
+    const idA = await seedInvite({
+      patientId,
+      identifierHash: "h".repeat(64),
+    });
+    const idB = await seedInvite({
+      patientId: otherPatientId,
+      identifierHash: "i".repeat(64),
+    });
+    const { data, error } = await serviceClient
+      .from("pending_invites")
+      .select("id")
+      .in("id", [idA, idB]);
+    expect(error).toBeNull();
+    const ids = ((data ?? []) as { id: string }[]).map((r) => r.id).sort();
+    expect(ids).toEqual([idA, idB].sort());
+  });
 });

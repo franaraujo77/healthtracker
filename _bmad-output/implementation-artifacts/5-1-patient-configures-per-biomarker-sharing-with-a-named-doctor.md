@@ -473,6 +473,48 @@ doctorWithRevokedToken` bound via `app.current_share_token_id`)
 - `docs/rls-review-checklist.md` (doctor-principal checklist
   section)
 
+### Review Findings (2026-05-26)
+
+Three-layer adversarial review (Blind Hunter + Edge Case Hunter + Acceptance Auditor). All three converged on the transaction-boundary miss.
+
+#### Decision-needed
+
+- [ ] [Review][Decision] **Biomarker label / copy strategy (gender + "Dr." prefix)** — `BIOMARKER_HIDDEN_PT_BR_FN` hardcodes `"Dr."` and feminine `"oculta"`. Two issues: (a) patients may type `displayName = "Dra. Renata"` → output reads "Ferritina oculta do Dr. Dra. Renata"; (b) `oculta` is grammatically feminine, breaks on masculine biomarkers ("Colesterol oculta"). Plus AC2's spec example is itself grammatically gendered. Options: (i) drop the "Dr." prefix and use displayName as-is; (ii) keep "Dr." and trust the patient to type a bare name; (iii) move to neutral verb form ("não compartilhada/compartilhada com {displayName}"). Product/UX call needed.
+- [ ] [Review][Decision] **`listShares.biomarkerCount` semantics** — currently counts only `visible=true`; UI renders "X biomarcadores". This understates the share's scope. Options: (a) count all rows (matches spec AC9 metadata); (b) keep visible-only and change UI copy to "X visíveis".
+
+#### Patch (apply before merge)
+
+- [ ] [Review][Patch] **HIGH — `createShareToken` not wrapped in `ctx.db.transaction(...)`** — `packages/api/src/router/sharing.ts:134-212`. Spec AC8 + T3.1 require token insert + biomarker pre-pop + audit in a single tx. Today: three independent `ctx.db` statements; mid-flight failure leaves orphan state.
+- [ ] [Review][Patch] **HIGH — `configureBiomarkers` not wrapped in `ctx.db.transaction(...)`** — `packages/api/src/router/sharing.ts:227-302`. Spec AC4 explicit: UPSERT + audit must be same tx. Today: separate `ctx.db` calls; crash between them silently splits state.
+- [ ] [Review][Patch] **HIGH — Fast-Concluir race loses data** — `apps/expo/.../biomarcadores.tsx:691-693`, web `:1196-1198`. `flushPending(); props.onDone()` fires the mutation then immediately routes; unmount kills the Toast + revert path. Await the flush mutation before `onDone`.
+- [ ] [Review][Patch] **HIGH — `createShareToken` allows duplicate tokens per inviteId** — `packages/api/src/router/sharing.ts:142-175`. Tab refresh re-mounts `duracao.tsx`, `firedRef` resets, second token is created against the same invite. Defensive: SELECT existing active `share_token` for `(patient_id, invite_id)` before insert and return idempotently. Or: partial unique index on `(invite_id) WHERE revoked_at IS NULL`.
+- [ ] [Review][Patch] **HIGH — TOCTOU between revocation check and UPSERT** in `configureBiomarkers` — `packages/api/src/router/sharing.ts:227-273`. SELECT then-UPSERT — a revoke landing between them mutates a revoked share. Fold the predicate into the UPSERT (`WHERE EXISTS (SELECT 1 FROM share_tokens WHERE id = $1 AND revoked_at IS NULL AND expires_at > now())`) or use FOR UPDATE inside the new transaction wrapper.
+- [ ] [Review][Patch] **MEDIUM — Duplicate biomarker categories in one batch trigger 23505 from the same statement** — `packages/validators/src/sharing.ts:46-57`, `router/sharing.ts:261-273`. `ON CONFLICT` doesn't resolve in-batch dupes. Add a `.refine` for uniqueness on `biomarkerCategory`, or de-dup last-write-wins in the resolver.
+- [ ] [Review][Patch] **MEDIUM — Identifier case-sensitivity breaks AC7 idempotency for emails** — `packages/validators/src/sharing.ts:35`, `packages/api/src/sharing.ts` (hashIdentifier). Lowercase emails before hashing. CRMs already uppercase by convention.
+- [ ] [Review][Patch] **MEDIUM — `configureBiomarkers` accepts arbitrary text categories** — `router/sharing.ts:254-273`. Buggy/malicious clients can poison `share_token_biomarkers` with arbitrary strings. Verify each `scope.biomarkerCategory` exists in the seeded rows for this `shareTokenId`.
+- [ ] [Review][Patch] **MEDIUM — Dev HMAC fallback opens in staging/preview** — `packages/api/src/sharing.ts:42-56`. Gate is `NODE_ENV === "production"` only; staging/preview/Vercel-preview without the var sign with a source-controlled secret. Flip to deny-by-default outside `development`/`test`.
+- [ ] [Review][Patch] **MEDIUM — Debounced hook stale closures + unmount-flush loses revert/Toast** — `apps/expo/src/hooks/use-debounced-configure-biomarkers.ts:60-119`, web equivalent. Stabilize callbacks via refs to `options`; on unmount with a pending timer, await the flush or surface a non-React queue Toast.
+- [ ] [Review][Patch] **MEDIUM — Inline pt-BR strings violate "no inline pt-BR" anti-pattern** — `apps/expo/.../biomarcadores.tsx:630,665,621`, web `:1142,1136`. Strings: `"Carregando…"`, `"Sem dados ainda."` (period diverges from `NO_DATA_YET_PT_BR`), `"← Voltar"`. Move to `packages/validators` constants.
+- [ ] [Review][Patch] **MEDIUM — Raw LOINC code rendered as patient-facing biomarker label** — `apps/expo/.../biomarcadores.tsx:672`, web `:1185-1186`. `biomarkerLabel={entry.category}` shows e.g. "718-7" instead of "Hemoglobina". Either swap `coalesce(loinc_code, biomarker_name)` ordering to prefer `biomarker_name` for display, or add a label resolver in the helper.
+- [ ] [Review][Patch] **LOW — Audit metadata key inconsistency: `identifierHash` vs `doctorIdentifierHash`** — `router/sharing.ts` (pending_invite.created uses one; sharing.configured uses the other). Use `doctorIdentifierHash` everywhere so Story 5.3 Access Log handles one shape.
+- [ ] [Review][Patch] **LOW — RLS test matrix gaps vs docstrings** — `packages/db/__tests__/rls/{pending_invites,share_tokens,share_token_biomarkers}.rls.test.ts`. `pending_invites` claims 3 identities but ships 2; `share_tokens` claims 6 but ships 5 (no serviceRole); `share_token_biomarkers` ships only 3 of 6. Fill the matrices.
+- [ ] [Review][Patch] **LOW — `warnedAboutDevSecret` declared after `getHmacSecret`** — `packages/api/src/sharing.ts:2086-2104`. TDZ footgun. Move the `let` above.
+- [ ] [Review][Patch] **LOW — `ShareBiomarkerToggle` XStack missing `accessible={true}`** — `packages/ui/.../ShareBiomarkerToggle.tsx`. VoiceOver may focus nested `Text` separately.
+- [ ] [Review][Patch] **LOW — T7.4 integration test missing (`configure-biomarkers.integration.test.ts`)** — required by spec.
+- [ ] [Review][Patch] **LOW — T7.6/T7.7 component + behavior tests missing** — `ShareBiomarkerToggle` snapshot + debounced hook fake-timer behavior.
+- [ ] [Review][Patch] **LOW — T8.2/T8.3 CLAUDE.md updates missing** — required-vars list + sharing-schema-notes paragraph + 6-identity-matrix bullet.
+
+#### Deferred (pre-existing or out-of-scope)
+
+- [x] [Review][Defer] **N+1 `biomarkerCount` correlated subquery in `listShares`** — acceptable for Story 5.1 cardinality; revisit in Story 5.4.
+- [x] [Review][Defer] **Clock-skew tolerance on `expires_at > now()`** — DB-clock vs worker-clock; infra concern.
+- [x] [Review][Defer] **`pnpm db:push` without `psql -f` leaves dev RLS unpatched** — Story 5.7 (last Epic 5) lands the migration; add a `db:push` post-hook then.
+- [x] [Review][Defer] **Premium downgrade doesn't auto-revoke active shares** — Epic 5 retro / Story 5.4 territory.
+- [x] [Review][Defer] **Tab layout hex literals** — pre-existing; not introduced by this story.
+- [x] [Review][Defer] **DATABASE_URL role-bypass risk** if `postgres` superuser used — Epic 0 connection-string discipline.
+- [x] [Review][Defer] **`ShareBiomarkerToggle` `variant` prop accepted but unused** — Story 5.2 will branch on `setup` vs `edit`.
+- [x] [Review][Defer] **Lock-icon uses emoji `🔒`** — cosmetic; Story 5.2 polish.
+
 ### Known infra blockers (out-of-code)
 
 - **Production migration deferred.** `supabase/migrations/0005_epic_5_sharing_schema.sql` is out of scope for Story 5.1. Production deploys cannot ship Epic-5 functionality until the last story of Epic 5 lands the migration. Dev/staging environments are unblocked via `pnpm db:push` + `psql -f packages/db/policies/custom_rls_share_*.sql`.

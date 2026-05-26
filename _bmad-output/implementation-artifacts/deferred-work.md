@@ -339,3 +339,14 @@
 ## Story 2.8 — round-3 review deferral (F177)
 
 - **F177** Auto-render AC4 OS-denied banner via `expo-notifications` permission check. Spec text mandates an alarmist banner when permission is denied; current code always renders a neutral CTA. F135 wires the permission status; F177 tracks the conditional banner copy on top of that.
+
+## Deferred from: code review of story-5.1 (2026-05-26)
+
+- N+1 `biomarkerCount` correlated subquery in `listShares` — acceptable for Story 5.1 cardinality; revisit in Story 5.4 once revocation listing grows.
+- Clock-skew tolerance on `expires_at > now()` — DB-clock vs worker-clock; infra concern beyond Story 5.1.
+- `pnpm db:push` without `psql -f` leaves dev RLS unpatched — Story 5.7 (last Epic 5) lands the prod migration; add a `db:push` post-hook then.
+- Premium downgrade doesn't auto-revoke active shares — Story 5.4 (revoke) / Epic 5 retro territory.
+- Tab layout hex literals in `apps/expo/src/app/(tabs)/_layout.tsx:10-12` — pre-existing; not introduced by this story.
+- `DATABASE_URL` role-bypass risk if `postgres` superuser used — Epic 0 connection-string discipline; broader than Story 5.1.
+- `ShareBiomarkerToggle` `variant` prop accepted but unused — Story 5.2 will branch on `setup` vs `edit`.
+- Lock-icon uses emoji `🔒` rather than a vector icon — cosmetic; Story 5.2 polish.

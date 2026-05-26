@@ -104,6 +104,13 @@ export const ShareTokens = pgTable(
       sql`${table.createdAt} desc`,
     ),
     index("share_tokens_invite_idx").on(table.inviteId),
+    // Patch #4 — DB-level idempotency on (invite_id) WHERE not revoked.
+    // Mirrors the SELECT-then-INSERT guard inside `createShareToken`
+    // and defends against tab-refresh races where the application
+    // check would miss a concurrent INSERT.
+    uniqueIndex("share_tokens_invite_active_uq")
+      .on(table.inviteId)
+      .where(sql`${table.revokedAt} IS NULL`),
   ],
 );
 

@@ -126,6 +126,9 @@ export function ShareBiomarkerToggle(
   return (
     <XStack
       testID={`share-biomarker-toggle-${biomarkerCategory}`}
+      // Patch #15 — merge children into one VoiceOver/TalkBack focus
+      // stop so the composite a11y label reads as a single switch.
+      accessible={true}
       accessibilityRole="switch"
       accessibilityLabel={a11yLabel}
       accessibilityState={{ checked: visible, disabled: !!disabled }}

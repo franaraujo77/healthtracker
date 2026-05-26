@@ -133,4 +133,19 @@ describe("share_tokens RLS", () => {
     );
     expect(rows).toHaveLength(0);
   });
+
+  // Patch #13 — 6th identity. serviceRole MUST see all share tokens.
+  it("serviceRole bypasses RLS and sees every share_tokens row", async () => {
+    const patientId = crypto.randomUUID();
+    const otherPatientId = crypto.randomUUID();
+    const idA = await seedToken({ patientId });
+    const idB = await seedToken({ patientId: otherPatientId });
+    const { data, error } = await serviceClient
+      .from("share_tokens")
+      .select("id")
+      .in("id", [idA, idB]);
+    expect(error).toBeNull();
+    const ids = ((data ?? []) as { id: string }[]).map((r) => r.id).sort();
+    expect(ids).toEqual([idA, idB].sort());
+  });
 });

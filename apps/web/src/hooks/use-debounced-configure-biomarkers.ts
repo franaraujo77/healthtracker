@@ -12,6 +12,9 @@ import { useTRPC } from "~/trpc/react";
  * on failure); the only delta is the tRPC accessor — web uses
  * `useTRPC()` while Expo imports the module-level `trpc`. See
  * `apps/expo/src/hooks/use-debounced-configure-biomarkers.ts`.
+ *
+ * Review 2026-05-26 Patch #9 — refs for `options` to stabilize
+ * `flush` + Patch #3 — `flushAsync()` for the Concluir handler.
  */
 
 const DEFAULT_DEBOUNCE_MS = 250;
@@ -23,9 +26,17 @@ export interface UseDebouncedConfigureBiomarkersOptions {
   onError?: () => void;
 }
 
+export interface UseDebouncedConfigureBiomarkersResult {
+  scope: Map<string, boolean>;
+  toggle: (category: string, next: boolean) => void;
+  flushPending: () => void;
+  flushAsync: () => Promise<void>;
+  isPending: boolean;
+}
+
 export function useDebouncedConfigureBiomarkers(
   options: UseDebouncedConfigureBiomarkersOptions,
-) {
+): UseDebouncedConfigureBiomarkersResult {
   const trpc = useTRPC();
   const debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS;
 
@@ -36,6 +47,13 @@ export function useDebouncedConfigureBiomarkers(
     return m;
   });
 
+  const shareTokenIdRef = useRef(options.shareTokenId);
+  const onErrorRef = useRef(options.onError);
+  useEffect(() => {
+    shareTokenIdRef.current = options.shareTokenId;
+    onErrorRef.current = options.onError;
+  }, [options.shareTokenId, options.onError]);
+
   const pendingRef = useRef<Map<string, boolean>>(new Map());
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -43,7 +61,12 @@ export function useDebouncedConfigureBiomarkers(
     trpc.sharing.configureBiomarkers.mutationOptions(),
   );
 
-  const flush = useCallback(() => {
+  const mutateAsyncRef = useRef(mutation.mutateAsync);
+  useEffect(() => {
+    mutateAsyncRef.current = mutation.mutateAsync;
+  }, [mutation.mutateAsync]);
+
+  const flushAsync = useCallback(async (): Promise<void> => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
@@ -53,21 +76,24 @@ export function useDebouncedConfigureBiomarkers(
       ([biomarkerCategory, visible]) => ({ biomarkerCategory, visible }),
     );
     pendingRef.current = new Map();
-    mutation.mutate(
-      { shareTokenId: options.shareTokenId, scope: batch },
-      {
-        onError: () => {
-          setScope((prev) => {
-            const next = new Map(prev);
-            for (const row of batch)
-              next.set(row.biomarkerCategory, !row.visible);
-            return next;
-          });
-          options.onError?.();
-        },
-      },
-    );
-  }, [mutation, options]);
+    try {
+      await mutateAsyncRef.current({
+        shareTokenId: shareTokenIdRef.current,
+        scope: batch,
+      });
+    } catch {
+      setScope((prev) => {
+        const next = new Map(prev);
+        for (const row of batch) next.set(row.biomarkerCategory, !row.visible);
+        return next;
+      });
+      onErrorRef.current?.();
+    }
+  }, []);
+
+  const flush = useCallback(() => {
+    void flushAsync();
+  }, [flushAsync]);
 
   const toggle = useCallback(
     (category: string, next: boolean) => {
@@ -89,10 +115,23 @@ export function useDebouncedConfigureBiomarkers(
         clearTimeout(timerRef.current);
         timerRef.current = null;
       }
-      if (pendingRef.current.size > 0) flush();
+      if (pendingRef.current.size > 0) {
+        flushAsync().catch((err: unknown) => {
+          console.warn(
+            "[useDebouncedConfigureBiomarkers] unmount-flush failed",
+            err,
+          );
+        });
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return { scope, toggle, flushPending: flush, isPending: mutation.isPending };
+  return {
+    scope,
+    toggle,
+    flushPending: flush,
+    flushAsync,
+    isPending: mutation.isPending,
+  };
 }

@@ -16,9 +16,18 @@ import { trpc } from "~/utils/api";
  *   - On failure, only the rows that were in the failed batch are
  *     reverted on the local map; a caller-provided `onError`
  *     callback can surface the Toast.
+ *   - `flushAsync()` returns a Promise that resolves when the
+ *     in-flight mutation settles — used by the "Concluir" handler
+ *     so navigation doesn't preempt the Toast / revert path
+ *     (review 2026-05-26 Patch #3).
  *
  * Server is source-of-truth — the hook does NOT refetch on success;
  * the parent screen's `getDraftConfig` query is the read path.
+ *
+ * Review 2026-05-26 Patch #9 — `options.onError` and
+ * `options.shareTokenId` are routed through refs so `flush` does
+ * not re-create on every parent render (the previous shape made
+ * `useCallback`'s dependency on `options` a no-op stability claim).
  */
 
 const DEFAULT_DEBOUNCE_MS = 250;
@@ -35,6 +44,7 @@ export interface UseDebouncedConfigureBiomarkersResult {
   scope: Map<string, boolean>;
   toggle: (category: string, next: boolean) => void;
   flushPending: () => void;
+  flushAsync: () => Promise<void>;
   isPending: boolean;
 }
 
@@ -50,6 +60,16 @@ export function useDebouncedConfigureBiomarkers(
     return m;
   });
 
+  // Patch #9 — stable refs for the parts of `options` that the
+  // `flush` closure needs. Updated via `useEffect` so the closure
+  // always reads the latest values without re-creating.
+  const shareTokenIdRef = useRef(options.shareTokenId);
+  const onErrorRef = useRef(options.onError);
+  useEffect(() => {
+    shareTokenIdRef.current = options.shareTokenId;
+    onErrorRef.current = options.onError;
+  }, [options.shareTokenId, options.onError]);
+
   const pendingRef = useRef<Map<string, boolean>>(new Map());
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -57,7 +77,13 @@ export function useDebouncedConfigureBiomarkers(
     trpc.sharing.configureBiomarkers.mutationOptions(),
   );
 
-  const flush = useCallback(() => {
+  // Stable ref to the mutation so `flush`/`flushAsync` don't re-create.
+  const mutateAsyncRef = useRef(mutation.mutateAsync);
+  useEffect(() => {
+    mutateAsyncRef.current = mutation.mutateAsync;
+  }, [mutation.mutateAsync]);
+
+  const flushAsync = useCallback(async (): Promise<void> => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
@@ -67,28 +93,28 @@ export function useDebouncedConfigureBiomarkers(
     const batch = Array.from(pendingRef.current.entries()).map(
       ([biomarkerCategory, visible]) => ({ biomarkerCategory, visible }),
     );
-    // Snapshot the batch BEFORE clearing — revert needs the original
-    // visibility-before-toggle, but the simpler safe shape is to
-    // revert by flipping the visibility we just sent. Failure-revert
-    // policy per T4.6: revert local map for the failed rows only.
     pendingRef.current = new Map();
 
-    mutation.mutate(
-      { shareTokenId: options.shareTokenId, scope: batch },
-      {
-        onError: () => {
-          setScope((prev) => {
-            const next = new Map(prev);
-            for (const row of batch) {
-              next.set(row.biomarkerCategory, !row.visible);
-            }
-            return next;
-          });
-          options.onError?.();
-        },
-      },
-    );
-  }, [mutation, options]);
+    try {
+      await mutateAsyncRef.current({
+        shareTokenId: shareTokenIdRef.current,
+        scope: batch,
+      });
+    } catch {
+      setScope((prev) => {
+        const next = new Map(prev);
+        for (const row of batch) {
+          next.set(row.biomarkerCategory, !row.visible);
+        }
+        return next;
+      });
+      onErrorRef.current?.();
+    }
+  }, []);
+
+  const flush = useCallback(() => {
+    void flushAsync();
+  }, [flushAsync]);
 
   const toggle = useCallback(
     (category: string, next: boolean) => {
@@ -105,15 +131,22 @@ export function useDebouncedConfigureBiomarkers(
   );
 
   // Drain pending on unmount so a quick "Concluir" tap doesn't lose
-  // the final toggle.
+  // the final toggle. No parent Toast is available at unmount time;
+  // log a warning so the failure isn't silent (Patch #9 fallback).
   useEffect(() => {
     return () => {
       if (timerRef.current) {
         clearTimeout(timerRef.current);
         timerRef.current = null;
       }
-      // Best-effort flush on unmount (fire-and-forget mutation).
-      if (pendingRef.current.size > 0) flush();
+      if (pendingRef.current.size > 0) {
+        flushAsync().catch((err: unknown) => {
+          console.warn(
+            "[useDebouncedConfigureBiomarkers] unmount-flush failed",
+            err,
+          );
+        });
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -122,6 +155,7 @@ export function useDebouncedConfigureBiomarkers(
     scope,
     toggle,
     flushPending: flush,
+    flushAsync,
     isPending: mutation.isPending,
   };
 }
