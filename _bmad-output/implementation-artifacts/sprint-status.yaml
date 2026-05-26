@@ -36,6 +36,21 @@
 
 generated: 2026-05-15
 last_updated: 2026-05-26
+# Story 5.3 spec created → ready-for-dev. Stacks on 5.1 + 5.2 / PR #56.
+# Read-only Access Log surface. ADR: displayName-only (no raw email);
+# all share-related event kinds in scope; access_log is a logical view
+# onto audit_log (no new table). RLS extension on custom_rls_audit_log
+# .sql: patient sees rows where they are actor OR where resource_id
+# points at one of their share_tokens (closes the doctor-actor-row
+# blind spot). NEW protectedProcedure sharingRouter.listAccessLog
+# (cursor pagination with (created_at, id) tuple compare for same-ms
+# stability; event-kind allowlist filter; inline premium check returns
+# upgradeRequired:true rather than throwing). NEW AccessLogItem +
+# AccessLogList components in @healthtracker/ui (compact/expanded
+# variants, 4 token-status badges incl. sem prazo, no red tokens).
+# NEW formatRelativeTimePtBr + formatAbsolutePtBr helpers in
+# @healthtracker/validators. Acessos tab wired Expo + web (4th tab
+# per UX-DR11). 4 new RLS test cases on audit_log.
 # Story 5.2 implementation + R1 review complete → review. PR #56 (stacked).
 # Headline R1 fixes: (a) CRITICAL configureBiomarkers SELECT FOR UPDATE
 # now handles nullable expires_at — previously silently rejected every
@@ -380,7 +395,7 @@ development_status:
   epic-5: in-progress
   5-1-patient-configures-per-biomarker-sharing-with-a-named-doctor: review
   5-2-patient-generates-a-time-limited-sharing-link-with-duration-selection: review
-  5-3-patient-views-the-access-log: backlog
+  5-3-patient-views-the-access-log: ready-for-dev
   5-4-patient-revokes-a-doctors-access-to-their-record: backlog
   5-5-patient-exports-their-complete-health-record-as-json-or-pdf: backlog
   5-6-patient-permanently-deletes-their-account-and-all-data: backlog
