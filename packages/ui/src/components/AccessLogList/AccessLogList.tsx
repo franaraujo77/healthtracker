@@ -38,10 +38,17 @@ import { AccessLogItem } from "../AccessLogItem";
  * MVP page size (20).
  *
  * AC2 — `conversation_starter.queued` / `generated` are suppressed
- * from the visible list (collapsed by default per the spec); they
- * still arrive in `data` from the resolver so the renderer can
- * filter centrally via `ACCESS_LOG_SUPPRESSED_KINDS`.
+ * entirely from the patient-facing list; surface only via an explicit
+ * `?showSystem=1` query param if needed for debugging (deferred —
+ * Story 5.x). They still arrive in `data` from the resolver so the
+ * renderer can filter centrally via `ACCESS_LOG_SUPPRESSED_KINDS`.
  */
+interface RawBiomarker {
+  category: string;
+  label?: string;
+  visible?: boolean;
+}
+
 export interface AccessLogListProps {
   data: AccessLogItemRow[];
   isLoading: boolean;
@@ -132,18 +139,22 @@ export function AccessLogList(props: AccessLogListProps): React.ReactElement {
           typeof meta.duration === "string"
             ? (meta.duration as ShareDuration)
             : undefined;
+        // Patch #6 (2026-05-26) — historical rows may carry malformed
+        // entries (null, primitives, objects without `category`); filter
+        // before the map so the renderer never crashes.
         const biomarkerCategories = Array.isArray(meta.biomarkerCategories)
-          ? (
-              meta.biomarkerCategories as {
-                category: string;
-                label?: string;
-                visible: boolean;
-              }[]
-            ).map((b) => ({
-              category: b.category,
-              label: b.label ?? b.category,
-              visible: b.visible,
-            }))
+          ? (meta.biomarkerCategories as unknown[])
+              .filter(
+                (b): b is RawBiomarker =>
+                  b !== null &&
+                  typeof b === "object" &&
+                  typeof (b as { category?: unknown }).category === "string",
+              )
+              .map((b) => ({
+                category: b.category,
+                label: b.label ?? b.category,
+                visible: b.visible === true,
+              }))
           : undefined;
         return (
           <AccessLogItem

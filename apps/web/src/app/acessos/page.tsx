@@ -1,11 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import type { AccessLogItemRow } from "@healthtracker/validators";
 import { AccessLogList } from "@healthtracker/ui";
-import { ACCESS_LOG_TITLE_PT_BR } from "@healthtracker/validators";
+import {
+  ACCESS_LOG_REFETCH_THROTTLE_MS,
+  ACCESS_LOG_TITLE_PT_BR,
+} from "@healthtracker/validators";
 
 import { useTRPC } from "~/trpc/react";
 
@@ -24,8 +27,11 @@ import { useTRPC } from "~/trpc/react";
  */
 export default function AcessosPage(): React.ReactElement {
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   const [priorPages, setPriorPages] = useState<AccessLogItemRow[]>([]);
+  // null sentinel = "never refetched yet"; first visibility-change refetches.
+  const lastRefetchAt = useRef<number | null>(null);
 
   const query = useQuery({
     ...trpc.sharing.listAccessLog.queryOptions({ cursor, pageSize: 20 }),
@@ -33,22 +39,39 @@ export default function AcessosPage(): React.ReactElement {
   });
 
   const accumulated = useMemo<AccessLogItemRow[]>(() => {
+    // Patch #4 (2026-05-26) — gate prior pages behind `upgradeRequired`
+    // to avoid stranded rows under the upgrade prompt. The setState-in-
+    // effect alternative is blocked by react-hooks lint.
+    if (query.data?.upgradeRequired) return [];
     const liveItems = query.data?.items ?? [];
     if (priorPages.length === 0) return liveItems;
     const seen = new Set(priorPages.map((r) => r.id));
     return [...priorPages, ...liveItems.filter((r) => !seen.has(r.id))];
   }, [priorPages, query.data]);
 
+  // Review-fix Patch #1 — invalidate the whole `listAccessLog` query
+  // key instead of calling `query.refetch()` on the old cursor's
+  // observer (which would race the `setCursor(undefined)` state
+  // update).
   const refetch = useCallback(() => {
     setCursor(undefined);
     setPriorPages([]);
-    void query.refetch();
-  }, [query]);
+    lastRefetchAt.current = Date.now();
+    void queryClient.invalidateQueries({
+      queryKey: trpc.sharing.listAccessLog.queryKey(),
+    });
+  }, [queryClient, trpc.sharing.listAccessLog]);
 
-  // AC10 — refetch on tab visibility change.
+  // AC10 — refetch on tab visibility change, throttled (Review
+  // decision A): only refresh if last refetch was more than
+  // ACCESS_LOG_REFETCH_THROTTLE_MS ago.
   useEffect(() => {
     const handler = () => {
-      if (document.visibilityState === "visible") refetch();
+      if (document.visibilityState !== "visible") return;
+      const last = lastRefetchAt.current;
+      if (last === null || Date.now() - last > ACCESS_LOG_REFETCH_THROTTLE_MS) {
+        refetch();
+      }
     };
     document.addEventListener("visibilitychange", handler);
     return () => document.removeEventListener("visibilitychange", handler);

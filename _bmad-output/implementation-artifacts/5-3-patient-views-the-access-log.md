@@ -1,6 +1,6 @@
 # Story 5.3: Patient views the Access Log
 
-Status: ready-for-dev
+Status: review
 
 > **Stacked on Stories 5.1 + 5.2 / PR #56.** Read-only surface that lights up the audit trail Stories 5.1 + 5.2 have been writing. No new mutating procedures. Adds: `sharingRouter.listAccessLog` (paginated query), an RLS extension on the existing `audit_log` table so a patient sees rows whose `resource_id` points at one of their share_tokens (not just rows where they're the actor), `AccessLogItem` component (compact + expanded states), and the Acessos tab.
 >
@@ -28,8 +28,8 @@ Status: ready-for-dev
      - `pending_invite.created` → `"Você adicionou {displayName}."`
      - `share_token.created` → `"Você criou um compartilhamento com {displayName} por {duração}."`
      - `sharing.configured` → `"Você atualizou as visibilidades para {displayName} ({N} alterações)."`
-     - `conversation_starter.queued` → `"Sumário pré-gerado para {displayName}."` (suppress from the visible list by default — see AC3; surface only on expanded view)
-     - `conversation_starter.generated` → same — collapsed by default
+     - `conversation_starter.queued` → `"Sumário pré-gerado para {displayName}."` (suppressed from the patient-facing list)
+     - `conversation_starter.generated` → same — suppressed from the patient-facing list
      - `conversation_starter.failed` → `"Não foi possível pré-gerar o sumário para {displayName}."` (visible — surface failures)
      - `share_token.revoked` (Story 5.4) → `"Você revogou o acesso de {displayName}."`
      - `share_token.read` (Epic 6) → `"{displayName} visualizou seus dados."`
@@ -264,6 +264,82 @@ No structural conflicts.
 
 Claude Opus 4.7 — dev agent (2026-05-26 implementation pass).
 
+### Review fixes applied (2026-05-26)
+
+Applied the 10 "Patch (apply before merge)" items plus the resolved
+decision A (throttled tab-focus refetch) from the Review Findings
+section.
+
+- **Decision A + Patch #1 (refetch).** Added
+  `ACCESS_LOG_REFETCH_THROTTLE_MS = 30_000` to
+  `packages/validators/src/sharing.ts`. Both `apps/expo/.../acessos/index.tsx`
+  and `apps/web/src/app/acessos/page.tsx` now track `lastRefetchAt`
+  in a `useRef`; the focus / visibilitychange handlers no-op if the
+  last refetch was within 30s. The redundant `query.refetch()` race
+  is fixed by switching the refetch path to
+  `queryClient.invalidateQueries({ queryKey: trpc.sharing.listAccessLog.queryKey() })`,
+  matching the established tRPC v11 pattern used by the consent and
+  uploads screens.
+- **Patch #2 — dead `conversation_starter_cache` resource_type.** Removed
+  the branch from both `packages/db/policies/custom_rls_audit_log.sql`
+  (the OR clause + docstring) and `packages/api/src/router/sharing.ts`
+  (the LEFT JOIN predicate, the `tokenStatus` derivation, and the
+  `shareTokenId` derivation).
+- **Patch #3 — `hasJoinedToken` from `st.id IS NOT NULL`.** Added
+  `st.id AS st_id` to the SELECT projection; the resolver derives
+  `hasJoinedToken` from `r.st_id !== null` and drops the
+  resource_type heuristic.
+- **Patch #4 — `upgradeRequired` race.** Both Acessos screens now
+  carry a `useEffect` that clears `priorPages` when
+  `query.data?.upgradeRequired` flips true.
+- **Patch #5 — empty/whitespace `displayName`.** Resolver trims
+  joined display-name + falls back to null when empty;
+  `AccessLogItem` uses `displayName?.trim() || ACCESS_LOG_SELF_DISPLAY_NAME_PT_BR`.
+  Reused the existing `ACCESS_LOG_SELF_DISPLAY_NAME_PT_BR = "Você"`
+  constant instead of adding a duplicate.
+- **Patch #6 — biomarkerCategories validation.** `AccessLogList`
+  filters non-object / missing-`category` entries before mapping;
+  the explicit `as` cast is gone.
+- **Patch #7 — suppressed-kind docblocks vs code coherence.** Updated
+  the docblocks on `AccessLogList`, `AccessLogItem`, and the
+  `ACCESS_LOG_SUPPRESSED_KINDS` constant in validators to say
+  "suppressed entirely … surface only via `?showSystem=1` if needed
+  for debugging (deferred — Story 5.x)". Spec AC2 lines updated to
+  match.
+- **Patch #8 — RLS test fixtures.** Added a `seedUser` helper in
+  `packages/db/__tests__/rls/audit_log.rls.test.ts` and pre-seeded
+  the `users` rows for the three Story 5.3 share-token cases.
+  `share_tokens.patient_id` FK references `public.users(id)`. The
+  pre-existing `share_tokens.rls.test.ts` doesn't seed `users` and
+  appears to pass — but defensive seeding is cheap and prevents
+  23503 ambiguity. Runtime verification requires Docker / `supabase start`.
+- **Patch #9 — `(0 alterações)` copy.** Updated
+  `ACCESS_LOG_EVENT_LABEL_PT_BR_FN("sharing.configured", …)` to
+  render `"Você revisou as visibilidades para {displayName}."` when
+  the change count is 0. Added two unit cases to
+  `packages/api/__tests__/sharing/access-log-pagination.test.ts`.
+- **Patch #10 — shared hex cross-reference.** Added an inline comment
+  above `shareToggleOn` and `accessLogActive` in
+  `packages/ui/src/theme/tokens.ts`.
+
+#### Judgment calls
+
+- **Patch #1** — picked `queryClient.invalidateQueries(...)` over
+  "drop the explicit refetch and rely on cursor-change auto-fetch"
+  because the cursor is already `undefined` on the initial page; the
+  cursor-change path doesn't fire when refetching the first page.
+  Invalidation matches the consent / uploads screens' precedent.
+- **Patch #4** — used a dedicated `useEffect` reacting to
+  `upgradeRequired` rather than folding into the existing reset path.
+  Folding into `refetch` would conflate the manual-refresh path with
+  the resolver-driven state flip; the effect makes the data-flow
+  read cleanly.
+- **Patch #8** — chose to seed `users` rows defensively for the new
+  cases, even though the pre-existing `share_tokens.rls.test.ts`
+  doesn't, because the patch instruction asked for safety. No
+  changes to the pre-existing tests (out-of-scope per behavioral
+  guideline #3 "surgical changes").
+
 ### Debug Log References
 
 - `pnpm typecheck` — 17/17 successful (cold + warm cache).
@@ -407,6 +483,37 @@ added in a later docs sweep without blocking the story.
   spec deferred. Cursor + token-status + allowlist coverage in the
   synchronous unit test is sufficient gating for this dev loop; CI
   will run the integration test when authored.
+
+### Review Findings (2026-05-26)
+
+Three-layer adversarial review (Blind Hunter + Edge Case Hunter + Acceptance Auditor). One CRITICAL turned out to be safe after verification (F18 RLS bypass — `protectedProcedure` wraps the tx + `set_config('app.current_patient_id', …)` at `packages/api/src/trpc.ts:76-92`; RLS is enforced).
+
+#### Decision-needed
+
+- [ ] [Review][Decision] **Tab-focus refetch behavior** — Today: `useFocusEffect` (Expo) / `visibilitychange` (web) → `setCursor(undefined); setPriorPages([]); query.refetch()`. A patient scrolled to page 3, backgrounds the app to grab an OTP, returns — accumulated pages 1+2+3 wiped to page 1, no scroll restore. AC10 says "refetch on focus" — ambiguous between "refresh first page" and "revalidate cached pages in place". Options: (a) keep current "reset + refetch first page"; (b) revalidate-in-place (refetch each loaded cursor, preserve scroll); (c) refetch only if last refetch was > 30s ago (avoid wiping on quick tab switches).
+
+#### Patch (apply before merge)
+
+- [ ] [Review][Patch] **HIGH — Redundant `query.refetch()` after `setCursor(undefined)` races state** — `apps/expo/.../acessos/index.tsx:47-51`, web `:39-43`. State update is async; `query.refetch()` runs on the OLD cursor's observer (about to unmount). Drop the manual refetch and let the cursor change drive the fetch; or use `queryClient.invalidateQueries({ queryKey: [...] })` if you want to flush both pages.
+- [ ] [Review][Patch] **MEDIUM — Dead `conversation_starter_cache` resource_type branch** — `packages/db/policies/custom_rls_audit_log.sql:1149` + `packages/api/src/router/sharing.ts:743`. Verified: BOTH `conversation_starter.queued/generated/failed` emitters in `packages/api/src/router/sharing.ts:381` and `services/llm/src/consumers/generate-conversation-starter.ts:181,205` write `resource_type='share_token'`. No production code writes `'conversation_starter_cache'`. Remove the branch from the RLS OR clause and the resolver `LEFT JOIN ... ON resource_type IN (...)` to match reality. Update the policy docstring.
+- [ ] [Review][Patch] **MEDIUM — `hasJoinedToken` false-positive when share_token row is deleted/missing** — `packages/api/src/router/sharing.ts:770-773`. Fallback `r.resource_type === "share_token"` always synthesizes `tokenStatus="sem prazo"` for a `share_token`-typed audit row even when the LEFT JOIN returned NULL (e.g. token hard-deleted). Patient sees a misleading "Sem prazo" badge. Fix: derive from `r.st_id !== null` (add `st.id AS st_id` to the SELECT) instead of resource_type heuristic. Simplifies the redundancy too (the double-gate against `tokenStatus` becomes a single check).
+- [ ] [Review][Patch] **MEDIUM — `upgradeRequired` race during pagination silently strands rows** — `apps/expo/.../acessos/index.tsx:69-81`, web `:60-72`, `AccessLogList.tsx:79-84`. If page 1 returns `upgradeRequired:false, items:[20]` and page 2 returns `upgradeRequired:true, items:[]` (subscription downgrade mid-scroll), the upgrade prompt replaces the list but `priorPages` still holds 20 invisible rows. Fix: when `upgradeRequired` flips true, clear `priorPages` in the same render (`useEffect` reacting to the flip, or fold into the existing reset path).
+- [ ] [Review][Patch] **MEDIUM — Empty/whitespace `displayName` renders empty header** — `packages/ui/src/components/AccessLogItem/AccessLogItem.tsx:88-89`, `packages/api/src/router/sharing.ts:783-784`. `displayName ?? "Você"` only catches null/undefined; `""` and `"   "` produce `"Você adicionou ."` and a blank header. Use `displayName?.trim() || "Você"`. Also consider Zod-refining on the `createPendingInvite` boundary (already `.min(1).trim()` per Story 5.1 — confirm historical rows are clean).
+- [ ] [Review][Patch] **MEDIUM — Unvalidated `metadata.biomarkerCategories` array shape** — `AccessLogList.tsx:99-115`, `packages/validators/src/sharing.ts:328`. Historical `sharing.configured` rows could carry `[null, {}, "string"]`; the `.map(b => ({ category: b.category, label: b.label ?? b.category, visible: b.visible }))` crashes when `b` is null. Add `.filter(b => b && typeof b === "object" && typeof b.category === "string")` before the map.
+- [ ] [Review][Patch] **MEDIUM — Suppressed-kind docblock contradicts code** — `AccessLogList.tsx:1459-1461`, `AccessLogItem.tsx:1199-1201`, spec line 71-76. Docblocks claim `conversation_starter.queued/generated` are "visible on expand" but the list-level `ACCESS_LOG_SUPPRESSED_KINDS.has(...)` filter removes them entirely before any item renders. Either remove the docblock claim OR wire a "Mostrar eventos do sistema" toggle on the list that shows them. Pick one — current state is incoherent.
+- [ ] [Review][Patch] **MEDIUM — RLS test fixtures seed `share_tokens.patient_id` with `crypto.randomUUID()`** — `packages/db/__tests__/rls/audit_log.rls.test.ts:135-141` etc. If `share_tokens.patient_id` has an FK to `patients(id)`, the test INSERTs will 23503 before assertions run. Verify the testcontainer schema's FK constraint; seed a `patients` row first or remove the FK from the schema (FK from share_tokens to patients does NOT appear in `packages/db/src/schema/sharing.ts:107-108` per Story 5.1 — it's `references users(id)` which is the supabase-managed `auth.users` table; testcontainers may not have that table). May actually pass — but worth a CI run-through to confirm.
+- [ ] [Review][Patch] **LOW — "(0 alterações)" copy on empty biomarkerCategories** — `packages/validators/src/sharing.ts:407-410`. Historical rows pre-R1 may have empty arrays. Either guard `biomarkerChangeCount === 0 ? "Você revisou as visibilidades para X." : "(${N} alterações)"`, or filter zero-change rows from the resolver. Lean toward the copy guard (filter-at-resolver loses transparency).
+- [ ] [Review][Patch] **LOW — `accessLogActive` shares hex `#E0F2F1` with `shareToggleOn`** — `packages/ui/src/theme/tokens.ts:1581,1591`. Two named tokens with the same value is fine semantically but invites drift. Add a one-line comment cross-referencing each other so a future palette tweak updates both deliberately.
+
+#### Deferred (pre-existing or out-of-scope)
+
+- [x] [Review][Defer] **Cursor decoder accepts loose ISO strings** (e.g. `"123"` parses as year 0123) — cursors are server-issued; worst case is an empty page. Docblock claim "strict parse" is overstated but the runtime risk is nil.
+- [x] [Review][Defer] **`Intl.DateTimeFormat("pt-BR")` Hermes assumption** — Expo SDK 54 ships full-ICU since SDK 52; precedent in `formatConsentGrantedDate`. Feature test would be polish; risk contained.
+- [x] [Review][Defer] **AccessLogItem `accessibilityRole="button"` vs spec's `"listitem"`** — the dev chose `button` because the item is tappable to expand; screen readers announce "button, expanded" which is fine. Spec language ambiguous when items are interactive.
+- [x] [Review][Defer] **`AccessLogList` upgrade-required short-circuits before data** — Auditor flagged "Atualizar" button only renders on error not as a persistent Tier-3 affordance. Acceptable for v1; revisit in Story 5.x.
+- [x] [Review][Defer] **AC3 biomarker-config click-through deferred** — chip list inlined into expanded view; biomarcadores screen is mutate-only today, read-only mode is Story 5.4 territory.
+- [x] [Review][Defer] **T5.2 list-access-log integration test + T5.4 component snapshots + T5.5 behavior tests** — UI package has no test runner; integration needs Docker; unit tests cover the synchronous logic.
+- [x] [Review][Defer] **`docs/rls-review-checklist.md`** — file doesn't exist in repo; the policy file carries the doc comment.
 
 ### Known infra blockers (out-of-code)
 

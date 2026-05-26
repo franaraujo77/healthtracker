@@ -36,6 +36,24 @@
 
 generated: 2026-05-15
 last_updated: 2026-05-26
+# Story 5.3 implementation + R1 review complete → review. PR #56 (stacked).
+# R1 verified F18 RLS-bypass concern was safe (protectedProcedure
+# wraps tx + set_config(app.current_patient_id, ...)). Headline fixes:
+# throttled tab-focus refetch (30s; no more pagination wipe on quick
+# tab switches; named ACCESS_LOG_REFETCH_THROTTLE_MS); redundant
+# query.refetch() replaced with queryClient.invalidateQueries;
+# dead 'conversation_starter_cache' resource_type branch removed from
+# RLS + resolver (verified no production emitter writes it; all use
+# 'share_token'); hasJoinedToken derived from st.id IS NOT NULL
+# (fixes false-positive "sem prazo" badge when share_token deleted);
+# upgradeRequired flip gates accumulated:=[] (no stranded rows under
+# the prompt); displayName?.trim() || "Você" everywhere (empty-string
+# header guard); metadata.biomarkerCategories filter before map
+# (defensive against historical malformed rows); suppressed-kind
+# docblock realigned with code (no expand path; spec AC2 updated);
+# (0 alterações) copy edge case handled; RLS test fixtures seed
+# users rows before share_tokens. typecheck 17/17; lint 15/15;
+# api test:unit 212/212 (+2 copy cases).
 # Story 5.3 spec created → ready-for-dev. Stacks on 5.1 + 5.2 / PR #56.
 # Read-only Access Log surface. ADR: displayName-only (no raw email);
 # all share-related event kinds in scope; access_log is a logical view
@@ -395,7 +413,7 @@ development_status:
   epic-5: in-progress
   5-1-patient-configures-per-biomarker-sharing-with-a-named-doctor: review
   5-2-patient-generates-a-time-limited-sharing-link-with-duration-selection: review
-  5-3-patient-views-the-access-log: ready-for-dev
+  5-3-patient-views-the-access-log: review
   5-4-patient-revokes-a-doctors-access-to-their-record: backlog
   5-5-patient-exports-their-complete-health-record-as-json-or-pdf: backlog
   5-6-patient-permanently-deletes-their-account-and-all-data: backlog

@@ -37,6 +37,11 @@ import {
  * All pt-BR copy comes from `@healthtracker/validators`. Adding a new
  * event kind = update both the discriminated union there AND the
  * resolver allowlist.
+ *
+ * AC2 — `conversation_starter.queued` / `generated` are suppressed
+ * entirely from the patient-facing list (filtered upstream in
+ * `AccessLogList`); they are NOT surfaced on expand. The `failed`
+ * variant stays visible.
  */
 export interface AccessLogItemProps {
   id: string;
@@ -85,7 +90,13 @@ export function AccessLogItem(props: AccessLogItemProps): React.ReactElement {
     onPress,
   } = props;
 
-  const resolvedDisplayName = displayName ?? ACCESS_LOG_SELF_DISPLAY_NAME_PT_BR;
+  // Patch #5 (2026-05-26) — empty / whitespace `displayName` (from
+  // historical rows) must fall back to "Você", not produce
+  // "Você adicionou ." or a blank header. `||` is intentional here:
+  // `??` wouldn't catch the empty-string case after `.trim()`.
+  const trimmedName = displayName?.trim() ?? "";
+  const resolvedDisplayName =
+    trimmedName.length > 0 ? trimmedName : ACCESS_LOG_SELF_DISPLAY_NAME_PT_BR;
   const durationLabel = duration
     ? DURATION_LABEL_PT_BR_FN(duration)
     : undefined;

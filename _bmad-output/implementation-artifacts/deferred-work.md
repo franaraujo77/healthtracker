@@ -359,3 +359,13 @@
 - Web/Expo `trpcClient` pattern asymmetry — cosmetic.
 - `DurationOption.value` prop only used in testID — pre-existing convention.
 - `DURATION_LABEL_PT_BR_FN("no_expiry")` lowercase vs sentence-case in DURATION_OPTIONS — intentional for in-sentence flow.
+
+## Deferred from: code review of story-5.3 (2026-05-26)
+
+- Cursor decoder accepts loose ISO strings — server-issued; worst case is empty page.
+- Intl.DateTimeFormat pt-BR Hermes feature-test — Expo SDK 54 has full-ICU; precedent confirmed.
+- AccessLogItem accessibilityRole="button" vs spec "listitem" — dev's choice defensible (tappable).
+- AccessLogList "Atualizar" only renders on error — acceptable for v1.
+- AC3 biomarker-config click-through — needs Story 5.4's read-only mode.
+- T5.2 integration / T5.4 snapshots / T5.5 behavior tests — UI runner not wired; Docker unavailable.
+- docs/rls-review-checklist.md doesn't exist in repo — comment block in policy file documents instead.

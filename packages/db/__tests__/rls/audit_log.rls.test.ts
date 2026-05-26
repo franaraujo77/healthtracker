@@ -21,6 +21,24 @@ interface AuditRow {
 }
 
 const seededAuditIds: string[] = [];
+const seededUserIds: string[] = [];
+
+/**
+ * Story 5.3 review-fix Patch #8 (2026-05-26) — share_tokens.patient_id
+ * has an FK to public.users(id) (packages/db/src/schema/sharing.ts:105-108).
+ * The pre-existing share_tokens.rls tests seed random patient UUIDs
+ * without a corresponding `users` row; this happens to work because
+ * the FK is `ON DELETE CASCADE` and the test path never trips it on
+ * INSERT — but it's brittle. Seed the users row first defensively for
+ * the new Story 5.3 cases below.
+ */
+async function seedUser(userId: string): Promise<void> {
+  const { error } = await serviceClient.from("users").insert({ id: userId });
+  if (error && !error.message.includes("duplicate")) {
+    throw new Error(`users seed failed: ${error.message}`);
+  }
+  seededUserIds.push(userId);
+}
 
 async function seedAudit(actorId: string): Promise<string> {
   const id = crypto.randomUUID();
@@ -39,9 +57,14 @@ async function seedAudit(actorId: string): Promise<string> {
 }
 
 afterEach(async () => {
-  if (seededAuditIds.length === 0) return;
-  await serviceClient.from("audit_log").delete().in("id", seededAuditIds);
-  seededAuditIds.length = 0;
+  if (seededAuditIds.length > 0) {
+    await serviceClient.from("audit_log").delete().in("id", seededAuditIds);
+    seededAuditIds.length = 0;
+  }
+  if (seededUserIds.length > 0) {
+    await serviceClient.from("users").delete().in("id", seededUserIds);
+    seededUserIds.length = 0;
+  }
 });
 
 describe("audit_log RLS isolation (append-only)", () => {
@@ -135,6 +158,8 @@ describe("audit_log RLS isolation (append-only)", () => {
     const tokenId = crypto.randomUUID();
     const auditId = crypto.randomUUID();
 
+    await seedUser(patientId);
+
     const { error: e1 } = await serviceClient.from("pending_invites").insert({
       id: inviteId,
       patient_id: patientId,
@@ -189,6 +214,9 @@ describe("audit_log RLS isolation (append-only)", () => {
     const inviteId = crypto.randomUUID();
     const tokenId = crypto.randomUUID();
     const auditId = crypto.randomUUID();
+
+    await seedUser(patientId);
+    await seedUser(otherPatientId);
 
     await serviceClient.from("pending_invites").insert({
       id: inviteId,
@@ -245,6 +273,8 @@ describe("audit_log RLS isolation (append-only)", () => {
     const inviteId = crypto.randomUUID();
     const tokenId = crypto.randomUUID();
     const auditId = crypto.randomUUID();
+
+    await seedUser(patientId);
 
     await serviceClient.from("pending_invites").insert({
       id: inviteId,

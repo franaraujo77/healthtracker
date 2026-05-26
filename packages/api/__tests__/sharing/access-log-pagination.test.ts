@@ -174,6 +174,30 @@ describe("Access Log event label copy (Story 5.3 AC2)", () => {
     expect(many).toContain("3 alterações");
   });
 
+  // Patch #9 (2026-05-26) — `(0 alterações)` is hostile copy on
+  // historical / no-change rows. Distinct phrasing without the
+  // parenthetical when the count is zero; preserve the existing
+  // wording when count > 0.
+  it("sharing.configured: drops the parenthetical when biomarkerChangeCount is 0", () => {
+    const zero = ACCESS_LOG_EVENT_LABEL_PT_BR_FN("sharing.configured", {
+      displayName: "Dra. Renata",
+      biomarkerChangeCount: 0,
+    });
+    expect(zero).toBe("Você revisou as visibilidades para Dra. Renata.");
+    expect(zero).not.toContain("0 alterações");
+    expect(zero).not.toContain("(");
+  });
+
+  it("sharing.configured: keeps the parenthetical when biomarkerChangeCount > 0", () => {
+    const some = ACCESS_LOG_EVENT_LABEL_PT_BR_FN("sharing.configured", {
+      displayName: "Dra. Renata",
+      biomarkerChangeCount: 2,
+    });
+    expect(some).toBe(
+      "Você atualizou as visibilidades para Dra. Renata (2 alterações).",
+    );
+  });
+
   it("omits the duration clause when no durationLabel is provided", () => {
     const out = ACCESS_LOG_EVENT_LABEL_PT_BR_FN("share_token.created", {
       displayName: "Dra. Renata",

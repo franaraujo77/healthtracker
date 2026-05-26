@@ -39,6 +39,7 @@ export const colorTokens = {
   // for the "hidden" state (NEVER red — UX-DR13);
   // `shareToggleDisabledText` is a low-contrast grey for the
   // disabled "Sem dados ainda" row.
+  // shared value with `accessLogActive` — keep in sync or split intentionally.
   shareToggleOn: { light: "#E0F2F1", dark: "#134E4A" },
   shareToggleOff: { light: "#F3EFE7", dark: "#3C3836" },
   shareToggleDisabledText: { light: "#9E9E9E", dark: "#78716C" },
@@ -49,6 +50,7 @@ export const colorTokens = {
   // is INTENTIONALLY a muted warm-neutral (NEVER red — UX-DR13 line
   // 1079 reserves red for system errors only); `accessLogNeutral`
   // backs the "sem prazo" / no-token-context state.
+  // shared value with `shareToggleOn` — keep in sync or split intentionally.
   accessLogActive: { light: "#E0F2F1", dark: "#134E4A" },
   accessLogExpired: { light: "#F3EFE7", dark: "#3C3836" },
   accessLogRevoked: { light: "#EDE4DA", dark: "#4A4036" },

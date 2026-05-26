@@ -720,6 +720,7 @@ export const sharingRouter = {
         resource_type: string;
         metadata: Record<string, unknown> | null;
         created_at: Date;
+        st_id: string | null;
         st_expires_at: Date | null;
         st_revoked_at: Date | null;
         st_display_name: string | null;
@@ -734,13 +735,14 @@ export const sharingRouter = {
           al.resource_type   AS resource_type,
           al.metadata        AS metadata,
           al.created_at      AS created_at,
+          st.id              AS st_id,
           st.expires_at      AS st_expires_at,
           st.revoked_at      AS st_revoked_at,
           stpi.display_name  AS st_display_name,
           pi.display_name    AS pi_display_name
         FROM audit_log al
         LEFT JOIN share_tokens st
-          ON al.resource_type IN ('share_token', 'conversation_starter_cache')
+          ON al.resource_type = 'share_token'
          AND al.resource_id = st.id
         LEFT JOIN pending_invites stpi
           ON st.invite_id = stpi.id
@@ -765,33 +767,30 @@ export const sharingRouter = {
         const event: AccessLogEventKind = isAccessLogEventKind(r.event)
           ? r.event
           : "share_token.created";
-        const hasJoinedToken =
-          r.st_expires_at !== null || r.st_revoked_at !== null
-            ? true
-            : r.resource_type === "share_token" ||
-              r.resource_type === "conversation_starter_cache";
-        const tokenStatus: AccessLogTokenStatus | null =
-          r.resource_type === "share_token" ||
-          r.resource_type === "conversation_starter_cache"
-            ? computeAccessLogTokenStatus(r.st_expires_at, r.st_revoked_at, now)
-            : null;
+        // Patch #3 (2026-05-26) — derive `hasJoinedToken` from the
+        // joined `share_tokens.id` directly. Previously this fell
+        // back to a `resource_type === 'share_token'` heuristic that
+        // synthesized "sem prazo" for hard-deleted tokens.
+        const hasJoinedToken = r.st_id !== null;
+        const tokenStatus: AccessLogTokenStatus | null = hasJoinedToken
+          ? computeAccessLogTokenStatus(r.st_expires_at, r.st_revoked_at, now)
+          : null;
         // `display_name` resolution: share-token-scoped rows pull
         // from the joined pending_invite; pending_invite.created rows
-        // pull from their own resource row. Null falls through to
-        // the renderer's "Você" fallback for patient-self events.
+        // pull from their own resource row. Patch #5 — trim and fall
+        // back when the stored value is empty / whitespace.
+        const joined = r.st_display_name ?? r.pi_display_name ?? null;
+        const trimmedDn = joined?.trim() ?? "";
         const displayName: string | null =
-          r.st_display_name ?? r.pi_display_name ?? null;
+          trimmedDn.length > 0 ? trimmedDn : null;
         return {
           id: r.id,
           event,
           createdAt: r.created_at,
           displayName,
           shareTokenId:
-            r.resource_type === "share_token" ||
-            r.resource_type === "conversation_starter_cache"
-              ? r.resource_id
-              : null,
-          tokenStatus: hasJoinedToken ? tokenStatus : null,
+            r.resource_type === "share_token" ? r.resource_id : null,
+          tokenStatus,
           metadata: r.metadata ?? {},
         } satisfies AccessLogItemRow;
       });

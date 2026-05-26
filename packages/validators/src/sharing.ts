@@ -415,6 +415,11 @@ export function ACCESS_LOG_EVENT_LABEL_PT_BR_FN(
         : `Você criou um compartilhamento com ${displayName}.`;
     case "sharing.configured": {
       const n = biomarkerChangeCount ?? 0;
+      // Patch #9 (2026-05-26) — historical / no-change rows render
+      // without the parenthetical (no "(0 alterações)" noise).
+      if (n === 0) {
+        return `Você revisou as visibilidades para ${displayName}.`;
+      }
       const noun = n === 1 ? "alteração" : "alterações";
       return `Você atualizou as visibilidades para ${displayName} (${n} ${noun}).`;
     }
@@ -433,14 +438,28 @@ export function ACCESS_LOG_EVENT_LABEL_PT_BR_FN(
 
 /**
  * AC2 — the conversation-starter `queued` / `generated` events are
- * collapsed from the visible list by default (preventing per-share
- * noise). The component layer surfaces them only inside the expanded
- * view; the `failed` variant stays visible. Centralizing here keeps
- * the resolver simple (it returns every allowlisted row; the renderer
- * hides the suppressed kinds).
+ * suppressed entirely from the patient-facing list (preventing
+ * per-share noise); they are NOT surfaced on expand either. The
+ * `failed` variant stays visible. Future debug surfacing can be
+ * wired behind an explicit `?showSystem=1` query param (deferred —
+ * Story 5.x). Centralizing here keeps the resolver simple (it
+ * returns every allowlisted row; the renderer hides the suppressed
+ * kinds).
  */
 export const ACCESS_LOG_SUPPRESSED_KINDS: ReadonlySet<AccessLogEventKind> =
   new Set(["conversation_starter.queued", "conversation_starter.generated"]);
 
 // Acessos route (web parity).
 export const ACCESS_LOG_ROUTE = "/acessos";
+
+/**
+ * Story 5.3 review-fix (2026-05-26) — throttle for the tab-focus
+ * refetch path on both Expo (`useFocusEffect`) and web
+ * (`visibilitychange`). The "pull-to-refresh" path stays unthrottled.
+ *
+ * Rationale: quick tab switches (Acessos → Inicio → Acessos within a
+ * few seconds) used to wipe `priorPages` and rewind to page 1.
+ * Threshold of 30s preserves AC10's "refresh on focus" while avoiding
+ * the scroll-state loss on transient backgrounds.
+ */
+export const ACCESS_LOG_REFETCH_THROTTLE_MS = 30_000;
