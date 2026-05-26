@@ -36,6 +36,23 @@
 
 generated: 2026-05-15
 last_updated: 2026-05-26
+# Story 5.2 spec created → ready-for-dev. Stacks on Story 5.1 / PR #56
+# per user's stacked-PR convention. Lands the real duration picker
+# (replacing Story 5.1's auto-fire placeholder), "Sem prazo" extra-
+# confirmation modal, and the load-bearing Conversation Starter
+# pre-gen pipeline. ADR resolutions locked: share_tokens.expires_at
+# becomes nullable (NULL = no expiry; RLS predicate updated to
+# `IS NULL OR > now()`); NEW conversation_starter_cache table
+# (patient_id, share_token_id, status, payload jsonb, expires_at)
+# with patient + doctor RLS principals; NEW pg-boss queue
+# conversation_starter.generate hosted in services/llm; stub LLMAdapter
+# method returns canned payload until Epic 6 prompt + DPA land.
+# Three NEW audit kinds: conversation_starter.queued / generated /
+# failed. createShareToken extended to require duration: '24h'|'7d'|'30d'
+# |'no_expiry' (no server default — screen owns "7d" pre-select).
+# NEW sharingRouter.getShareUrl procedure (HMAC URL composition kept
+# server-side). NEW components: DurationOption + NoExpiryConfirmDialog.
+# Story 5.1 R1 fix-up complete → review. PR #56 open.
 # Story 5.1 implementation + R1 review complete → review. PR #56 open.
 # Round-1 adversarial review (Blind Hunter + Edge Case Hunter +
 # Acceptance Auditor) found and patched 20 issues. Headline fixes:
@@ -345,7 +362,7 @@ development_status:
   # Epic 5: Patient Controls Who Sees Their Health Data
   epic-5: in-progress
   5-1-patient-configures-per-biomarker-sharing-with-a-named-doctor: review
-  5-2-patient-generates-a-time-limited-sharing-link-with-duration-selection: backlog
+  5-2-patient-generates-a-time-limited-sharing-link-with-duration-selection: ready-for-dev
   5-3-patient-views-the-access-log: backlog
   5-4-patient-revokes-a-doctors-access-to-their-record: backlog
   5-5-patient-exports-their-complete-health-record-as-json-or-pdf: backlog
