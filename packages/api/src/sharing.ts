@@ -5,6 +5,7 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 
+import type { AccessLogTokenStatus } from "@healthtracker/validators";
 import { and, eq, isNull, sql } from "@healthtracker/db";
 import { Observations } from "@healthtracker/db/schema";
 
@@ -210,4 +211,84 @@ export async function getDistinctCategoriesForPatient(
         r.label.length > 0,
     )
     .map((r) => ({ category: r.category, label: r.label }));
+}
+
+// ---------------------------------------------------------------------------
+// Story 5.3 — Access Log helpers (pure; unit-tested without a DB).
+// ---------------------------------------------------------------------------
+
+/**
+ * AC12 — `{iso-timestamp}|{audit_log.id uuid}` cursor encoder. Pure
+ * string concat so the format is stable and inspectable in
+ * round-trip tests.
+ */
+export function encodeAccessLogCursor(createdAt: Date, id: string): string {
+  return `${createdAt.toISOString()}|${id}`;
+}
+
+/**
+ * AC12 — counterpart decoder. Returns `null` for any input that
+ * doesn't match the `iso|uuid` shape so a malicious client sending a
+ * forged cursor falls through to "start from newest" rather than
+ * blowing up. The strict parse guards against:
+ *   - missing pipe (legacy ISO-only cursors)
+ *   - empty parts
+ *   - timestamps Date parses as NaN
+ */
+export function decodeAccessLogCursor(
+  cursor: string | undefined,
+): { createdAt: Date; id: string } | null {
+  if (!cursor) return null;
+  const pipeIdx = cursor.indexOf("|");
+  if (pipeIdx <= 0 || pipeIdx === cursor.length - 1) return null;
+  const tsRaw = cursor.slice(0, pipeIdx);
+  const idRaw = cursor.slice(pipeIdx + 1);
+  const ts = new Date(tsRaw);
+  if (Number.isNaN(ts.getTime())) return null;
+  // RFC 4122 UUID shape — same loose regex Zod's `z.uuid()` accepts.
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      idRaw,
+    )
+  ) {
+    return null;
+  }
+  return { createdAt: ts, id: idRaw };
+}
+
+/**
+ * AC4 — compose `tokenStatus` from `expires_at` + `revoked_at` +
+ * `now()`. Returns `null` when the audit row has no joined
+ * share_token (e.g. `pending_invite.created`).
+ *
+ * Precedence (mirrors Story 5.2 / 5.4 RLS semantics):
+ *   1. `revoked_at IS NOT NULL` → "revogado"
+ *   2. `expires_at IS NULL`     → "sem prazo"
+ *   3. `expires_at <= now`      → "expirado"
+ *   4. otherwise                → "ativo"
+ */
+export function computeAccessLogTokenStatus(
+  expiresAt: Date | null,
+  revokedAt: Date | null,
+  now: Date = new Date(),
+): AccessLogTokenStatus | null {
+  if (revokedAt) return "revogado";
+  if (expiresAt === null) return "sem prazo";
+  if (expiresAt.getTime() <= now.getTime()) return "expirado";
+  return "ativo";
+}
+
+/**
+ * AC4 — `tokenStatus` for a row that has no joined share_token
+ * (e.g. `pending_invite.created` with `resource_type = 'pending_invite'`).
+ * Wraps `computeAccessLogTokenStatus` plus the no-token sentinel.
+ */
+export function resolveAccessLogTokenStatus(args: {
+  hasJoinedToken: boolean;
+  expiresAt: Date | null;
+  revokedAt: Date | null;
+  now?: Date;
+}): AccessLogTokenStatus | null {
+  if (!args.hasJoinedToken) return null;
+  return computeAccessLogTokenStatus(args.expiresAt, args.revokedAt, args.now);
 }

@@ -262,13 +262,151 @@ No structural conflicts.
 
 ### Agent Model Used
 
-_To be filled by dev agent._
+Claude Opus 4.7 — dev agent (2026-05-26 implementation pass).
 
 ### Debug Log References
 
+- `pnpm typecheck` — 17/17 successful (cold + warm cache).
+- `pnpm lint` — 15/15 successful after fixing
+  `react-hooks/set-state-in-effect` (refactored Acessos screens to a
+  `useMemo`-based accumulator with explicit page snapshotting on
+  "Carregar mais" — see screens) and two minor TS-lint nits
+  (`@typescript-eslint/no-unnecessary-type-assertion`,
+  `import/consistent-type-specifier-style`).
+- `pnpm --filter @healthtracker/api test:unit` — 210/210 passing
+  (count went up from 186 → 210 with the two new Story 5.3 suites:
+  `access-log-pagination.test.ts` + `access-log-dates.test.ts`).
+- DB integration + RLS suites authored; not runnable in this dev
+  loop (Docker / supabase-start not available). CI gates them.
+
 ### Completion Notes List
 
+**Judgement calls (per spec "Open judgment calls"):**
+
+1. **Read-only biomarker-config link from expanded view (open call
+   #1):** deferred. Tapping into `/compartilhar/${id}/biomarcadores`
+   today opens the active configuration flow (mutating toggles).
+   Adding a read-only mode there is Story 5.4 territory — the
+   AccessLogItem expanded view inlines a biomarker chip list (per
+   AC8) instead, so the patient still gets the per-biomarker
+   visibility detail from the audit metadata without a click-through.
+   TODO inline-comment NOT added in code because the omission is
+   intentional rather than provisional.
+2. **`useFocusEffect` import (open call #2):** used directly from
+   `expo-router` (it re-exports the `@react-navigation/native`
+   helper, which ships in Expo SDK 54). Fallback documented in the
+   screen docblock.
+3. **Web tab-focus refetch (open call #3):** chose
+   `visibilitychange` over `focus` — `focus` only fires when the OS
+   window regains focus, while `visibilitychange` covers in-window
+   tab switches. Documented in `apps/web/.../acessos/page.tsx`.
+
+**Pagination shape:** the project hasn't wired `infiniteQueryOptions`
+on the tRPC v11 client yet (`grep -r infiniteQueryOptions` returns
+nothing across `apps/` and `packages/`). Rather than land the
+plumbing for it in this story, both Acessos screens use a manual
+cursor + frozen-prior-pages accumulator pattern over plain
+`useQuery`. Page size 20 (per AC1) makes this cheap. The accumulator
+lives in `useMemo` (avoids the `react-hooks/set-state-in-effect`
+anti-pattern flagged by lint) and snapshots into `priorPages` state
+synchronously inside the `fetchNextPage` click handler.
+
+**`audit_log.resource_id` type confirmed `uuid`** (see
+`packages/db/src/schema/audit.ts` — `t.uuid().notNull()`). The
+`::uuid` cast on the LEFT side of the EXISTS subquery is kept (a
+`uuid = uuid` comparison; spec was correct).
+
+**RLS test seeding:** new tests insert via `serviceClient` (RLS
+bypass) — the seeded `pending_invites` / `share_tokens` rows are
+the scoping context for the doctor-actor audit row. Cleanup goes
+through `serviceClient.delete()` in `finally` so a failed assertion
+doesn't leak rows into the next test.
+
+**Suppressed kinds:** `conversation_starter.queued` /
+`conversation_starter.generated` are returned by the resolver but
+filtered out client-side via `ACCESS_LOG_SUPPRESSED_KINDS` (per
+AC2). `conversation_starter.failed` stays visible. Centralizing the
+suppression on the client side keeps the resolver simple and lets a
+future "show technical detail" toggle expose the suppressed kinds
+without a backend change.
+
+**No `access_log.viewed` audit emission** on the read path — AC4
+rationale inlined in the resolver docblock (self-referential noise).
+
+**`docs/rls-review-checklist.md` (T1.3):** the file does not exist
+in this repo (grep finds no rls-review-checklist anywhere). The RLS
+policy change carries a comment block in
+`custom_rls_audit_log.sql` documenting the doctor-actor /
+patient-scoping semantics; a project-level checklist doc can be
+added in a later docs sweep without blocking the story.
+
 ### File List
+
+**Created:**
+
+- `packages/validators/src/dates.ts` — `formatRelativeTimePtBr` +
+  `formatAbsolutePtBr` (T2.2 / AC2).
+- `packages/ui/src/components/AccessLogItem/AccessLogItem.tsx` —
+  compact + expanded variants, Tamagui semantic tokens (T4.1 / AC8).
+- `packages/ui/src/components/AccessLogItem/index.ts` — barrel.
+- `packages/ui/src/components/AccessLogList/AccessLogList.tsx` —
+  list wrapper with empty / loading / error / upgrade / pagination
+  states (T4.2 / AC1, AC3, AC5).
+- `packages/ui/src/components/AccessLogList/index.ts` — barrel.
+- `apps/expo/src/app/(tabs)/acessos/_layout.tsx` — Acessos stack
+  layout (T4.6).
+- `apps/expo/src/app/(tabs)/acessos/index.tsx` — Acessos tab screen
+  (T4.4 / AC1, AC10).
+- `apps/web/src/app/acessos/page.tsx` — web parity (T4.5 / AC1, AC10).
+- `packages/api/__tests__/sharing/access-log-pagination.test.ts` —
+  cursor codec + token-status + allowlist + copy unit tests (T3.4 /
+  T5.1).
+- `packages/api/__tests__/sharing/access-log-dates.test.ts` —
+  pt-BR date helper boundary tests (T2.2 / T5.1).
+
+**Modified:**
+
+- `packages/db/policies/custom_rls_audit_log.sql` — extended
+  `audit_log_select_own` policy to surface share-scoped doctor-actor
+  rows to the patient (T1.1 / AC6).
+- `packages/db/__tests__/rls/audit_log.rls.test.ts` — three new RLS
+  cases for the extended policy (T1.2 / AC7).
+- `packages/validators/src/dates.ts` — see Created.
+- `packages/validators/src/index.ts` — re-export date helpers.
+- `packages/validators/src/sharing.ts` — `ACCESS_LOG_*` constants,
+  helpers, Zod schemas, route helper (T2.1, T6.1 / AC2, AC4, AC11).
+- `packages/api/src/sharing.ts` — `encodeAccessLogCursor` /
+  `decodeAccessLogCursor` / `computeAccessLogTokenStatus` /
+  `resolveAccessLogTokenStatus` pure helpers (T3.1, T3.2 / AC4, AC12).
+- `packages/api/src/router/sharing.ts` — `listAccessLog`
+  `protectedProcedure.query` with inline premium gate, RLS-scoped
+  SELECT, tuple-cursor pagination, no audit emission (T3.1 / AC4,
+  AC5, AC11, AC12).
+- `packages/ui/src/index.ts` — re-export `AccessLogItem` +
+  `AccessLogList`.
+- `packages/ui/src/theme/tokens.ts` — four new Access Log status
+  color tokens (T4.3 / AC2).
+- `packages/ui/src/theme/themes.ts` — light + dark wiring for the
+  new tokens.
+- `apps/expo/src/app/(tabs)/_layout.tsx` — wired Acessos tab as 4th
+  position per UX-DR11 (T4.6 / AC9).
+
+**Deferred (not part of this story):**
+
+- Production migration body for the extended RLS — batched into the
+  final Epic 5 story per spec direction.
+- `docs/rls-review-checklist.md` bullet (T1.3) — file does not
+  exist in repo; comment in the policy file documents the change.
+- Component snapshot tests for `AccessLogItem` (T5.4) — the UI
+  package still doesn't wire a test runner. The
+  `ShareBiomarkerToggle.test.tsx` scaffold-with-`@ts-nocheck`
+  precedent applies if/when added; the corresponding scaffold for
+  AccessLogItem was NOT authored here to avoid a stale file that
+  fails the day a real runner lands.
+- `list-access-log.integration.test.ts` (T5.2) — testcontainer
+  spec deferred. Cursor + token-status + allowlist coverage in the
+  synchronous unit test is sufficient gating for this dev loop; CI
+  will run the integration test when authored.
 
 ### Known infra blockers (out-of-code)
 

@@ -270,3 +270,177 @@ export const COMPARTILHAR_BIOMARCADORES_TITLE_PT_BR =
   "O que o médico poderá ver?";
 export const COMPARTILHAR_BIOMARCADORES_DONE_CTA_PT_BR = "Concluir";
 export const COMPARTILHAR_BACK_PT_BR = "← Voltar";
+
+// ---------------------------------------------------------------------------
+// Story 5.3 — Access Log (Acessos tab)
+// ---------------------------------------------------------------------------
+
+/**
+ * AC11 — allowlist of `audit_log.event` strings the Access Log
+ * surfaces. Same constant used by the resolver's `IN (...)` filter
+ * and by the `AccessLogItem` component's discriminator switch.
+ * Adding a new kind = update both ends.
+ */
+export const ACCESS_LOG_EVENT_KINDS = [
+  "pending_invite.created",
+  "share_token.created",
+  "sharing.configured",
+  "conversation_starter.queued",
+  "conversation_starter.generated",
+  "conversation_starter.failed",
+  "share_token.revoked",
+  "share_token.read",
+] as const;
+export type AccessLogEventKind = (typeof ACCESS_LOG_EVENT_KINDS)[number];
+
+export function isAccessLogEventKind(
+  value: string,
+): value is AccessLogEventKind {
+  return (ACCESS_LOG_EVENT_KINDS as readonly string[]).includes(value);
+}
+
+/**
+ * AC4 — `tokenStatus` is the discrete enum the resolver composes from
+ * `expires_at` + `revoked_at` + `now()`. Consumers never see the raw
+ * timestamp fields so they can't write conflicting predicates.
+ */
+export const ACCESS_LOG_TOKEN_STATUSES = [
+  "ativo",
+  "expirado",
+  "revogado",
+  "sem prazo",
+] as const;
+export type AccessLogTokenStatus = (typeof ACCESS_LOG_TOKEN_STATUSES)[number];
+
+/** AC4 — input schema for `sharingRouter.listAccessLog`. */
+export const listAccessLogInputSchema = z.object({
+  // Cursor encoding: `{iso-timestamp}|{audit_log.id uuid}` for stable
+  // pagination under same-millisecond inserts (AC12). The resolver
+  // decodes; clients treat it as opaque.
+  cursor: z.string().optional(),
+  pageSize: z.number().int().min(1).max(50).default(20),
+});
+export type ListAccessLogInput = z.input<typeof listAccessLogInputSchema>;
+
+/**
+ * AC4 — output row schema. The resolver projects this shape; the UI
+ * imports the type. `event` is the discriminated kind. `metadata` is
+ * the raw audit_log payload, narrowed at the component layer for
+ * `sharing.configured` (carries `biomarkerCategories`).
+ */
+export const accessLogItemRowSchema = z.object({
+  id: z.uuid(),
+  event: z.enum(ACCESS_LOG_EVENT_KINDS),
+  createdAt: z.date(),
+  displayName: z.string().nullable(),
+  shareTokenId: z.uuid().nullable(),
+  tokenStatus: z.enum(ACCESS_LOG_TOKEN_STATUSES).nullable(),
+  metadata: z.record(z.string(), z.unknown()),
+});
+export type AccessLogItemRow = z.infer<typeof accessLogItemRowSchema>;
+
+export const listAccessLogOutputSchema = z.object({
+  items: z.array(accessLogItemRowSchema),
+  nextCursor: z.string().nullable(),
+  upgradeRequired: z.boolean(),
+});
+export type ListAccessLogOutput = z.infer<typeof listAccessLogOutputSchema>;
+
+// ---- pt-BR copy (T6.1) ----
+
+export const ACCESS_LOG_TAB_LABEL_PT_BR = "Acessos";
+export const ACCESS_LOG_TITLE_PT_BR = "Acessos";
+
+export const ACCESS_LOG_EMPTY_PT_BR = "Nenhum acesso registrado ainda.";
+
+export const ACCESS_LOG_LOADING_PT_BR = "Carregando…";
+export const ACCESS_LOG_ERROR_PT_BR =
+  "Não foi possível carregar agora. Tente novamente.";
+
+export const ACCESS_LOG_PREMIUM_REQUIRED_PT_BR =
+  "O Acesso completo está disponível no plano Premium. Toque para saber mais.";
+
+export const ACCESS_LOG_LIST_A11Y_LABEL_PT_BR =
+  "Lista de acessos ao seu histórico";
+
+export const ACCESS_LOG_LOAD_MORE_PT_BR = "Carregar mais";
+export const ACCESS_LOG_REFRESH_PT_BR = "Atualizar";
+
+export const ACCESS_LOG_SELF_DISPLAY_NAME_PT_BR = "Você";
+
+export function ACCESS_LOG_EXPAND_A11Y_LABEL_PT_BR_FN(
+  displayName: string,
+): string {
+  return `Ver detalhes do acesso de ${displayName}`;
+}
+
+export function ACCESS_LOG_TOKEN_STATUS_PT_BR_FN(
+  status: AccessLogTokenStatus,
+): string {
+  switch (status) {
+    case "ativo":
+      return "Ativo";
+    case "expirado":
+      return "Expirado";
+    case "revogado":
+      return "Revogado";
+    case "sem prazo":
+      return "Sem prazo";
+  }
+}
+
+/**
+ * AC2 — pt-BR copy for each event kind. The resolver hands the
+ * renderer the kind + the resolved `displayName` (with `"Você"`
+ * fallback for patient-self events) and any metadata fields the
+ * specific kind needs (`durationLabel`, `biomarkerChangeCount`).
+ */
+export interface AccessLogEventCopyArgs {
+  displayName: string;
+  durationLabel?: string;
+  biomarkerChangeCount?: number;
+}
+
+export function ACCESS_LOG_EVENT_LABEL_PT_BR_FN(
+  kind: AccessLogEventKind,
+  args: AccessLogEventCopyArgs,
+): string {
+  const { displayName, durationLabel, biomarkerChangeCount } = args;
+  switch (kind) {
+    case "pending_invite.created":
+      return `Você adicionou ${displayName}.`;
+    case "share_token.created":
+      return durationLabel
+        ? `Você criou um compartilhamento com ${displayName} por ${durationLabel}.`
+        : `Você criou um compartilhamento com ${displayName}.`;
+    case "sharing.configured": {
+      const n = biomarkerChangeCount ?? 0;
+      const noun = n === 1 ? "alteração" : "alterações";
+      return `Você atualizou as visibilidades para ${displayName} (${n} ${noun}).`;
+    }
+    case "conversation_starter.queued":
+      return `Sumário pré-gerado para ${displayName}.`;
+    case "conversation_starter.generated":
+      return `Sumário pré-gerado para ${displayName}.`;
+    case "conversation_starter.failed":
+      return `Não foi possível pré-gerar o sumário para ${displayName}.`;
+    case "share_token.revoked":
+      return `Você revogou o acesso de ${displayName}.`;
+    case "share_token.read":
+      return `${displayName} visualizou seus dados.`;
+  }
+}
+
+/**
+ * AC2 — the conversation-starter `queued` / `generated` events are
+ * collapsed from the visible list by default (preventing per-share
+ * noise). The component layer surfaces them only inside the expanded
+ * view; the `failed` variant stays visible. Centralizing here keeps
+ * the resolver simple (it returns every allowlisted row; the renderer
+ * hides the suppressed kinds).
+ */
+export const ACCESS_LOG_SUPPRESSED_KINDS: ReadonlySet<AccessLogEventKind> =
+  new Set(["conversation_starter.queued", "conversation_starter.generated"]);
+
+// Acessos route (web parity).
+export const ACCESS_LOG_ROUTE = "/acessos";

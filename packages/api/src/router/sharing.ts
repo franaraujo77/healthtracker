@@ -2,7 +2,12 @@ import type { TRPCRouterRecord } from "@trpc/server";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod/v4";
 
-import type { ShareDuration } from "@healthtracker/validators";
+import type {
+  AccessLogEventKind,
+  AccessLogItemRow,
+  AccessLogTokenStatus,
+  ShareDuration,
+} from "@healthtracker/validators";
 import { and, desc, eq, gt, isNull, or, sql } from "@healthtracker/db";
 import {
   ConversationStarterCache,
@@ -11,10 +16,13 @@ import {
   ShareTokens,
 } from "@healthtracker/db/schema";
 import {
+  ACCESS_LOG_EVENT_KINDS,
   configureBiomarkersInputSchema,
   createPendingInviteInputSchema,
   createShareTokenInputSchema,
   getDraftConfigInputSchema,
+  isAccessLogEventKind,
+  listAccessLogInputSchema,
   SHARING_AUDIT_CONFIGURED,
   SHARING_AUDIT_CONVERSATION_STARTER_QUEUED,
   SHARING_AUDIT_PENDING_INVITE_CREATED,
@@ -22,9 +30,12 @@ import {
 } from "@healthtracker/validators";
 
 import { writeAuditLog } from "../audit";
-import { premiumProcedure } from "../middleware/entitlements";
+import { isPremium, premiumProcedure } from "../middleware/entitlements";
 import {
   buildShareUrl,
+  computeAccessLogTokenStatus,
+  decodeAccessLogCursor,
+  encodeAccessLogCursor,
   generateShareToken,
   getDistinctCategoriesForPatient,
   hashIdentifier,
@@ -646,6 +657,151 @@ export const sharingRouter = {
 
     return { shares: rows };
   }),
+
+  /**
+   * Story 5.3 — paginated Access Log feed (AC1, AC4, AC5, AC11, AC12).
+   *
+   * `protectedProcedure` (NOT `premiumProcedure`) — AC5: free-tier
+   * patients get a graceful empty-list + `upgradeRequired: true`
+   * instead of a thrown `PRECONDITION_FAILED`. Story 4.1's
+   * `premiumProcedure` middleware is the alternative shape; the
+   * inline check is chosen here because the UX wants the upgrade
+   * prompt to render inside the list view.
+   *
+   * Read-only. Deliberately does NOT emit an `access_log.viewed`
+   * audit row (every Acessos tap would self-reference and create
+   * runaway noise — CLAUDE.md philosophy).
+   *
+   * Row scoping is RLS-authoritative (the extended
+   * `audit_log_select_own` policy added in this story shows the
+   * patient both their own actor rows AND rows whose `resource_id`
+   * points at one of their `share_tokens`). The resolver does NOT
+   * re-filter on `actor_id` so a doctor-actor row scoped to the
+   * patient's share is visible.
+   *
+   * Cursor: `{iso-ts}|{audit_log.id uuid}` — tuple compare against
+   * `(created_at, id)` so pagination is stable even when multiple
+   * audit rows land in the same millisecond (e.g. `createShareToken`
+   * writes 3 audit rows in a single tx).
+   */
+  listAccessLog: protectedProcedure
+    .input(listAccessLogInputSchema)
+    .query(async ({ ctx, input }) => {
+      // AC5 — premium gate (inline, non-throwing).
+      if (!isPremium(ctx.session.user)) {
+        return {
+          items: [] as AccessLogItemRow[],
+          nextCursor: null as string | null,
+          upgradeRequired: true,
+        };
+      }
+
+      const decoded = decodeAccessLogCursor(input.cursor);
+      const allowlist = ACCESS_LOG_EVENT_KINDS as readonly string[];
+      const limit = input.pageSize + 1; // +1 to detect has-more.
+
+      // Tuple compare `(created_at, id) < (cursor_ts, cursor_id)`
+      // when a cursor is present; otherwise return newest first.
+      // The join goes audit_log -> share_tokens -> pending_invites
+      // so `pending_invite.created` rows (no share_token yet) still
+      // appear, just with `display_name = null` and the resolver
+      // does a second lookup against `pending_invites` by
+      // `resource_id` for those.
+      const cursorCondition = decoded
+        ? sql`(al.created_at, al.id) < (${decoded.createdAt.toISOString()}::timestamptz, ${decoded.id}::uuid)`
+        : sql`TRUE`;
+
+      const rawRows = await ctx.db.execute<{
+        id: string;
+        event: string;
+        actor_id: string;
+        actor_type: string;
+        resource_id: string;
+        resource_type: string;
+        metadata: Record<string, unknown> | null;
+        created_at: Date;
+        st_expires_at: Date | null;
+        st_revoked_at: Date | null;
+        st_display_name: string | null;
+        pi_display_name: string | null;
+      }>(sql`
+        SELECT
+          al.id              AS id,
+          al.event           AS event,
+          al.actor_id        AS actor_id,
+          al.actor_type      AS actor_type,
+          al.resource_id     AS resource_id,
+          al.resource_type   AS resource_type,
+          al.metadata        AS metadata,
+          al.created_at      AS created_at,
+          st.expires_at      AS st_expires_at,
+          st.revoked_at      AS st_revoked_at,
+          stpi.display_name  AS st_display_name,
+          pi.display_name    AS pi_display_name
+        FROM audit_log al
+        LEFT JOIN share_tokens st
+          ON al.resource_type IN ('share_token', 'conversation_starter_cache')
+         AND al.resource_id = st.id
+        LEFT JOIN pending_invites stpi
+          ON st.invite_id = stpi.id
+        LEFT JOIN pending_invites pi
+          ON al.resource_type = 'pending_invite'
+         AND al.resource_id = pi.id
+        WHERE al.event = ANY(${allowlist}::text[])
+          AND ${cursorCondition}
+        ORDER BY al.created_at DESC, al.id DESC
+        LIMIT ${limit}
+      `);
+
+      const now = new Date();
+      const trimmed = rawRows.slice(0, input.pageSize);
+      const hasMore = rawRows.length > input.pageSize;
+
+      const items: AccessLogItemRow[] = trimmed.map((r) => {
+        // AC11 — narrow `event` text to the discriminated union via
+        // the allowlist guard. Rows that slip past the SQL filter
+        // (shouldn't happen) fall back to the first kind so the type
+        // narrowing holds; the guard short-circuits before then.
+        const event: AccessLogEventKind = isAccessLogEventKind(r.event)
+          ? r.event
+          : "share_token.created";
+        const hasJoinedToken =
+          r.st_expires_at !== null || r.st_revoked_at !== null
+            ? true
+            : r.resource_type === "share_token" ||
+              r.resource_type === "conversation_starter_cache";
+        const tokenStatus: AccessLogTokenStatus | null =
+          r.resource_type === "share_token" ||
+          r.resource_type === "conversation_starter_cache"
+            ? computeAccessLogTokenStatus(r.st_expires_at, r.st_revoked_at, now)
+            : null;
+        // `display_name` resolution: share-token-scoped rows pull
+        // from the joined pending_invite; pending_invite.created rows
+        // pull from their own resource row. Null falls through to
+        // the renderer's "Você" fallback for patient-self events.
+        const displayName: string | null =
+          r.st_display_name ?? r.pi_display_name ?? null;
+        return {
+          id: r.id,
+          event,
+          createdAt: r.created_at,
+          displayName,
+          shareTokenId:
+            r.resource_type === "share_token" ||
+            r.resource_type === "conversation_starter_cache"
+              ? r.resource_id
+              : null,
+          tokenStatus: hasJoinedToken ? tokenStatus : null,
+          metadata: r.metadata ?? {},
+        } satisfies AccessLogItemRow;
+      });
+
+      const last = items[items.length - 1];
+      const nextCursor =
+        hasMore && last ? encodeAccessLogCursor(last.createdAt, last.id) : null;
+
+      return { items, nextCursor, upgradeRequired: false };
+    }),
 } satisfies TRPCRouterRecord;
 
 /**

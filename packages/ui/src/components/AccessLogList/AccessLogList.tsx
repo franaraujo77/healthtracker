@@ -1,0 +1,177 @@
+"use client";
+
+import { useState } from "react";
+import { Text, YStack } from "tamagui";
+
+import type {
+  AccessLogItemRow,
+  ShareDuration,
+} from "@healthtracker/validators";
+import {
+  ACCESS_LOG_EMPTY_PT_BR,
+  ACCESS_LOG_ERROR_PT_BR,
+  ACCESS_LOG_LIST_A11Y_LABEL_PT_BR,
+  ACCESS_LOG_LOAD_MORE_PT_BR,
+  ACCESS_LOG_LOADING_PT_BR,
+  ACCESS_LOG_PREMIUM_REQUIRED_PT_BR,
+  ACCESS_LOG_REFRESH_PT_BR,
+  ACCESS_LOG_SUPPRESSED_KINDS,
+} from "@healthtracker/validators";
+
+import { Button } from "../../button";
+import { AccessLogItem } from "../AccessLogItem";
+
+/**
+ * Story 5.3 — `AccessLogList` (AC1, AC3, AC5, AC9, AC10).
+ *
+ * Cross-platform (Tamagui RNW). Hosts the empty/loading/error/upgrade
+ * states + Carregar-mais pagination + an Atualizar Tier-3 button so
+ * the web tab-focus refresh has a manual escape hatch. Per-item
+ * expansion state lives here (one open at a time would be simpler;
+ * the spec lets each item own its own state — we keep a small map
+ * so the renderer is still cheap).
+ *
+ * Why not `FlatList`: `packages/ui` cannot import `react-native`
+ * directly (see ShareBiomarkerToggle docblock). The plain mapped
+ * `YStack` + "Carregar mais" button matches the precedent set by
+ * `apps/expo/.../compartilhar/index.tsx` and is sufficient at the
+ * MVP page size (20).
+ *
+ * AC2 — `conversation_starter.queued` / `generated` are suppressed
+ * from the visible list (collapsed by default per the spec); they
+ * still arrive in `data` from the resolver so the renderer can
+ * filter centrally via `ACCESS_LOG_SUPPRESSED_KINDS`.
+ */
+export interface AccessLogListProps {
+  data: AccessLogItemRow[];
+  isLoading: boolean;
+  isError: boolean;
+  isFetchingNextPage: boolean;
+  hasNextPage: boolean;
+  fetchNextPage: () => void;
+  refetch: () => void;
+  upgradeRequired: boolean;
+}
+
+export function AccessLogList(props: AccessLogListProps): React.ReactElement {
+  const {
+    data,
+    isLoading,
+    isError,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
+    refetch,
+    upgradeRequired,
+  } = props;
+
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+
+  const toggleExpanded = (id: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // AC5 — free-tier path. Resolver returned `{ items: [], upgradeRequired: true }`;
+  // surface the upgrade prompt (Tier-2 / never Tier-1 per UX-DR13).
+  if (upgradeRequired) {
+    return (
+      <YStack padding="$4" gap="$3">
+        <Text color="$textSecondary">{ACCESS_LOG_PREMIUM_REQUIRED_PT_BR}</Text>
+      </YStack>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <YStack padding="$4">
+        <Text>{ACCESS_LOG_LOADING_PT_BR}</Text>
+      </YStack>
+    );
+  }
+
+  if (isError) {
+    return (
+      <YStack padding="$4" gap="$3">
+        <Text>{ACCESS_LOG_ERROR_PT_BR}</Text>
+        <Button variant="secondary" onPress={refetch}>
+          {ACCESS_LOG_REFRESH_PT_BR}
+        </Button>
+      </YStack>
+    );
+  }
+
+  const visible = data.filter(
+    (row) => !ACCESS_LOG_SUPPRESSED_KINDS.has(row.event),
+  );
+
+  if (visible.length === 0) {
+    return (
+      <YStack padding="$4">
+        <Text color="$textSecondary">{ACCESS_LOG_EMPTY_PT_BR}</Text>
+      </YStack>
+    );
+  }
+
+  return (
+    <YStack
+      padding="$3"
+      gap="$2"
+      accessibilityRole="list"
+      accessibilityLabel={ACCESS_LOG_LIST_A11Y_LABEL_PT_BR}
+    >
+      {visible.map((row) => {
+        const meta = row.metadata;
+        // `share_token.created` carries `duration` in metadata (Story 5.2
+        // audit shape); `sharing.configured` carries `biomarkerCategories`.
+        const duration =
+          typeof meta.duration === "string"
+            ? (meta.duration as ShareDuration)
+            : undefined;
+        const biomarkerCategories = Array.isArray(meta.biomarkerCategories)
+          ? (
+              meta.biomarkerCategories as {
+                category: string;
+                label?: string;
+                visible: boolean;
+              }[]
+            ).map((b) => ({
+              category: b.category,
+              label: b.label ?? b.category,
+              visible: b.visible,
+            }))
+          : undefined;
+        return (
+          <AccessLogItem
+            key={row.id}
+            id={row.id}
+            event={row.event}
+            displayName={row.displayName}
+            timestamp={row.createdAt}
+            tokenStatus={row.tokenStatus}
+            biomarkerCategories={biomarkerCategories}
+            duration={duration}
+            expanded={expandedIds.has(row.id)}
+            onPress={toggleExpanded}
+          />
+        );
+      })}
+
+      {hasNextPage ? (
+        <Button
+          variant="secondary"
+          onPress={fetchNextPage}
+          disabled={isFetchingNextPage}
+        >
+          {isFetchingNextPage
+            ? ACCESS_LOG_LOADING_PT_BR
+            : ACCESS_LOG_LOAD_MORE_PT_BR}
+        </Button>
+      ) : null}
+    </YStack>
+  );
+}

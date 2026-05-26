@@ -42,6 +42,10 @@ export type {
   ShareBiomarkerToggleState,
   ShareBiomarkerToggleVariant,
 } from "./components/ShareBiomarkerToggle";
+export { AccessLogItem } from "./components/AccessLogItem";
+export type { AccessLogItemProps } from "./components/AccessLogItem";
+export { AccessLogList } from "./components/AccessLogList";
+export type { AccessLogListProps } from "./components/AccessLogList";
 export { DurationOption } from "./components/DurationOption";
 export type { DurationOptionProps } from "./components/DurationOption";
 export { NoExpiryConfirmDialog } from "./components/NoExpiryConfirmDialog";

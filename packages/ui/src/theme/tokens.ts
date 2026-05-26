@@ -42,6 +42,17 @@ export const colorTokens = {
   shareToggleOn: { light: "#E0F2F1", dark: "#134E4A" },
   shareToggleOff: { light: "#F3EFE7", dark: "#3C3836" },
   shareToggleDisabledText: { light: "#9E9E9E", dark: "#78716C" },
+
+  // Story 5.3 — Access Log token-status badge surfaces (T4.3 / AC2).
+  // `accessLogActive` mirrors the muted-teal "shared" surface;
+  // `accessLogExpired` is a low-contrast neutral; `accessLogRevoked`
+  // is INTENTIONALLY a muted warm-neutral (NEVER red — UX-DR13 line
+  // 1079 reserves red for system errors only); `accessLogNeutral`
+  // backs the "sem prazo" / no-token-context state.
+  accessLogActive: { light: "#E0F2F1", dark: "#134E4A" },
+  accessLogExpired: { light: "#F3EFE7", dark: "#3C3836" },
+  accessLogRevoked: { light: "#EDE4DA", dark: "#4A4036" },
+  accessLogNeutral: { light: "#F0EFEC", dark: "#2E2A26" },
 } as const;
 
 export const fontSizeTokens = {
