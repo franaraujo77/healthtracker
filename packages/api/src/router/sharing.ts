@@ -1,8 +1,11 @@
 import type { TRPCRouterRecord } from "@trpc/server";
 import { TRPCError } from "@trpc/server";
+import { z } from "zod/v4";
 
-import { and, desc, eq, gt, isNull, sql } from "@healthtracker/db";
+import type { ShareDuration } from "@healthtracker/validators";
+import { and, desc, eq, gt, isNull, or, sql } from "@healthtracker/db";
 import {
+  ConversationStarterCache,
   PendingInvites,
   ShareTokenBiomarkers,
   ShareTokens,
@@ -12,8 +15,8 @@ import {
   createPendingInviteInputSchema,
   createShareTokenInputSchema,
   getDraftConfigInputSchema,
-  SHARE_DEFAULT_DURATION_DAYS,
   SHARING_AUDIT_CONFIGURED,
+  SHARING_AUDIT_CONVERSATION_STARTER_QUEUED,
   SHARING_AUDIT_PENDING_INVITE_CREATED,
   SHARING_AUDIT_TOKEN_CREATED,
 } from "@healthtracker/validators";
@@ -21,10 +24,12 @@ import {
 import { writeAuditLog } from "../audit";
 import { premiumProcedure } from "../middleware/entitlements";
 import {
+  buildShareUrl,
   generateShareToken,
   getDistinctCategoriesForPatient,
   hashIdentifier,
 } from "../sharing";
+import { protectedProcedure } from "../trpc";
 
 /**
  * Story 5.1 — `sharingRouter`. Patient-side sharing ceremony
@@ -172,8 +177,13 @@ export const sharingRouter = {
 
         // Patch #4 — idempotency on `(patient_id, invite_id)`. If an
         // active (non-revoked, non-expired) token already exists for
-        // this invite, short-circuit. Do NOT re-emit the audit row or
-        // re-INSERT biomarker scope.
+        // this invite, short-circuit. Do NOT re-emit the audit row,
+        // re-INSERT biomarker scope, or re-enqueue the conversation-
+        // starter job (AC11 — duration is locked at first creation;
+        // revoke-and-start-over is the path to change it, Story 5.4).
+        //
+        // Story 5.2 update: `expires_at` is now nullable; the active-
+        // ness predicate becomes `(expires_at IS NULL OR > now())`.
         const existingToken = await tx
           .select({ id: ShareTokens.id })
           .from(ShareTokens)
@@ -182,7 +192,10 @@ export const sharingRouter = {
               eq(ShareTokens.patientId, patientId),
               eq(ShareTokens.inviteId, input.inviteId),
               isNull(ShareTokens.revokedAt),
-              gt(ShareTokens.expiresAt, new Date()),
+              or(
+                isNull(ShareTokens.expiresAt),
+                gt(ShareTokens.expiresAt, new Date()),
+              ),
             ),
           )
           .limit(1);
@@ -204,9 +217,13 @@ export const sharingRouter = {
         }
 
         const { tokenHash, tokenHmac } = generateShareToken();
-        const expiresAt = new Date(
-          Date.now() + SHARE_DEFAULT_DURATION_DAYS * 24 * 60 * 60 * 1000,
-        );
+        // Story 5.2 AC3 — map the picker's duration enum to an
+        // `expires_at` timestamp (or NULL for "Sem prazo"). No
+        // server-side default; the picker screen owns the
+        // default-selection of `"7d"` so a missing field surfaces
+        // as a Zod validation error rather than being silently
+        // coerced.
+        const expiresAt = computeExpiresAt(input.duration);
 
         const categories = await getDistinctCategoriesForPatient(tx, patientId);
 
@@ -250,9 +267,59 @@ export const sharingRouter = {
           resourceType: "share_token",
           metadata: {
             inviteId: input.inviteId,
-            defaultExpiresAt: expiresAt.toISOString(),
+            // Story 5.2 AC9 — include the chosen duration in audit
+            // metadata; Story 5.3 Access Log renders e.g. "por 7 dias".
+            duration: input.duration,
+            // `null` when `no_expiry` — preserves the audit history
+            // distinction between "we set a 7d window" and "no expiry".
+            defaultExpiresAt: expiresAt ? expiresAt.toISOString() : null,
             biomarkerCount: categories.length,
           },
+        });
+
+        // Story 5.2 AC3 + AC5 — Conversation Starter pre-gen.
+        // Insert one cache row in `queued` status inheriting the
+        // share-token's expiry, then enqueue the pg-boss job inside
+        // the same tx via the outbox pattern (direct INSERT into
+        // `pgboss.job` — pg-boss `send()` opens its own connection
+        // and is NOT tx-aware against the Drizzle `tx` handle; the
+        // same precedent is in `services/extraction/src/notifications/emit.ts`
+        // and `services/llm/src/consumers/generate-letter.ts`). On a
+        // crash between this INSERT and the tx commit, the whole tx
+        // rolls back — no orphan cache row, no orphan job.
+        await tx.insert(ConversationStarterCache).values({
+          shareTokenId: tokenRow.id,
+          patientId,
+          status: "queued",
+          expiresAt,
+        });
+
+        const conversationStarterJob = {
+          jobId: crypto.randomUUID(),
+          patientId,
+          correlationId: tokenRow.id,
+          payload: { shareTokenId: tokenRow.id },
+          createdAt: new Date().toISOString(),
+        };
+        await tx.execute(sql`
+          INSERT INTO pgboss.job
+            (name, data, retry_limit, retry_delay, retry_backoff, singleton_key)
+          VALUES (
+            'conversation_starter.generate',
+            ${JSON.stringify(conversationStarterJob)}::jsonb,
+            3, 30, true,
+            ${"conversation_starter." + tokenRow.id}
+          )
+          ON CONFLICT DO NOTHING
+        `);
+
+        await writeAuditLog(tx, {
+          actorId: patientId,
+          actorType: "patient",
+          event: SHARING_AUDIT_CONVERSATION_STARTER_QUEUED,
+          resourceId: tokenRow.id,
+          resourceType: "share_token",
+          metadata: { shareTokenId: tokenRow.id },
         });
 
         return { shareTokenId: tokenRow.id, biomarkerScope };
@@ -444,6 +511,43 @@ export const sharingRouter = {
       };
     }),
 
+  /**
+   * Story 5.2 AC7 / T7.1 — composes the deliverable share URL the
+   * resumo screen passes to the native share-sheet. `protectedProcedure`
+   * is sufficient (the patient already cleared the premium gate when
+   * `createShareToken` succeeded; re-gating on retrieval would just
+   * surface confusing PRECONDITION_FAILED errors if the patient's
+   * tier briefly downgrades between create and send). Verifies
+   * ownership and 404s on mismatch — no enumeration oracle (Story
+   * 5.1 R1 discipline).
+   *
+   * Returns the URL only; this resolver does NOT emit a new audit
+   * row (share-URL retrieval is an internal patient action; only the
+   * doctor's eventual access fires audit — Epic 6).
+   */
+  getShareUrl: protectedProcedure
+    .input(z.object({ shareTokenId: z.uuid() }))
+    .query(async ({ ctx, input }) => {
+      const patientId = ctx.session.user.id;
+      const rows = await ctx.db
+        .select({
+          id: ShareTokens.id,
+          tokenHmac: ShareTokens.tokenHmac,
+        })
+        .from(ShareTokens)
+        .where(
+          and(
+            eq(ShareTokens.id, input.shareTokenId),
+            eq(ShareTokens.patientId, patientId),
+            isNull(ShareTokens.revokedAt),
+          ),
+        )
+        .limit(1);
+      const row = rows[0];
+      if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+      return { url: buildShareUrl(row.id, row.tokenHmac) };
+    }),
+
   /** Compartilhar-tab listing (Story 5.4 extends with revoke action). */
   listShares: premiumProcedure.query(async ({ ctx }) => {
     const patientId = ctx.session.user.id;
@@ -485,4 +589,24 @@ function isUniqueViolation(err: unknown): boolean {
     "code" in err &&
     err.code === "23505"
   );
+}
+
+/**
+ * Story 5.2 — duration enum → `expires_at` timestamp (or NULL for
+ * "Sem prazo"). Pure; no Date.now() injection because the resolver
+ * runs inside the same Node task as the INSERT and we don't want to
+ * leak a test-only seam into the resolver signature. The unit test
+ * uses `vi.useFakeTimers()` to lock now().
+ */
+function computeExpiresAt(duration: ShareDuration): Date | null {
+  switch (duration) {
+    case "24h":
+      return new Date(Date.now() + 24 * 60 * 60 * 1000);
+    case "7d":
+      return new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    case "30d":
+      return new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    case "no_expiry":
+      return null;
+  }
 }

@@ -47,6 +47,34 @@ export interface BiomarkerSuggestionResult {
   tokensUsed: number;
 }
 
+/**
+ * Story 5.2 — Conversation Starter pre-gen payload. Shape locked
+ * here so the Epic 6 doctor-side surface (Story 6.2) can consume
+ * exactly this JSONB. The stub adapter returns canned values; the
+ * real Anthropic prompt + system message is Epic 6's territory
+ * (DPA + Conversation Starter prompt land together).
+ */
+export interface ConversationStarterPrompt {
+  text: string;
+}
+export interface ConversationStarterBiomarkerCard {
+  category: string;
+  currentValue: number | null;
+  previousValue: number | null;
+  trendDirection: "up" | "down" | "flat" | null;
+  patientBaseline: number | null;
+}
+export interface ConversationStarterPayload {
+  prompts: ConversationStarterPrompt[];
+  biomarkerCards: ConversationStarterBiomarkerCard[];
+}
+
+export interface ConversationStarterInput {
+  shareTokenId: string;
+  patientId: string;
+  visibleBiomarkers: { category: string }[];
+}
+
 export interface LLMAdapter {
   streamLetter(args: {
     system: string;
@@ -68,6 +96,15 @@ export interface LLMAdapter {
     model: string;
     maxTokens: number;
   }): Promise<BiomarkerSuggestionResult>;
+  /**
+   * Story 5.2 — Conversation Starter pre-gen. The stub returns a
+   * deterministic canned payload (3 prompts + one card per visible
+   * biomarker). The real Anthropic adapter throws — Story 6.2
+   * lands the real prompt + DPA gate.
+   */
+  generateConversationStarter(
+    input: ConversationStarterInput,
+  ): Promise<ConversationStarterPayload>;
 }
 
 export function createAnthropicAdapter(opts: { apiKey: string }): LLMAdapter {
@@ -117,6 +154,12 @@ export function createAnthropicAdapter(opts: { apiKey: string }): LLMAdapter {
         args.callbacks.onError(err);
         throw err;
       }
+    },
+    // eslint-disable-next-line @typescript-eslint/require-await -- thin stub until Story 6.2
+    async generateConversationStarter(): Promise<ConversationStarterPayload> {
+      // TODO Story 6.2: implement real Conversation Starter generation
+      // (prompt + system message + ANVISA framing land with the DPA).
+      throw new Error("Not implemented — Story 6.2");
     },
     async generateBiomarkerSuggestion(args) {
       const response = await client.messages.create({
@@ -172,6 +215,33 @@ export function createStubLLMAdapter(): LLMAdapter {
         args.callbacks.onError(err);
         throw err;
       }
+    },
+    // eslint-disable-next-line @typescript-eslint/require-await -- deterministic stub for Story 5.2
+    async generateConversationStarter(
+      input: ConversationStarterInput,
+    ): Promise<ConversationStarterPayload> {
+      // Deterministic canned payload — used in dev/CI until the real
+      // Anthropic prompt + DPA gate land in Story 6.2. Three prompts
+      // are fixed; one biomarker card per visible category mirrors
+      // the input so tests can assert on the round-trip.
+      return {
+        prompts: [
+          {
+            text: "Como evoluiu sua hemoglobina nos últimos 6 meses?",
+          },
+          {
+            text: "Há algum biomarcador que você gostaria de discutir primeiro?",
+          },
+          { text: "Você notou alguma mudança recente em como se sente?" },
+        ],
+        biomarkerCards: input.visibleBiomarkers.map((b) => ({
+          category: b.category,
+          currentValue: null,
+          previousValue: null,
+          trendDirection: null,
+          patientBaseline: null,
+        })),
+      };
     },
     // eslint-disable-next-line @typescript-eslint/require-await -- stub returns instantly; the real adapter is async
     async generateBiomarkerSuggestion() {

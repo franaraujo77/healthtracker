@@ -42,6 +42,10 @@ export type {
   ShareBiomarkerToggleState,
   ShareBiomarkerToggleVariant,
 } from "./components/ShareBiomarkerToggle";
+export { DurationOption } from "./components/DurationOption";
+export type { DurationOptionProps } from "./components/DurationOption";
+export { NoExpiryConfirmDialog } from "./components/NoExpiryConfirmDialog";
+export type { NoExpiryConfirmDialogProps } from "./components/NoExpiryConfirmDialog";
 export {
   Toast,
   ToastProvider,

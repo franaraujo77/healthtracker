@@ -5,7 +5,8 @@
 -- Patient principal (`app.current_patient_id`): SELECT own rows only.
 -- Doctor principal (`app.current_share_token_id`): SELECT the single
 --   share token whose `id` matches the GUC, gated on
---   `revoked_at IS NULL AND expires_at > now()` (AC11 / AC5).
+--   `revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())`
+--   (Story 5.2 AC6 — `expires_at` is nullable; NULL means "sem prazo").
 --
 -- No INSERT / UPDATE / DELETE policies — all mutations flow through
 -- `sharingRouter` (service-role tRPC).
@@ -25,5 +26,5 @@ CREATE POLICY "share_tokens_select_own_doctor" ON "share_tokens"
   USING (
     id::text = current_setting('app.current_share_token_id', true)
     AND revoked_at IS NULL
-    AND expires_at > now()
+    AND (expires_at IS NULL OR expires_at > now())
   );

@@ -26,6 +26,19 @@ export const SHARING_AUDIT_PENDING_INVITE_CREATED =
 export const SHARING_AUDIT_TOKEN_CREATED = "share_token.created" as const;
 export const SHARING_AUDIT_CONFIGURED = "sharing.configured" as const;
 
+/**
+ * Story 5.2 — Conversation Starter pre-gen lifecycle audit kinds.
+ * `queued` fires inside the same tx as `share_token.created`;
+ * `generated` / `failed` fire from the `services/llm` worker after
+ * pg-boss processes the `conversation_starter.generate` job.
+ */
+export const SHARING_AUDIT_CONVERSATION_STARTER_QUEUED =
+  "conversation_starter.queued" as const;
+export const SHARING_AUDIT_CONVERSATION_STARTER_GENERATED =
+  "conversation_starter.generated" as const;
+export const SHARING_AUDIT_CONVERSATION_STARTER_FAILED =
+  "conversation_starter.failed" as const;
+
 // ---------------------------------------------------------------------------
 // Zod input schemas (T5.1)
 // ---------------------------------------------------------------------------
@@ -38,8 +51,19 @@ export type CreatePendingInviteInput = z.infer<
   typeof createPendingInviteInputSchema
 >;
 
+/**
+ * Story 5.2 — duration enum. `"no_expiry"` is the "Sem prazo" branch;
+ * server maps to NULL `expires_at`. The picker screen owns the default
+ * selection of `"7d"` — there is intentionally NO server-side default
+ * on this field (a caller that "forgot" to pick should surface as a
+ * Zod validation error rather than be silently coerced).
+ */
+export const shareDurationSchema = z.enum(["24h", "7d", "30d", "no_expiry"]);
+export type ShareDuration = z.infer<typeof shareDurationSchema>;
+
 export const createShareTokenInputSchema = z.object({
   inviteId: z.uuid(),
+  duration: shareDurationSchema,
 });
 export type CreateShareTokenInput = z.infer<typeof createShareTokenInputSchema>;
 
@@ -119,8 +143,72 @@ export const DOCTOR_DISPLAY_NAME_LABEL_PT_BR =
   "Como você quer chamar este profissional?";
 export const DOCTOR_IDENTIFIER_LABEL_PT_BR = "Email ou CRM do médico";
 
-/** AC8 — hard-coded default expiry window. Story 5.2 reads this. */
-export const SHARE_DEFAULT_DURATION_DAYS = 7;
+// ---------------------------------------------------------------------------
+// Story 5.2 — duration picker + summary + share-sheet copy
+// ---------------------------------------------------------------------------
+
+/**
+ * AC1 — visual order is load-bearing (24h / 7d / 30d / no_expiry).
+ * `"7d"` is the pre-selected default but that lives in the picker
+ * screen's local state, NOT here.
+ */
+export const DURATION_OPTIONS: readonly {
+  value: ShareDuration;
+  labelPtBr: string;
+}[] = [
+  { value: "24h", labelPtBr: "24 horas" },
+  { value: "7d", labelPtBr: "7 dias" },
+  { value: "30d", labelPtBr: "30 dias" },
+  { value: "no_expiry", labelPtBr: "Sem prazo" },
+] as const;
+
+export function DURATION_LABEL_PT_BR_FN(d: ShareDuration): string {
+  switch (d) {
+    case "24h":
+      return "24 horas";
+    case "7d":
+      return "7 dias";
+    case "30d":
+      return "30 dias";
+    case "no_expiry":
+      return "sem prazo";
+  }
+}
+
+/** AC2 — verbatim copy for the no_expiry confirmation modal. */
+export const NO_EXPIRY_CONFIRM_BODY_PT_BR =
+  "Confirmar acesso sem prazo — o médico poderá ver seus dados até você revogar manualmente.";
+export const NO_EXPIRY_CONFIRM_BUTTON_PT_BR = "Confirmar";
+export const NO_EXPIRY_CONFIRM_CANCEL_PT_BR = "Voltar";
+
+/** AC7 — summary sentence for the resumo screen. */
+export function SHARE_SUMMARY_PT_BR_FN(
+  doctorName: string,
+  visibleCategories: string[],
+  duration: ShareDuration,
+): string {
+  const list =
+    visibleCategories.length > 0
+      ? visibleCategories.join(", ")
+      : "nenhum biomarcador";
+  return `${doctorName} verá: ${list} — ${DURATION_LABEL_PT_BR_FN(duration)}.`;
+}
+
+export const SHARE_SUBMIT_BUTTON_PT_BR = "Enviar";
+export const CONTINUE_BUTTON_PT_BR = "Continuar";
+
+/** AC7 — clipboard fallback Toast when `navigator.share` is unavailable. */
+export const SHARE_URL_COPIED_PT_BR = "Link copiado.";
+/** AC7 — Toast when the share-sheet call fails outright. */
+export const SHARE_URL_ERROR_PT_BR =
+  "Não foi possível abrir o compartilhamento. Tente novamente.";
+
+/** Resumo screen title. */
+export const COMPARTILHAR_RESUMO_TITLE_PT_BR = "Tudo pronto";
+
+/** Duration-picker screen title. */
+export const COMPARTILHAR_NOVO_DURACAO_TITLE_PT_BR =
+  "Por quanto tempo o médico poderá ver?";
 
 // ---------------------------------------------------------------------------
 // Route helpers (Compartilhar tab)
@@ -135,8 +223,12 @@ export function compartilharBiomarcadoresRoute(shareTokenId: string): string {
   return `/compartilhar/${shareTokenId}/biomarcadores`;
 }
 
-export function compartilharConcluidoRoute(shareTokenId: string): string {
-  return `/compartilhar/${shareTokenId}/concluido`;
+/**
+ * Story 5.2 — replaces `compartilharConcluidoRoute`. The plain-language
+ * summary screen with the Tier-2 "Enviar" share-sheet trigger.
+ */
+export function compartilharResumoRoute(shareTokenId: string): string {
+  return `/compartilhar/${shareTokenId}/resumo`;
 }
 
 // ---------------------------------------------------------------------------
@@ -155,10 +247,10 @@ export const COMPARTILHAR_ERROR_PT_BR =
 export const COMPARTILHAR_NOVO_IDENTIFICACAO_TITLE_PT_BR =
   "Para quem você quer compartilhar?";
 export const COMPARTILHAR_NOVO_CONTINUE_CTA_PT_BR = "Continuar";
-export const COMPARTILHAR_NOVO_DURACAO_PROGRESS_PT_BR =
-  "Criando compartilhamento de 7 dias…";
+// Story 5.2 — removed `COMPARTILHAR_NOVO_DURACAO_PROGRESS_PT_BR` (the
+// duracao screen no longer auto-fires) and `COMPARTILHAR_CONCLUIDO_PT_BR`
+// (the resumo screen subsumes the old concluido stub).
 export const COMPARTILHAR_BIOMARCADORES_TITLE_PT_BR =
   "O que o médico poderá ver?";
 export const COMPARTILHAR_BIOMARCADORES_DONE_CTA_PT_BR = "Concluir";
-export const COMPARTILHAR_CONCLUIDO_PT_BR = "Pronto.";
 export const COMPARTILHAR_BACK_PT_BR = "← Voltar";

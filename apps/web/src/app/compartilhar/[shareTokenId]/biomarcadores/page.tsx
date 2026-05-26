@@ -14,7 +14,7 @@ import {
   COMPARTILHAR_BIOMARCADORES_TITLE_PT_BR,
   COMPARTILHAR_LOADING_PT_BR,
   COMPARTILHAR_ROUTE,
-  compartilharConcluidoRoute,
+  compartilharResumoRoute,
   SHARE_TOKEN_INVALID_PT_BR,
 } from "@healthtracker/validators";
 
@@ -53,7 +53,7 @@ export default function BiomarcadoresPage(props: {
       shareTokenId={shareTokenId}
       doctorName={query.data.doctor.displayName}
       initialScope={query.data.biomarkerScope}
-      onDone={() => router.replace(compartilharConcluidoRoute(shareTokenId))}
+      onDone={() => router.replace(compartilharResumoRoute(shareTokenId))}
     />
   );
 }

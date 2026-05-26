@@ -16,7 +16,7 @@ import {
   COMPARTILHAR_BIOMARCADORES_TITLE_PT_BR,
   COMPARTILHAR_LOADING_PT_BR,
   COMPARTILHAR_ROUTE,
-  compartilharConcluidoRoute,
+  compartilharResumoRoute,
   NO_DATA_YET_PT_BR,
   SHARE_TOKEN_INVALID_PT_BR,
 } from "@healthtracker/validators";
@@ -67,7 +67,7 @@ export default function BiomarcadoresScreen(): React.ReactNode {
       shareTokenId={shareTokenId}
       doctorName={query.data.doctor.displayName}
       initialScope={query.data.biomarkerScope}
-      onDone={() => router.replace(compartilharConcluidoRoute(shareTokenId))}
+      onDone={() => router.replace(compartilharResumoRoute(shareTokenId))}
       onFailure={() => toast.show(BIOMARKER_TOGGLE_FAILED_PT_BR)}
     />
   );

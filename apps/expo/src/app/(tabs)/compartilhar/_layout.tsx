@@ -14,7 +14,7 @@ export default function CompartilharLayout(): React.ReactNode {
       <Stack.Screen name="novo/identificacao" />
       <Stack.Screen name="novo/duracao" />
       <Stack.Screen name="[shareTokenId]/biomarcadores" />
-      <Stack.Screen name="[shareTokenId]/concluido" />
+      <Stack.Screen name="[shareTokenId]/resumo" />
     </Stack>
   );
 }

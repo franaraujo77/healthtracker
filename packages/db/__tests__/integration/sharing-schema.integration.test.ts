@@ -77,6 +77,82 @@ describe("sharing schema — Story 5.1 (testcontainer)", () => {
     expect(raised?.code).toBe("23505");
   });
 
+  // Story 5.2 T1.4 — `expires_at` is nullable; the "Sem prazo" branch
+  // INSERTs NULL.
+  it("share_tokens accepts NULL expires_at (Story 5.2 — Sem prazo)", async () => {
+    const [invite] = await db.sql<{ id: string }[]>`
+      INSERT INTO pending_invites (patient_id, display_name, identifier_hash)
+      VALUES (${PATIENT_A}::uuid, 'Dra. NoExp',
+        'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd')
+      RETURNING id`;
+    if (!invite) throw new Error("invite insert returned no row");
+    const inviteId = invite.id;
+    const [token] = await db.sql<{ id: string; expires_at: Date | null }[]>`
+      INSERT INTO share_tokens
+        (token_hash, token_hmac, patient_id, invite_id, expires_at)
+      VALUES (
+        'hash-noexp', 'hmac-noexp', ${PATIENT_A}::uuid,
+        ${inviteId}::uuid, NULL)
+      RETURNING id, expires_at`;
+    expect(token?.expires_at).toBeNull();
+  });
+
+  // Story 5.2 T1.4 — `conversation_starter_cache.status` check
+  // constraint rejects values outside the closed set.
+  it("conversation_starter_cache rejects status outside ('queued','ready','failed')", async () => {
+    const [invite] = await db.sql<{ id: string }[]>`
+      INSERT INTO pending_invites (patient_id, display_name, identifier_hash)
+      VALUES (${PATIENT_A}::uuid, 'Dra. CS',
+        'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
+      RETURNING id`;
+    if (!invite) throw new Error("invite insert returned no row");
+    const [token] = await db.sql<{ id: string }[]>`
+      INSERT INTO share_tokens
+        (token_hash, token_hmac, patient_id, invite_id, expires_at)
+      VALUES ('hash-cs1', 'hmac-cs1', ${PATIENT_A}::uuid,
+        ${invite.id}::uuid, NULL)
+      RETURNING id`;
+    if (!token) throw new Error("share_tokens insert returned no row");
+
+    let raised: { code?: string } | null = null;
+    try {
+      await db.sql`INSERT INTO conversation_starter_cache
+        (share_token_id, patient_id, status)
+        VALUES (${token.id}::uuid, ${PATIENT_A}::uuid, 'bogus')`;
+    } catch (err) {
+      raised = err as { code?: string };
+    }
+    // 23514 = check_violation
+    expect(raised?.code).toBe("23514");
+  });
+
+  // Story 5.2 T1.4 — ON DELETE CASCADE from share_tokens reaches
+  // conversation_starter_cache.
+  it("conversation_starter_cache cascades on share_tokens DELETE", async () => {
+    const [invite] = await db.sql<{ id: string }[]>`
+      INSERT INTO pending_invites (patient_id, display_name, identifier_hash)
+      VALUES (${PATIENT_A}::uuid, 'Dra. CS2',
+        'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff')
+      RETURNING id`;
+    if (!invite) throw new Error("invite insert returned no row");
+    const [token] = await db.sql<{ id: string }[]>`
+      INSERT INTO share_tokens
+        (token_hash, token_hmac, patient_id, invite_id, expires_at)
+      VALUES ('hash-cs2', 'hmac-cs2', ${PATIENT_A}::uuid,
+        ${invite.id}::uuid, now() + interval '7 days')
+      RETURNING id`;
+    if (!token) throw new Error("share_tokens insert returned no row");
+    await db.sql`INSERT INTO conversation_starter_cache
+      (share_token_id, patient_id, status)
+      VALUES (${token.id}::uuid, ${PATIENT_A}::uuid, 'queued')`;
+
+    await db.sql`DELETE FROM share_tokens WHERE id = ${token.id}::uuid`;
+    const remaining = await db.sql<{ count: string }[]>`
+      SELECT count(*)::text AS count FROM conversation_starter_cache
+      WHERE share_token_id = ${token.id}::uuid`;
+    expect(remaining[0]?.count).toBe("0");
+  });
+
   it("share_tokens ON DELETE CASCADE removes share_token_biomarkers rows", async () => {
     const [invite] = await db.sql<{ id: string }[]>`
       INSERT INTO pending_invites (patient_id, display_name, identifier_hash)

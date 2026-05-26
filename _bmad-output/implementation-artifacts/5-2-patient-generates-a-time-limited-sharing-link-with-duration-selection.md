@@ -305,13 +305,149 @@ No structural conflicts.
 
 ### Agent Model Used
 
-_To be filled by dev agent._
+claude-opus-4-7
 
 ### Debug Log References
 
+- `pnpm typecheck` — clean (17 packages).
+- `pnpm lint` — clean after collapsing 4 inline-type imports to top-level
+  `import type` and rewriting the optional-chain on `navigator.clipboard`
+  in the web resumo page to a plain `if` (the strict
+  `@typescript-eslint/no-unnecessary-condition` rule flagged the `?.`).
+- `pnpm --filter @healthtracker/api test:unit` — 177 pass (4 new
+  `create-share-token-validators.test.ts` cases covering the duration
+  enum + missing-duration rejection).
+- `pnpm --filter @healthtracker/llm-service test:unit` — 20 pass (4 new
+  `conversation-starter-stub.test.ts` cases pinning the stub-adapter
+  contract + the real Anthropic adapter's `Not implemented — Story 6.2`
+  throw).
+- `pnpm --filter @healthtracker/db test:unit` — no files (db package
+  only has integration + RLS suites, both excluded from `test:unit`).
+- `test:integration` + `test:rls` — NOT executed; Docker + `supabase
+start` not available in this sandbox. New tests authored against the
+  existing setup conventions; CI will run them.
+
 ### Completion Notes List
 
+- **Migration still deferred** per spec § "Out of scope". Schema +
+  RLS files are the source of truth; `pnpm db:push` emits a safe
+  `ALTER COLUMN DROP NOT NULL` for the `expires_at` flip in dev.
+- **pg-boss tx-aware enqueue → outbox pattern.** Inspected
+  `packages/api/src/trpc.ts` — there is no `boss` in `ctx`. `pg-boss`'s
+  `send()` would open its own connection and bypass the Drizzle `tx`.
+  Used the outbox pattern that's already in
+  `services/extraction/src/notifications/emit.ts` and
+  `services/llm/src/consumers/generate-letter.ts` (`INSERT INTO
+pgboss.job ... ON CONFLICT DO NOTHING`). Singleton key
+  `conversation_starter.<shareTokenId>` so a re-enqueue is a no-op.
+- **`getShareUrl` resolver shape.** Picked a discrete `protectedProcedure`
+  rather than expanding `getDraftConfig` so the magic-link `tokenHmac`
+  stays in a single tightly-scoped resolver (the `getDraftConfig`
+  return shape is already wired into the per-biomarker screen and a
+  resumo screen extension would have leaked `tokenHmac` through more
+  rendering paths than necessary).
+- **Web share-sheet shape.** `navigator.share` first, clipboard
+  fallback. Added `SHARE_URL_COPIED_PT_BR` + `SHARE_URL_ERROR_PT_BR`
+  in validators per the spec.
+- **Duration round-trip for resumo.** Derive the duration from
+  `share_tokens.expires_at` (NULL → no_expiry; otherwise approximate
+  by remaining-window buckets — 24h ≤ 36h, 7d ≤ 14d, else 30d). The
+  ceremony's resumo screen is rendered immediately after the picker,
+  so the approximation is correct in practice. Avoided adding a
+  `duration_label` column (schema change for ergonomic gain only;
+  the audit-log metadata already carries `duration` as the
+  authoritative record for Story 5.3).
+- **`expo-sharing` not present.** Used React Native's built-in
+  `Share.share({url, message: url})` — no new dependency required.
+- **`useTRPCClient` exposed** in `apps/web/src/trpc/react.tsx` so the
+  web resumo page can do imperative `trpcClient.sharing.getShareUrl.query`.
+- **`or` added to `@healthtracker/db` barrel** — needed for the
+  nullable-expires_at active-token predicate inside the
+  `createShareToken` idempotency short-circuit.
+- **AC10 backwards-compat carry-through verified:** the only two
+  callers of `createShareToken` (Expo + web `duracao` screens) are
+  both replaced in this story to pass `duration`.
+
 ### File List
+
+**Created**
+
+- `packages/db/policies/custom_rls_conversation_starter_cache.sql`
+- `packages/db/__tests__/rls/conversation_starter_cache.rls.test.ts`
+- `packages/ui/src/components/DurationOption/DurationOption.tsx`
+- `packages/ui/src/components/DurationOption/index.ts`
+- `packages/ui/src/components/NoExpiryConfirmDialog/NoExpiryConfirmDialog.tsx`
+- `packages/ui/src/components/NoExpiryConfirmDialog/index.ts`
+- `services/llm/src/consumers/generate-conversation-starter.ts`
+- `services/llm/__tests__/conversation-starter-stub.test.ts`
+- `apps/expo/src/app/(tabs)/compartilhar/[shareTokenId]/resumo.tsx`
+- `apps/web/src/app/compartilhar/[shareTokenId]/resumo/page.tsx`
+- `packages/api/__tests__/sharing/create-share-token-validators.test.ts`
+
+**Modified**
+
+- `packages/db/src/schema/sharing.ts` — `expires_at` nullable, new
+  `conversation_starter_cache` table + inferred types.
+- `packages/db/src/index.ts` — re-export `or`.
+- `packages/db/policies/custom_rls_share_tokens.sql` — doctor
+  predicate `(IS NULL OR > now())`.
+- `packages/db/policies/custom_rls_share_token_biomarkers.sql` —
+  same predicate update inside the EXISTS subquery.
+- `packages/db/__tests__/rls/helpers.ts` — `doctorWithNoExpiryToken`
+  identity.
+- `packages/db/__tests__/rls/share_tokens.rls.test.ts` — new
+  `doctorWithNoExpiryToken` case.
+- `packages/db/__tests__/integration/sharing-schema.integration.test.ts`
+  — three new assertions (nullable expires_at, status check
+  constraint, cascade delete for the cache).
+- `packages/validators/src/sharing.ts` — `ShareDuration` +
+  `shareDurationSchema`, `DURATION_OPTIONS`,
+  `DURATION_LABEL_PT_BR_FN`, no-expiry confirm copy,
+  `SHARE_SUMMARY_PT_BR_FN`, `SHARE_SUBMIT_BUTTON_PT_BR`,
+  `CONTINUE_BUTTON_PT_BR`, `SHARE_URL_COPIED_PT_BR`,
+  `SHARE_URL_ERROR_PT_BR`, `COMPARTILHAR_RESUMO_TITLE_PT_BR`,
+  `COMPARTILHAR_NOVO_DURACAO_TITLE_PT_BR`, three new
+  `SHARING_AUDIT_CONVERSATION_STARTER_*` constants,
+  `compartilharResumoRoute` (replaces `compartilharConcluidoRoute`).
+  Removed stale `COMPARTILHAR_NOVO_DURACAO_PROGRESS_PT_BR`,
+  `COMPARTILHAR_CONCLUIDO_PT_BR`, `SHARE_DEFAULT_DURATION_DAYS`,
+  `compartilharConcluidoRoute`.
+- `packages/api/src/sharing.ts` — `buildShareUrl` + boot-gated
+  `getWebAppUrl` (NFR-S6 shape mirroring HMAC secret).
+- `packages/api/src/router/sharing.ts` — `duration` param + duration
+  → expires_at map, conversation-starter cache row + outbox-style
+  pg-boss enqueue + `conversation_starter.queued` audit (all in same
+  tx as the share-token INSERT), new `getShareUrl` protected
+  procedure, idempotency short-circuit updated for nullable
+  expires_at.
+- `services/llm/src/adapters/anthropic.ts` — `ConversationStarterPayload`
+  / `ConversationStarterInput` types, `generateConversationStarter`
+  added to `LLMAdapter` (real throws `Not implemented — Story 6.2`;
+  stub returns canned 3 prompts + N biomarker cards).
+- `services/llm/src/index.ts` — register
+  `conversation_starter.generate` queue + consumer.
+- `apps/expo/src/app/(tabs)/compartilhar/novo/duracao.tsx` — replaced
+  the auto-fire placeholder with the real picker + no_expiry modal.
+- `apps/expo/src/app/(tabs)/compartilhar/[shareTokenId]/biomarcadores.tsx`
+  — route `onDone` now points at `compartilharResumoRoute`.
+- `apps/expo/src/app/(tabs)/compartilhar/_layout.tsx` — `Stack.Screen`
+  swapped `concluido` → `resumo`.
+- `apps/web/src/app/compartilhar/novo/duracao/page.tsx` — web parity
+  picker + modal.
+- `apps/web/src/app/compartilhar/[shareTokenId]/biomarcadores/page.tsx`
+  — route swap to `compartilharResumoRoute`.
+- `apps/web/src/trpc/react.tsx` — expose `useTRPCClient`.
+- `packages/ui/src/index.ts` — `DurationOption` + `NoExpiryConfirmDialog`
+  barrel exports.
+- `.env.example` — `WEB_APP_URL=http://localhost:3000` with doc.
+- `turbo.json` — `WEB_APP_URL` in `globalEnv`.
+- `CLAUDE.md` — `WEB_APP_URL` in required vars + Story 5.2 sharing
+  duration notes paragraph.
+
+**Deleted**
+
+- `apps/expo/src/app/(tabs)/compartilhar/[shareTokenId]/concluido.tsx`
+- `apps/web/src/app/compartilhar/[shareTokenId]/concluido/page.tsx`
 
 ### Known infra blockers (out-of-code)
 

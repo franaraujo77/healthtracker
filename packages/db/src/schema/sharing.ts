@@ -1,5 +1,11 @@
 import { sql } from "drizzle-orm";
-import { index, pgTable, primaryKey, uniqueIndex } from "drizzle-orm/pg-core";
+import {
+  check,
+  index,
+  pgTable,
+  primaryKey,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 
 import { Users } from "./users";
 
@@ -89,7 +95,14 @@ export const ShareTokens = pgTable(
       .uuid()
       .notNull()
       .references(() => PendingInvites.id, { onDelete: "cascade" }),
-    expiresAt: t.timestamp({ mode: "date", withTimezone: true }).notNull(),
+    /**
+     * Story 5.2 — nullable. `NULL` means "sem prazo" (no expiry).
+     * RLS predicates updated to `(expires_at IS NULL OR expires_at > now())`
+     * in `custom_rls_share_tokens.sql` + `custom_rls_share_token_biomarkers.sql`.
+     * Default-selection of `"7d"` lives in the duration-picker screen state
+     * (NOT a server-side default — that would mask callers that forgot to pick).
+     */
+    expiresAt: t.timestamp({ mode: "date", withTimezone: true }),
     /** AC11 — soft-delete signal owned by Story 5.4 revoke flow. */
     revokedAt: t.timestamp({ mode: "date", withTimezone: true }),
     createdAt: t
@@ -141,6 +154,59 @@ export const ShareTokenBiomarkers = pgTable(
   ],
 );
 
+/**
+ * Story 5.2 — Conversation Starter pre-gen cache.
+ *
+ * One row per share_token. Populated by the `conversation_starter.generate`
+ * pg-boss worker hosted in `services/llm` (enqueued at token-create time so
+ * the doctor's tap on the magic link hits a warm cache — NFR-P4
+ * <3s conversion window; cold LLM at doctor-tap = conversion failure).
+ *
+ * `expires_at` inherits the parent `share_tokens.expires_at`
+ * (nullable; NULL = no expiry). RLS doctor-principal SELECT requires
+ * `status = 'ready'` AND the parent token non-revoked + non-expired —
+ * see `custom_rls_conversation_starter_cache.sql`.
+ *
+ * Regeneration (when a new draw lands and invalidates) is owned by a
+ * later Story 5.x — Story 5.2 ships INSERT-only.
+ */
+export const ConversationStarterCache = pgTable(
+  "conversation_starter_cache",
+  (t) => ({
+    id: t.uuid().notNull().primaryKey().defaultRandom(),
+    shareTokenId: t
+      .uuid()
+      .notNull()
+      .references(() => ShareTokens.id, { onDelete: "cascade" }),
+    patientId: t
+      .uuid()
+      .notNull()
+      .references(() => Users.id, { onDelete: "cascade" }),
+    /** queued | ready | failed — check constraint enforces the closed set. */
+    status: t.text().notNull().default("queued"),
+    /** ConversationStarterPayload (prompts + biomarkerCards). NULL until ready. */
+    payload: t.jsonb(),
+    failureReason: t.text(),
+    generatedAt: t.timestamp({ mode: "date", withTimezone: true }),
+    /** Inherits share_tokens.expires_at — NULL means no expiry. */
+    expiresAt: t.timestamp({ mode: "date", withTimezone: true }),
+    createdAt: t
+      .timestamp({ mode: "date", withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  }),
+  (table) => [
+    // Exactly one cache row per share token. Regenerate via UPDATE.
+    uniqueIndex("conversation_starter_cache_share_token_uq").on(
+      table.shareTokenId,
+    ),
+    check(
+      "conversation_starter_cache_status_check",
+      sql`${table.status} in ('queued', 'ready', 'failed')`,
+    ),
+  ],
+);
+
 // Inferred row types for downstream consumers.
 export type PendingInvite = typeof PendingInvites.$inferSelect;
 export type NewPendingInvite = typeof PendingInvites.$inferInsert;
@@ -148,3 +214,7 @@ export type ShareToken = typeof ShareTokens.$inferSelect;
 export type NewShareToken = typeof ShareTokens.$inferInsert;
 export type ShareTokenBiomarker = typeof ShareTokenBiomarkers.$inferSelect;
 export type NewShareTokenBiomarker = typeof ShareTokenBiomarkers.$inferInsert;
+export type ConversationStarterCacheRow =
+  typeof ConversationStarterCache.$inferSelect;
+export type NewConversationStarterCache =
+  typeof ConversationStarterCache.$inferInsert;

@@ -6,6 +6,7 @@ import {
   createAnthropicAdapter,
   createStubLLMAdapter,
 } from "./adapters/anthropic.js";
+import { registerGenerateConversationStarterConsumer } from "./consumers/generate-conversation-starter.js";
 import { registerGenerateLetterConsumer } from "./consumers/generate-letter.js";
 import { sql } from "./db.js";
 import { registerBiomarkerSuggestionRoute } from "./routes/biomarker-suggestion.js";
@@ -41,8 +42,19 @@ await boss.createQueue("letter.generate", {
   retryDelay: 30,
   retryBackoff: true,
 });
+// Story 5.2 — Conversation Starter pre-gen queue. Same retry shape as
+// `letter.generate`: 3 attempts with exponential backoff. After
+// exhaustion the consumer's narrow-catch arm marks the cache row
+// `failed` so the Story 6.2 doctor surface can render an inline
+// "preparing failed" message.
+await boss.createQueue("conversation_starter.generate", {
+  retryLimit: 3,
+  retryDelay: 30,
+  retryBackoff: true,
+});
 
 await registerGenerateLetterConsumer(boss, { sql, llm });
+await registerGenerateConversationStarterConsumer(boss, { sql, llm });
 
 const app = Fastify({ logger: false });
 app.get("/healthz", () => ({ ok: true }));

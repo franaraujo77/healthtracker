@@ -134,6 +134,41 @@ describe("share_tokens RLS", () => {
     expect(rows).toHaveLength(0);
   });
 
+  // Story 5.2 — `expires_at IS NULL` ("Sem prazo") rows MUST be
+  // visible under the updated `(IS NULL OR > now())` predicate.
+  it("doctorWithNoExpiryToken sees the bound token when expires_at IS NULL", async () => {
+    const patientId = crypto.randomUUID();
+    const inviteId = crypto.randomUUID();
+    const tokenId = crypto.randomUUID();
+    await serviceClient.from("pending_invites").insert({
+      id: inviteId,
+      patient_id: patientId,
+      display_name: "Dra. N",
+      identifier_hash: "n".repeat(64),
+    });
+    seededInviteIds.push(inviteId);
+    await serviceClient.from("share_tokens").insert({
+      id: tokenId,
+      token_hash: `hash-${tokenId}`,
+      token_hmac: `hmac-${tokenId}`,
+      patient_id: patientId,
+      invite_id: inviteId,
+      expires_at: null,
+      revoked_at: null,
+    });
+    seededTokenIds.push(tokenId);
+    const run = asIdentity("doctorWithNoExpiryToken", {
+      patientId,
+      shareTokenId: tokenId,
+    });
+    const rows = await run(
+      (tx) => tx<{ id: string }[]>`
+      SELECT id FROM share_tokens WHERE id = ${tokenId}::uuid
+    `,
+    );
+    expect(rows).toHaveLength(1);
+  });
+
   // Patch #13 — 6th identity. serviceRole MUST see all share tokens.
   it("serviceRole bypasses RLS and sees every share_tokens row", async () => {
     const patientId = crypto.randomUUID();

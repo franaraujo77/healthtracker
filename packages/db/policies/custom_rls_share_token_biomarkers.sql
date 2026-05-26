@@ -32,6 +32,6 @@ CREATE POLICY "share_token_biomarkers_select_own_doctor" ON "share_token_biomark
       SELECT 1 FROM share_tokens
       WHERE share_tokens.id = share_token_biomarkers.share_token_id
         AND share_tokens.revoked_at IS NULL
-        AND share_tokens.expires_at > now()
+        AND (share_tokens.expires_at IS NULL OR share_tokens.expires_at > now())
     )
   );

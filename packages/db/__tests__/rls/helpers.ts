@@ -19,7 +19,11 @@ export type IdentityType =
   // adversarial RLS surfaces used by `share_*.rls.test.ts`.
   | "doctorWithActiveToken"
   | "doctorWithExpiredToken"
-  | "doctorWithRevokedToken";
+  | "doctorWithRevokedToken"
+  // Story 5.2 — doctor principal bound to a token whose `expires_at`
+  // is NULL (the "Sem prazo" branch). MUST SELECT successfully under
+  // the updated `(IS NULL OR > now())` RLS predicate.
+  | "doctorWithNoExpiryToken";
 
 export interface IdentityOptions {
   patientId: string;
@@ -176,6 +180,7 @@ async function applyClaims(
     case "doctorWithActiveToken":
     case "doctorWithExpiredToken":
     case "doctorWithRevokedToken":
+    case "doctorWithNoExpiryToken":
       await setLocal(tx, "app.current_user_role", "doctor");
       if (opts.shareTokenId) {
         await setLocal(tx, "app.current_share_token_id", opts.shareTokenId);

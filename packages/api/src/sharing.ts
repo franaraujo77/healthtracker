@@ -127,6 +127,42 @@ export interface PatientCategoryRow {
   label: string;
 }
 
+/**
+ * Story 5.2 T7.2 — composes the magic-link share URL.
+ *
+ * Shape: `${WEB_APP_URL}/m/${shareTokenId}.${tokenHmac}`. The `/m/`
+ * doctor-side route is owned by Epic 6; Story 5.2 only generates the
+ * URL the share-sheet hands to whichever app the patient picks.
+ *
+ * `WEB_APP_URL` is rejected at boot in non-development/test envs to
+ * prevent a missing var from silently emitting `undefined/...` links.
+ */
+export function buildShareUrl(shareTokenId: string, tokenHmac: string): string {
+  const base = getWebAppUrl();
+  return `${base}/m/${shareTokenId}.${tokenHmac}`;
+}
+
+let warnedAboutDevWebAppUrl = false;
+const DEV_FALLBACK_WEB_APP_URL = "http://localhost:3000";
+
+function getWebAppUrl(): string {
+  const fromEnv = process.env.WEB_APP_URL;
+  if (fromEnv && fromEnv.length > 0) return fromEnv.replace(/\/$/, "");
+  const env = process.env.NODE_ENV;
+  if (env !== "development" && env !== "test") {
+    throw new Error(
+      "WEB_APP_URL is required outside development/test (Story 5.2)",
+    );
+  }
+  if (!warnedAboutDevWebAppUrl) {
+    warnedAboutDevWebAppUrl = true;
+    console.warn(
+      "[sharing] WEB_APP_URL is empty — using dev-only fallback http://localhost:3000",
+    );
+  }
+  return DEV_FALLBACK_WEB_APP_URL;
+}
+
 export async function getDistinctCategoriesForPatient(
   database: AuditDb,
   patientId: string,
