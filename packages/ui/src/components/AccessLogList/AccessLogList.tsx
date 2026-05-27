@@ -58,6 +58,14 @@ export interface AccessLogListProps {
   fetchNextPage: () => void;
   refetch: () => void;
   upgradeRequired: boolean;
+  /**
+   * Story 5.4 — hoisted to the screen so the dialog + 5s timer +
+   * UndoToast can live above the list. The screen also injects
+   * `tokenStatus="revoked-pending"` on rows whose shareTokenId is
+   * in the parent's `revokingTokenIds` set (see the screens'
+   * `accumulated` mapper).
+   */
+  onRevokePress?: (shareTokenId: string, displayName: string) => void;
 }
 
 export function AccessLogList(props: AccessLogListProps): React.ReactElement {
@@ -70,6 +78,7 @@ export function AccessLogList(props: AccessLogListProps): React.ReactElement {
     fetchNextPage,
     refetch,
     upgradeRequired,
+    onRevokePress,
   } = props;
 
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
@@ -168,6 +177,8 @@ export function AccessLogList(props: AccessLogListProps): React.ReactElement {
             duration={duration}
             expanded={expandedIds.has(row.id)}
             onPress={toggleExpanded}
+            shareTokenId={row.shareTokenId}
+            onRevokePress={onRevokePress}
           />
         );
       })}

@@ -222,13 +222,44 @@ No structural conflicts.
 
 ### Agent Model Used
 
-_To be filled by dev agent._
+Claude Opus 4.7 (claude-opus-4-7), 2026-05-26.
 
 ### Debug Log References
 
+- Verified `@tamagui/toast` is NOT a workspace dep (`packages/ui/package.json`) — implemented `UndoToast` as a custom Tamagui-primitives component with a single `setTimeout` (auth source of truth for the 5s deadline) + a 50ms `setInterval` for the linear progress bar.
+- `protectedProcedure` chosen for `revokeShareToken` (not `premiumProcedure`) — a downgraded patient must still be able to revoke their existing shares (LGPD control plane).
+- Pending revoke set keyed by `shareTokenId`; React triggers re-render via `setRevokingTokenIds(new Set(prev).add(id))` (Set referential equality). `timersRef.current` is a `Map<string, Timeout>` ref so re-renders don't drop handles.
+
 ### Completion Notes List
 
+1. **`@tamagui/toast` vs custom Animated.View** — package not present in workspace; used custom Tamagui-primitives component.
+2. **5-second countdown indicator** — implemented as a linear progress bar driven by a single `setInterval(50ms)` (chosen over CSS keyframes for cross-platform parity — Reanimated would be a heavyweight add for one feature). The auto-dismiss is owned by a separate `setTimeout(durationMs)` so dropped interval ticks under load can't extend the window.
+3. **`revokingTokenIds: Set<string>` vs `Record<string, true>`** — `Set` chosen to match the existing `expandedIds: Set<string>` pattern in `AccessLogList` (Story 5.3).
+4. **Multi-revoke toast surface** — confirmed with spec: most-recent toast wins; older timers continue silently. Documented in the Expo screen's docblock.
+5. **Cleanup-on-unmount** — fires pending revokes immediately (user already confirmed). NEVER cancels (anti-pattern per spec). Uses a `useRef` over `fireRevoke` to avoid stale closures while still running with `[]` deps.
+
 ### File List
+
+**Created**
+
+- `packages/api/__tests__/sharing/revoke-share-token-validators.test.ts` — Zod + copy-function unit tests for `revokeShareTokenInputSchema`, `REVOKE_*` constants, and the new `"revoked-pending"` enum member.
+- `packages/api/__tests__/sharing/revoke-share-token.integration.test.ts` — `it.todo()` placeholders + synchronous audit-constant assertions.
+- `packages/ui/src/components/RevokeConfirmDialog/RevokeConfirmDialog.tsx` — Tier-2 confirmation dialog; mirrors `NoExpiryConfirmDialog`.
+- `packages/ui/src/components/RevokeConfirmDialog/index.ts` — barrel.
+- `packages/ui/src/components/RevokeConfirmDialog/RevokeConfirmDialog.test.tsx` — `@ts-nocheck` runner-ready scaffold.
+- `packages/ui/src/components/UndoToast/UndoToast.tsx` — bottom-anchored toast with linear countdown; backdrop not-dismissable per spec.
+- `packages/ui/src/components/UndoToast/index.ts` — barrel.
+- `packages/ui/src/components/UndoToast/UndoToast.test.tsx` — fake-timer behavior scaffold (5s expiry; undo cancellation; visible=false short-circuit).
+
+**Modified**
+
+- `packages/validators/src/sharing.ts` — added `SHARING_AUDIT_TOKEN_REVOKED`, `revokeShareTokenInputSchema` / `revokeShareTokenOutputSchema`, `"revoked-pending"` to `ACCESS_LOG_TOKEN_STATUSES`, extended `ACCESS_LOG_TOKEN_STATUS_PT_BR_FN`, added the full revoke-ceremony copy block + `REVOKE_TIMEOUT_MS`.
+- `packages/api/src/router/sharing.ts` — new `revokeShareToken` `protectedProcedure.mutation`; tx wrapper + `SELECT FOR UPDATE` + audit-in-tx + narrow `isUniqueViolation` catch.
+- `packages/ui/src/components/AccessLogItem/AccessLogItem.tsx` — added `shareTokenId` + `onRevokePress` props; dim treatment for `"revoked-pending"`; revoke button gated on `event === "share_token.created"` AND active token status.
+- `packages/ui/src/components/AccessLogList/AccessLogList.tsx` — surfaces `onRevokePress` and pipes `row.shareTokenId` down.
+- `packages/ui/src/index.ts` — re-exports `RevokeConfirmDialog` + `UndoToast`.
+- `apps/expo/src/app/(tabs)/acessos/index.tsx` — full revoke ceremony (dialog state, timers ref, undo toast, cleanup-on-unmount that flushes pending mutations).
+- `apps/web/src/app/acessos/page.tsx` — web parity.
 
 ### Known infra blockers (out-of-code)
 

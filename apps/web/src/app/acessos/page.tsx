@@ -1,37 +1,83 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import type { AccessLogItemRow } from "@healthtracker/validators";
-import { AccessLogList } from "@healthtracker/ui";
+import {
+  AccessLogList,
+  RevokeConfirmDialog,
+  UndoToast,
+} from "@healthtracker/ui";
 import {
   ACCESS_LOG_REFETCH_THROTTLE_MS,
   ACCESS_LOG_TITLE_PT_BR,
+  REVOKE_TIMEOUT_MS,
+  REVOKE_UNDO_BUTTON_PT_BR,
+  REVOKE_UNDO_TOAST_PT_BR,
+  REVOKE_UNDONE_TOAST_PT_BR,
 } from "@healthtracker/validators";
 
 import { useTRPC } from "~/trpc/react";
 
 /**
- * Story 5.3 — Acessos page, web parity with `apps/expo/.../acessos`.
+ * Story 5.3 + 5.4 — Acessos page, web parity.
  *
- * Tab-focus refetch on web: `visibilitychange` is more reliable than
- * `focus` for SPA tab-switching (`focus` only fires when the OS
- * window regains focus; `visibilitychange` covers the patient
- * switching browser tabs within the same window). Decision documented
- * in the Dev Agent Record.
- *
- * Pagination follows the Expo screen's pattern — see that file for
- * the rationale on the prior-pages snapshot and the
- * react-hooks/set-state-in-effect avoidance.
+ * Revoke ceremony — see the Expo screen's docblock; the shape is
+ * identical (state lives in `useState` + a `timersRef` Map; cleanup
+ * on unmount fires pending revokes).
  */
 export default function AcessosPage(): React.ReactElement {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   const [priorPages, setPriorPages] = useState<AccessLogItemRow[]>([]);
-  // null sentinel = "never refetched yet"; first visibility-change refetches.
   const lastRefetchAt = useRef<number | null>(null);
+
+  const [pendingDialog, setPendingDialog] = useState<{
+    shareTokenId: string;
+    displayName: string;
+  } | null>(null);
+  const [revokingTokenIds, setRevokingTokenIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [activeToast, setActiveToast] = useState<{
+    shareTokenId: string;
+    message: string;
+  } | null>(null);
+  const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+    new Map(),
+  );
+
+  const revokeMutation = useMutation(
+    trpc.sharing.revokeShareToken.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({
+          queryKey: trpc.sharing.listAccessLog.queryKey(),
+        });
+      },
+    }),
+  );
+
+  const fireRevoke = useCallback(
+    (shareTokenId: string) => {
+      timersRef.current.delete(shareTokenId);
+      revokeMutation.mutate(
+        { shareTokenId },
+        {
+          onSettled: () => {
+            setRevokingTokenIds((prev) => {
+              if (!prev.has(shareTokenId)) return prev;
+              const next = new Set(prev);
+              next.delete(shareTokenId);
+              return next;
+            });
+          },
+        },
+      );
+    },
+    [revokeMutation],
+  );
 
   const query = useQuery({
     ...trpc.sharing.listAccessLog.queryOptions({ cursor, pageSize: 20 }),
@@ -39,20 +85,23 @@ export default function AcessosPage(): React.ReactElement {
   });
 
   const accumulated = useMemo<AccessLogItemRow[]>(() => {
-    // Patch #4 (2026-05-26) — gate prior pages behind `upgradeRequired`
-    // to avoid stranded rows under the upgrade prompt. The setState-in-
-    // effect alternative is blocked by react-hooks lint.
     if (query.data?.upgradeRequired) return [];
     const liveItems = query.data?.items ?? [];
-    if (priorPages.length === 0) return liveItems;
-    const seen = new Set(priorPages.map((r) => r.id));
-    return [...priorPages, ...liveItems.filter((r) => !seen.has(r.id))];
-  }, [priorPages, query.data]);
+    const merged =
+      priorPages.length === 0
+        ? liveItems
+        : (() => {
+            const seen = new Set(priorPages.map((r) => r.id));
+            return [...priorPages, ...liveItems.filter((r) => !seen.has(r.id))];
+          })();
+    if (revokingTokenIds.size === 0) return merged;
+    return merged.map((r) =>
+      r.shareTokenId && revokingTokenIds.has(r.shareTokenId)
+        ? { ...r, tokenStatus: "revoked-pending" as const }
+        : r,
+    );
+  }, [priorPages, query.data, revokingTokenIds]);
 
-  // Review-fix Patch #1 — invalidate the whole `listAccessLog` query
-  // key instead of calling `query.refetch()` on the old cursor's
-  // observer (which would race the `setCursor(undefined)` state
-  // update).
   const refetch = useCallback(() => {
     setCursor(undefined);
     setPriorPages([]);
@@ -62,9 +111,6 @@ export default function AcessosPage(): React.ReactElement {
     });
   }, [queryClient, trpc.sharing.listAccessLog]);
 
-  // AC10 — refetch on tab visibility change, throttled (Review
-  // decision A): only refresh if last refetch was more than
-  // ACCESS_LOG_REFETCH_THROTTLE_MS ago.
   useEffect(() => {
     const handler = () => {
       if (document.visibilityState !== "visible") return;
@@ -84,6 +130,82 @@ export default function AcessosPage(): React.ReactElement {
     setCursor(nc);
   }, [accumulated, query.data?.nextCursor]);
 
+  const handleRevokePress = useCallback(
+    (shareTokenId: string, displayName: string) => {
+      setPendingDialog({ shareTokenId, displayName });
+    },
+    [],
+  );
+
+  const handleConfirmRevoke = useCallback(() => {
+    if (!pendingDialog) return;
+    const { shareTokenId } = pendingDialog;
+    setRevokingTokenIds((prev) => {
+      const next = new Set(prev);
+      next.add(shareTokenId);
+      return next;
+    });
+    setActiveToast({ shareTokenId, message: REVOKE_UNDO_TOAST_PT_BR });
+    const handle = setTimeout(() => {
+      fireRevoke(shareTokenId);
+      setActiveToast((prev) =>
+        prev?.shareTokenId === shareTokenId ? null : prev,
+      );
+    }, REVOKE_TIMEOUT_MS);
+    timersRef.current.set(shareTokenId, handle);
+    setPendingDialog(null);
+  }, [pendingDialog, fireRevoke]);
+
+  const handleCancelDialog = useCallback(() => {
+    setPendingDialog(null);
+  }, []);
+
+  const handleUndo = useCallback(() => {
+    const current = activeToast;
+    if (!current) return;
+    const { shareTokenId } = current;
+    const handle = timersRef.current.get(shareTokenId);
+    if (handle) {
+      clearTimeout(handle);
+      timersRef.current.delete(shareTokenId);
+    }
+    setRevokingTokenIds((prev) => {
+      if (!prev.has(shareTokenId)) return prev;
+      const next = new Set(prev);
+      next.delete(shareTokenId);
+      return next;
+    });
+    setActiveToast({
+      shareTokenId: `${shareTokenId}:undone`,
+      message: REVOKE_UNDONE_TOAST_PT_BR,
+    });
+  }, [activeToast]);
+
+  const handleToastTimeout = useCallback(() => {
+    setActiveToast(null);
+  }, []);
+
+  // AC8 cleanup — see the Expo screen's comment. Ref write must
+  // happen inside an effect, not during render (react-hooks/refs).
+  const fireRevokeRef = useRef(fireRevoke);
+  useEffect(() => {
+    fireRevokeRef.current = fireRevoke;
+  }, [fireRevoke]);
+  useEffect(() => {
+    // Snapshot refs at mount so the cleanup doesn't trip
+    // react-hooks/exhaustive-deps. Both refs hold stable identity
+    // for the component's lifetime.
+    const timers = timersRef.current;
+    const fireFnRef = fireRevokeRef;
+    return () => {
+      for (const [id, handle] of timers.entries()) {
+        clearTimeout(handle);
+        fireFnRef.current(id);
+      }
+      timers.clear();
+    };
+  }, []);
+
   return (
     <main style={{ padding: 24, maxWidth: 720, margin: "0 auto" }}>
       <h1 style={{ marginBottom: 16 }}>{ACCESS_LOG_TITLE_PT_BR}</h1>
@@ -99,6 +221,26 @@ export default function AcessosPage(): React.ReactElement {
         fetchNextPage={fetchNextPage}
         refetch={refetch}
         upgradeRequired={query.data?.upgradeRequired ?? false}
+        onRevokePress={handleRevokePress}
+      />
+
+      <RevokeConfirmDialog
+        open={pendingDialog !== null}
+        displayName={pendingDialog?.displayName ?? ""}
+        onConfirm={handleConfirmRevoke}
+        onCancel={handleCancelDialog}
+      />
+
+      {/* See Expo screen — `key` forces remount + state reset. */}
+      <UndoToast
+        key={activeToast?.shareTokenId ?? "none"}
+        visible={activeToast !== null}
+        toastId={activeToast?.shareTokenId ?? "none"}
+        message={activeToast?.message ?? ""}
+        undoLabel={REVOKE_UNDO_BUTTON_PT_BR}
+        onUndo={handleUndo}
+        onTimeout={handleToastTimeout}
+        durationMs={REVOKE_TIMEOUT_MS}
       />
     </main>
   );

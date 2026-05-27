@@ -39,6 +39,13 @@ export const SHARING_AUDIT_CONVERSATION_STARTER_GENERATED =
 export const SHARING_AUDIT_CONVERSATION_STARTER_FAILED =
   "conversation_starter.failed" as const;
 
+/**
+ * Story 5.4 — patient-actor revoke audit. The doctor-side
+ * `share_token.rejected` audit (fired when a doctor presents a
+ * revoked token) is Epic 6's territory.
+ */
+export const SHARING_AUDIT_TOKEN_REVOKED = "share_token.revoked" as const;
+
 // ---------------------------------------------------------------------------
 // Zod input schemas (T5.1)
 // ---------------------------------------------------------------------------
@@ -96,6 +103,23 @@ export const getDraftConfigInputSchema = z.object({
   shareTokenId: z.uuid(),
 });
 export type GetDraftConfigInput = z.infer<typeof getDraftConfigInputSchema>;
+
+// ---------------------------------------------------------------------------
+// Story 5.4 — revokeShareToken I/O (T1.2)
+// ---------------------------------------------------------------------------
+
+export const revokeShareTokenInputSchema = z.object({
+  shareTokenId: z.uuid(),
+});
+export type RevokeShareTokenInput = z.infer<typeof revokeShareTokenInputSchema>;
+
+export const revokeShareTokenOutputSchema = z.object({
+  shareTokenId: z.uuid(),
+  revokedAt: z.iso.datetime(),
+});
+export type RevokeShareTokenOutput = z.infer<
+  typeof revokeShareTokenOutputSchema
+>;
 
 // ---------------------------------------------------------------------------
 // pt-BR copy + a11y (T5.2)
@@ -309,6 +333,11 @@ export const ACCESS_LOG_TOKEN_STATUSES = [
   "expirado",
   "revogado",
   "sem prazo",
+  // Story 5.4 — transient client-side state during the 5s
+  // deferred-server-write undo window. Never returned by the
+  // resolver; injected by the Acessos screen via the
+  // `revokingTokenIds: Set<string>` override.
+  "revoked-pending",
 ] as const;
 export type AccessLogTokenStatus = (typeof ACCESS_LOG_TOKEN_STATUSES)[number];
 
@@ -386,6 +415,8 @@ export function ACCESS_LOG_TOKEN_STATUS_PT_BR_FN(
       return "Revogado";
     case "sem prazo":
       return "Sem prazo";
+    case "revoked-pending":
+      return "Revogando…";
   }
 }
 
@@ -463,3 +494,38 @@ export const ACCESS_LOG_ROUTE = "/acessos";
  * the scroll-state loss on transient backgrounds.
  */
 export const ACCESS_LOG_REFETCH_THROTTLE_MS = 30_000;
+
+// ---------------------------------------------------------------------------
+// Story 5.4 — Revoke ceremony copy (T5.1)
+// ---------------------------------------------------------------------------
+
+/**
+ * 5-second deferred-server-write undo window. The screen owns the
+ * timer; the timer expiry fires `sharingRouter.revokeShareToken`.
+ * Tapping "Desfazer" within the window clears the timer and no
+ * server mutation happens — no DB churn, no audit noise.
+ */
+export const REVOKE_TIMEOUT_MS = 5_000;
+
+export const REVOKE_BUTTON_LABEL_PT_BR = "Revogar acesso";
+
+export function REVOKE_BUTTON_A11Y_PT_BR_FN(displayName: string): string {
+  return `Revogar acesso de ${displayName} ao seu histórico de saúde`;
+}
+
+export function REVOKE_CONFIRM_BODY_PT_BR_FN(displayName: string): string {
+  return `Tem certeza? ${displayName} perderá acesso aos seus dados imediatamente.`;
+}
+
+export const REVOKE_CONFIRM_BUTTON_PT_BR = "Revogar";
+export const REVOKE_CONFIRM_CANCEL_PT_BR = "Cancelar";
+
+export const REVOKE_UNDO_TOAST_PT_BR = "Acesso revogado. Desfazer?";
+export const REVOKE_UNDO_BUTTON_PT_BR = "Desfazer";
+export const REVOKE_UNDONE_TOAST_PT_BR = "Revogação cancelada.";
+
+/**
+ * Inline hint rendered next to the "Revogando…" badge while the
+ * 5s timer runs, so the patient knows where to find the undo.
+ */
+export const ACCESS_LOG_REVOKING_HINT_PT_BR = "(Desfazer no toast)";

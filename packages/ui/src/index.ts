@@ -50,6 +50,10 @@ export { DurationOption } from "./components/DurationOption";
 export type { DurationOptionProps } from "./components/DurationOption";
 export { NoExpiryConfirmDialog } from "./components/NoExpiryConfirmDialog";
 export type { NoExpiryConfirmDialogProps } from "./components/NoExpiryConfirmDialog";
+export { RevokeConfirmDialog } from "./components/RevokeConfirmDialog";
+export type { RevokeConfirmDialogProps } from "./components/RevokeConfirmDialog";
+export { UndoToast } from "./components/UndoToast";
+export type { UndoToastProps } from "./components/UndoToast";
 export {
   Toast,
   ToastProvider,

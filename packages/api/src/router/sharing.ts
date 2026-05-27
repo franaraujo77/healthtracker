@@ -23,10 +23,12 @@ import {
   getDraftConfigInputSchema,
   isAccessLogEventKind,
   listAccessLogInputSchema,
+  revokeShareTokenInputSchema,
   SHARING_AUDIT_CONFIGURED,
   SHARING_AUDIT_CONVERSATION_STARTER_QUEUED,
   SHARING_AUDIT_PENDING_INVITE_CREATED,
   SHARING_AUDIT_TOKEN_CREATED,
+  SHARING_AUDIT_TOKEN_REVOKED,
 } from "@healthtracker/validators";
 
 import { writeAuditLog } from "../audit";
@@ -504,6 +506,89 @@ export const sharingRouter = {
         });
 
         return { ok: true as const };
+      });
+    }),
+
+  /**
+   * Story 5.4 — `revokeShareToken` (AC4, AC10, AC11).
+   *
+   * Patient flips `share_tokens.revoked_at` and writes a
+   * `share_token.revoked` audit row in the same tx. The 5-second
+   * client-side undo window is a DEFERRED-SERVER-WRITE timer on the
+   * Acessos screen — when the patient confirms in the dialog, the
+   * screen starts a 5s `setTimeout` that fires this mutation. If the
+   * patient taps "Desfazer" within the window, the timeout is
+   * cancelled and this resolver is never called. Cancelled revokes
+   * never hit the DB; no audit noise; no `unrevoke` mutation needed.
+   *
+   * `protectedProcedure` (not `premiumProcedure`) — a patient whose
+   * subscription downgrades mid-window must still be able to revoke
+   * their existing shares (LGPD: revoke is a control plane, not a
+   * Premium feature). 404 (not 403) on cross-patient OR
+   * already-revoked lookup (Story 5.1 R1 discipline). The
+   * `revoked_at IS NULL` guard + `FOR UPDATE` row-lock together
+   * close the TOCTOU window against concurrent re-revoke (the lock
+   * serializes the two callers; the second sees the row already
+   * `revoked_at`-set and 404s on the next iteration).
+   */
+  revokeShareToken: protectedProcedure
+    .input(revokeShareTokenInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const patientId = ctx.session.user.id;
+
+      return ctx.db.transaction(async (tx) => {
+        // SELECT FOR UPDATE — lock the row for the rest of the tx so
+        // a concurrent revoke can't see "still active" and race the
+        // UPDATE. The `revoked_at IS NULL` guard short-circuits
+        // re-revocation: a second caller pre-empted by the first
+        // will return 0 rows here and 404.
+        const tokenRows = await tx.execute<{ id: string }>(sql`
+          SELECT id
+          FROM ${ShareTokens}
+          WHERE ${ShareTokens.id} = ${input.shareTokenId}
+            AND ${ShareTokens.patientId} = ${patientId}
+            AND ${ShareTokens.revokedAt} IS NULL
+          FOR UPDATE
+        `);
+        if (!tokenRows[0]) {
+          throw new TRPCError({ code: "NOT_FOUND" });
+        }
+
+        const revokedAt = new Date();
+
+        try {
+          await tx
+            .update(ShareTokens)
+            .set({ revokedAt })
+            .where(eq(ShareTokens.id, input.shareTokenId));
+        } catch (err) {
+          // Narrow catch — only the defensive 23505 path is folded.
+          // `share_tokens` has no partial unique index that would
+          // surface 23505 on UPDATE today, but keeping the predicate
+          // narrow matches the round-1 discipline of Stories 5.1–5.3
+          // (broad `catch (err)` swallows programmer errors).
+          if (isUniqueViolation(err)) {
+            throw new TRPCError({
+              code: "INTERNAL_SERVER_ERROR",
+              message: "revokeShareToken: unexpected 23505 on UPDATE",
+            });
+          }
+          throw err;
+        }
+
+        await writeAuditLog(tx, {
+          actorId: patientId,
+          actorType: "patient",
+          event: SHARING_AUDIT_TOKEN_REVOKED,
+          resourceId: input.shareTokenId,
+          resourceType: "share_token",
+          metadata: { revokedAt: revokedAt.toISOString() },
+        });
+
+        return {
+          shareTokenId: input.shareTokenId,
+          revokedAt: revokedAt.toISOString(),
+        };
       });
     }),
 
