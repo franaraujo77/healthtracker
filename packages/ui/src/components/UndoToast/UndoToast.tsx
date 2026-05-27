@@ -47,7 +47,13 @@ export interface UndoToastProps {
    */
   toastId: string;
   message: string;
-  undoLabel: string;
+  /**
+   * Story 5.4 review-fix Patch #3 — when `null`, the "Desfazer"
+   * button is NOT rendered. Used by the cancel-confirmation toast
+   * surface ("Revogação cancelada.") which has nothing to undo and
+   * would otherwise loop via `handleUndo` infinitely.
+   */
+  undoLabel: string | null;
   onUndo: () => void;
   onTimeout: () => void;
   durationMs?: number;
@@ -105,10 +111,13 @@ export function UndoToast(props: UndoToastProps): React.ReactElement | null {
 
   if (!visible) return null;
 
-  const progressPct = Math.max(
-    0,
-    Math.min(100, (remaining / durationMs) * 100),
-  );
+  // Patch #9 (Story 5.4 review-fix) — NaN guard. If a caller passes
+  // `durationMs <= 0`, division would yield NaN → `width: NaN%`
+  // render glitch. Short-circuit to an empty bar.
+  const progressPct =
+    durationMs <= 0
+      ? 0
+      : Math.max(0, Math.min(100, (remaining / durationMs) * 100));
 
   return (
     <YStack
@@ -129,9 +138,11 @@ export function UndoToast(props: UndoToastProps): React.ReactElement | null {
         <Text fontSize="$3" color="$textPrimary" flex={1}>
           {message}
         </Text>
-        <Button variant="secondary" onPress={onUndo}>
-          {undoLabel}
-        </Button>
+        {undoLabel !== null ? (
+          <Button variant="secondary" onPress={onUndo}>
+            {undoLabel}
+          </Button>
+        ) : null}
       </XStack>
       {/*
         Linear progress bar (5→0 over 5s). A circular ring would

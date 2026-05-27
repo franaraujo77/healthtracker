@@ -5,7 +5,7 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 
-import type { AccessLogTokenStatus } from "@healthtracker/validators";
+import type { ServerAccessLogTokenStatus } from "@healthtracker/validators";
 import { and, eq, isNull, sql } from "@healthtracker/db";
 import { Observations } from "@healthtracker/db/schema";
 
@@ -271,7 +271,7 @@ export function computeAccessLogTokenStatus(
   expiresAt: Date | null,
   revokedAt: Date | null,
   now: Date = new Date(),
-): AccessLogTokenStatus | null {
+): ServerAccessLogTokenStatus | null {
   if (revokedAt) return "revogado";
   if (expiresAt === null) return "sem prazo";
   if (expiresAt.getTime() <= now.getTime()) return "expirado";
@@ -288,7 +288,7 @@ export function resolveAccessLogTokenStatus(args: {
   expiresAt: Date | null;
   revokedAt: Date | null;
   now?: Date;
-}): AccessLogTokenStatus | null {
+}): ServerAccessLogTokenStatus | null {
   if (!args.hasJoinedToken) return null;
   return computeAccessLogTokenStatus(args.expiresAt, args.revokedAt, args.now);
 }

@@ -328,15 +328,26 @@ export function isAccessLogEventKind(
  * `expires_at` + `revoked_at` + `now()`. Consumers never see the raw
  * timestamp fields so they can't write conflicting predicates.
  */
-export const ACCESS_LOG_TOKEN_STATUSES = [
+/**
+ * Story 5.4 review-fix Patch #7 — split the server vs client variants.
+ * The server resolver MUST NEVER return `"revoked-pending"`; that is a
+ * transient client-side overlay injected by the Acessos screen via the
+ * `revokingTokenIds: Set<string>` override. The output Zod schema uses
+ * the server enum so a buggy/malicious response carrying
+ * `"revoked-pending"` is Zod-rejected at the tRPC boundary; the
+ * `AccessLogItem` prop type uses the client enum.
+ */
+export const SERVER_ACCESS_LOG_TOKEN_STATUSES = [
   "ativo",
   "expirado",
   "revogado",
   "sem prazo",
-  // Story 5.4 — transient client-side state during the 5s
-  // deferred-server-write undo window. Never returned by the
-  // resolver; injected by the Acessos screen via the
-  // `revokingTokenIds: Set<string>` override.
+] as const;
+export type ServerAccessLogTokenStatus =
+  (typeof SERVER_ACCESS_LOG_TOKEN_STATUSES)[number];
+
+export const ACCESS_LOG_TOKEN_STATUSES = [
+  ...SERVER_ACCESS_LOG_TOKEN_STATUSES,
   "revoked-pending",
 ] as const;
 export type AccessLogTokenStatus = (typeof ACCESS_LOG_TOKEN_STATUSES)[number];
@@ -363,10 +374,20 @@ export const accessLogItemRowSchema = z.object({
   createdAt: z.date(),
   displayName: z.string().nullable(),
   shareTokenId: z.uuid().nullable(),
-  tokenStatus: z.enum(ACCESS_LOG_TOKEN_STATUSES).nullable(),
+  tokenStatus: z.enum(SERVER_ACCESS_LOG_TOKEN_STATUSES).nullable(),
   metadata: z.record(z.string(), z.unknown()),
 });
 export type AccessLogItemRow = z.infer<typeof accessLogItemRowSchema>;
+
+/**
+ * Story 5.4 review-fix Patch #7 — client-side row variant. The
+ * server emits `ServerAccessLogTokenStatus`; the Acessos screen
+ * overlays `"revoked-pending"` for rows currently inside the 5s
+ * undo window. UI components consume this wider type.
+ */
+export type ClientAccessLogItemRow = Omit<AccessLogItemRow, "tokenStatus"> & {
+  tokenStatus: AccessLogTokenStatus | null;
+};
 
 export const listAccessLogOutputSchema = z.object({
   items: z.array(accessLogItemRowSchema),
@@ -523,6 +544,15 @@ export const REVOKE_CONFIRM_CANCEL_PT_BR = "Cancelar";
 export const REVOKE_UNDO_TOAST_PT_BR = "Acesso revogado. Desfazer?";
 export const REVOKE_UNDO_BUTTON_PT_BR = "Desfazer";
 export const REVOKE_UNDONE_TOAST_PT_BR = "Revogação cancelada.";
+
+/**
+ * Story 5.4 review-fix Patch #1 — toast surface when the
+ * server-side `revokeShareToken` mutation fails (network / 5xx /
+ * unknown). The 404 path (re-revoke after the row was already
+ * revoked elsewhere) is silenced — the refetch surfaces the correct
+ * `revogado` state.
+ */
+export const REVOKE_FAILED_PT_BR = "Não foi possível revogar. Tente novamente.";
 
 /**
  * Inline hint rendered next to the "Revogando…" badge while the

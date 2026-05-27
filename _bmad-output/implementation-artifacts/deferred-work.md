@@ -369,3 +369,14 @@
 - AC3 biomarker-config click-through — needs Story 5.4's read-only mode.
 - T5.2 integration / T5.4 snapshots / T5.5 behavior tests — UI runner not wired; Docker unavailable.
 - docs/rls-review-checklist.md doesn't exist in repo — comment block in policy file documents instead.
+
+## Deferred from: code review of story-5.4 (2026-05-27)
+
+- AC7 cosmetic: linear progress bar + setInterval vs spec's circular CSS-keyframe ring — Story 5.x polish.
+- Expo Router tab-suspension: timer runs offscreen during 5s window — server-write correct; visual bar may not be visible.
+- Multi-revoke older toasts silently replaced — toast-queue is Story 5.x polish.
+- `onCancel` double-fire on RevokeConfirmDialog — idempotent; harmless today.
+- UndoToast durationMs effect-dep re-run — constant from validators in practice.
+- Integration test it.todo() coverage of FOR UPDATE / concurrent / cross-patient — matches Story 5.x precedent.
+- VoiceOver `alert` role focus-stealing UX — Story 5.x polish.
+- Android hardware back on RevokeConfirmDialog — Tamagui Dialog default; verify in manual QA.

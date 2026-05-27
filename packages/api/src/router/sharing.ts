@@ -5,7 +5,7 @@ import { z } from "zod/v4";
 import type {
   AccessLogEventKind,
   AccessLogItemRow,
-  AccessLogTokenStatus,
+  ServerAccessLogTokenStatus,
   ShareDuration,
 } from "@healthtracker/validators";
 import { and, desc, eq, gt, isNull, or, sql } from "@healthtracker/db";
@@ -24,6 +24,7 @@ import {
   isAccessLogEventKind,
   listAccessLogInputSchema,
   revokeShareTokenInputSchema,
+  revokeShareTokenOutputSchema,
   SHARING_AUDIT_CONFIGURED,
   SHARING_AUDIT_CONVERSATION_STARTER_QUEUED,
   SHARING_AUDIT_PENDING_INVITE_CREATED,
@@ -533,6 +534,7 @@ export const sharingRouter = {
    */
   revokeShareToken: protectedProcedure
     .input(revokeShareTokenInputSchema)
+    .output(revokeShareTokenOutputSchema)
     .mutation(async ({ ctx, input }) => {
       const patientId = ctx.session.user.id;
 
@@ -554,19 +556,33 @@ export const sharingRouter = {
           throw new TRPCError({ code: "NOT_FOUND" });
         }
 
-        const revokedAt = new Date();
-
+        // Patch #2 + #6 (Story 5.4 review-fix) — UPDATE carries the
+        // `revoked_at IS NULL` defense-in-depth predicate AND uses the
+        // Postgres clock (`now()`) returned via `RETURNING`. The DB
+        // column, audit metadata, and mutation output all come from
+        // the same Postgres clock — no JS/DB drift. The `IS NULL`
+        // guard means a future refactor that drops the SELECT FOR
+        // UPDATE can't silently overwrite an already-revoked column.
+        let revokedAt: Date;
         try {
-          await tx
-            .update(ShareTokens)
-            .set({ revokedAt })
-            .where(eq(ShareTokens.id, input.shareTokenId));
+          const updatedRows = await tx.execute<{ revoked_at: Date }>(sql`
+            UPDATE ${ShareTokens}
+            SET revoked_at = now()
+            WHERE ${ShareTokens.id} = ${input.shareTokenId}
+              AND ${ShareTokens.revokedAt} IS NULL
+            RETURNING revoked_at
+          `);
+          const updated = updatedRows[0];
+          if (!updated) {
+            // 0 rows means the row was revoked between the SELECT FOR
+            // UPDATE and the UPDATE (effectively impossible under the
+            // row lock, but defense-in-depth aligned with the SELECT).
+            throw new TRPCError({ code: "NOT_FOUND" });
+          }
+          revokedAt = updated.revoked_at;
         } catch (err) {
+          if (err instanceof TRPCError) throw err;
           // Narrow catch — only the defensive 23505 path is folded.
-          // `share_tokens` has no partial unique index that would
-          // surface 23505 on UPDATE today, but keeping the predicate
-          // narrow matches the round-1 discipline of Stories 5.1–5.3
-          // (broad `catch (err)` swallows programmer errors).
           if (isUniqueViolation(err)) {
             throw new TRPCError({
               code: "INTERNAL_SERVER_ERROR",
@@ -857,7 +873,7 @@ export const sharingRouter = {
         // back to a `resource_type === 'share_token'` heuristic that
         // synthesized "sem prazo" for hard-deleted tokens.
         const hasJoinedToken = r.st_id !== null;
-        const tokenStatus: AccessLogTokenStatus | null = hasJoinedToken
+        const tokenStatus: ServerAccessLogTokenStatus | null = hasJoinedToken
           ? computeAccessLogTokenStatus(r.st_expires_at, r.st_revoked_at, now)
           : null;
         // `display_name` resolution: share-token-scoped rows pull

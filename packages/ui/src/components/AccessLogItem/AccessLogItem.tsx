@@ -192,7 +192,7 @@ export function AccessLogItem(props: AccessLogItemProps): React.ReactElement {
         </Text>
       ) : null}
 
-      {expanded && canRevoke && shareTokenId && onRevokePress ? (
+      {canRevoke && shareTokenId && onRevokePress ? (
         <XStack paddingTop="$2">
           <Button
             variant="secondary"

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import type { AccessLogItemRow } from "@healthtracker/validators";
+import type { ClientAccessLogItemRow } from "@healthtracker/validators";
 import {
   AccessLogList,
   RevokeConfirmDialog,
@@ -12,6 +12,7 @@ import {
 import {
   ACCESS_LOG_REFETCH_THROTTLE_MS,
   ACCESS_LOG_TITLE_PT_BR,
+  REVOKE_FAILED_PT_BR,
   REVOKE_TIMEOUT_MS,
   REVOKE_UNDO_BUTTON_PT_BR,
   REVOKE_UNDO_TOAST_PT_BR,
@@ -31,7 +32,7 @@ export default function AcessosPage(): React.ReactElement {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const [cursor, setCursor] = useState<string | undefined>(undefined);
-  const [priorPages, setPriorPages] = useState<AccessLogItemRow[]>([]);
+  const [priorPages, setPriorPages] = useState<ClientAccessLogItemRow[]>([]);
   const lastRefetchAt = useRef<number | null>(null);
 
   const [pendingDialog, setPendingDialog] = useState<{
@@ -41,19 +42,56 @@ export default function AcessosPage(): React.ReactElement {
   const [revokingTokenIds, setRevokingTokenIds] = useState<Set<string>>(
     () => new Set(),
   );
-  const [activeToast, setActiveToast] = useState<{
-    shareTokenId: string;
-    message: string;
-  } | null>(null);
+  // See the Expo screen — discriminated union over toast kinds so the
+  // `undone` / `error` surfaces never carry an "undo" button (patch #3).
+  type ActiveToast =
+    | { kind: "revoking"; shareTokenId: string; message: string }
+    | { kind: "undone"; shareTokenId: string; message: string }
+    | { kind: "error"; shareTokenId: string; message: string };
+  const [activeToast, setActiveToast] = useState<ActiveToast | null>(null);
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
     new Map(),
   );
 
+  const clearRevokingId = useCallback((shareTokenId: string) => {
+    setRevokingTokenIds((prev) => {
+      if (!prev.has(shareTokenId)) return prev;
+      const next = new Set(prev);
+      next.delete(shareTokenId);
+      return next;
+    });
+  }, []);
+
   const revokeMutation = useMutation(
     trpc.sharing.revokeShareToken.mutationOptions({
-      onSuccess: () => {
+      // Patch #5 — clear the pending-set entry BEFORE invalidating
+      // to avoid a visible `revoked → pending → revoked` flicker.
+      onSuccess: (data) => {
+        clearRevokingId(data.shareTokenId);
         void queryClient.invalidateQueries({
           queryKey: trpc.sharing.listAccessLog.queryKey(),
+        });
+      },
+      // Patch #1 — re-revoke 404 is silenced (the refetch surfaces
+      // the correct `revogado` state); everything else surfaces an
+      // error toast so the patient knows to re-tap.
+      onError: (error, variables) => {
+        clearRevokingId(variables.shareTokenId);
+        const isAlreadyRevoked =
+          error.data?.code === "NOT_FOUND" || error.data?.httpStatus === 404;
+        if (isAlreadyRevoked) {
+          void queryClient.invalidateQueries({
+            queryKey: trpc.sharing.listAccessLog.queryKey(),
+          });
+          setActiveToast((prev) =>
+            prev?.shareTokenId === variables.shareTokenId ? null : prev,
+          );
+          return;
+        }
+        setActiveToast({
+          kind: "error",
+          shareTokenId: variables.shareTokenId,
+          message: REVOKE_FAILED_PT_BR,
         });
       },
     }),
@@ -62,19 +100,7 @@ export default function AcessosPage(): React.ReactElement {
   const fireRevoke = useCallback(
     (shareTokenId: string) => {
       timersRef.current.delete(shareTokenId);
-      revokeMutation.mutate(
-        { shareTokenId },
-        {
-          onSettled: () => {
-            setRevokingTokenIds((prev) => {
-              if (!prev.has(shareTokenId)) return prev;
-              const next = new Set(prev);
-              next.delete(shareTokenId);
-              return next;
-            });
-          },
-        },
-      );
+      revokeMutation.mutate({ shareTokenId });
     },
     [revokeMutation],
   );
@@ -84,7 +110,7 @@ export default function AcessosPage(): React.ReactElement {
     refetchOnWindowFocus: false,
   });
 
-  const accumulated = useMemo<AccessLogItemRow[]>(() => {
+  const accumulated = useMemo<ClientAccessLogItemRow[]>(() => {
     if (query.data?.upgradeRequired) return [];
     const liveItems = query.data?.items ?? [];
     const merged =
@@ -145,7 +171,11 @@ export default function AcessosPage(): React.ReactElement {
       next.add(shareTokenId);
       return next;
     });
-    setActiveToast({ shareTokenId, message: REVOKE_UNDO_TOAST_PT_BR });
+    setActiveToast({
+      kind: "revoking",
+      shareTokenId,
+      message: REVOKE_UNDO_TOAST_PT_BR,
+    });
     const handle = setTimeout(() => {
       fireRevoke(shareTokenId);
       setActiveToast((prev) =>
@@ -169,17 +199,16 @@ export default function AcessosPage(): React.ReactElement {
       clearTimeout(handle);
       timersRef.current.delete(shareTokenId);
     }
-    setRevokingTokenIds((prev) => {
-      if (!prev.has(shareTokenId)) return prev;
-      const next = new Set(prev);
-      next.delete(shareTokenId);
-      return next;
-    });
+    clearRevokingId(shareTokenId);
+    // `kind: "undone"` → JSX passes `undoLabel={null}` to UndoToast
+    // so the cancel-confirmation surface has no Desfazer button
+    // (patch #3 — prevents infinite `:undone:undone…` chain).
     setActiveToast({
+      kind: "undone",
       shareTokenId: `${shareTokenId}:undone`,
       message: REVOKE_UNDONE_TOAST_PT_BR,
     });
-  }, [activeToast]);
+  }, [activeToast, clearRevokingId]);
 
   const handleToastTimeout = useCallback(() => {
     setActiveToast(null);
@@ -198,8 +227,13 @@ export default function AcessosPage(): React.ReactElement {
     const timers = timersRef.current;
     const fireFnRef = fireRevokeRef;
     return () => {
-      for (const [id, handle] of timers.entries()) {
-        clearTimeout(handle);
+      // Patch #4 — snapshot keys to avoid Map-mutation-during-
+      // iteration foot-guns when a future maintainer adds a
+      // timers.set(...) inside the fire-fn.
+      const ids = Array.from(timers.keys());
+      for (const id of ids) {
+        const handle = timers.get(id);
+        if (handle) clearTimeout(handle);
         fireFnRef.current(id);
       }
       timers.clear();
@@ -237,7 +271,11 @@ export default function AcessosPage(): React.ReactElement {
         visible={activeToast !== null}
         toastId={activeToast?.shareTokenId ?? "none"}
         message={activeToast?.message ?? ""}
-        undoLabel={REVOKE_UNDO_BUTTON_PT_BR}
+        // Patch #3 — only the `revoking` surface carries an undo
+        // button; `undone` / `error` pass `null` to hide it.
+        undoLabel={
+          activeToast?.kind === "revoking" ? REVOKE_UNDO_BUTTON_PT_BR : null
+        }
         onUndo={handleUndo}
         onTimeout={handleToastTimeout}
         durationMs={REVOKE_TIMEOUT_MS}

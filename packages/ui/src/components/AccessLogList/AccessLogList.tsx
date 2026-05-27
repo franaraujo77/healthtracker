@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Text, YStack } from "tamagui";
 
 import type {
-  AccessLogItemRow,
+  ClientAccessLogItemRow,
   ShareDuration,
 } from "@healthtracker/validators";
 import {
@@ -50,7 +50,10 @@ interface RawBiomarker {
 }
 
 export interface AccessLogListProps {
-  data: AccessLogItemRow[];
+  // Story 5.4 review-fix Patch #7 — UI consumes the client variant
+  // (includes `"revoked-pending"`); the resolver emits the server
+  // variant (Zod-narrowed at the tRPC boundary).
+  data: ClientAccessLogItemRow[];
   isLoading: boolean;
   isError: boolean;
   isFetchingNextPage: boolean;

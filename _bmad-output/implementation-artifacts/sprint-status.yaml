@@ -35,7 +35,27 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-05-15
-last_updated: 2026-05-26
+last_updated: 2026-05-27
+# Story 5.4 implementation + R1 review complete → review. PR #56 (stacked).
+# Both Blind Hunter and Edge Case Hunter converged on missing onError
+# handler as the LGPD-relevant headline. Patched: revokeMutation onError
+# silently treats 404 as "already revoked elsewhere"; surfaces
+# REVOKE_FAILED_PT_BR toast on network/5xx. UPDATE gained
+# `WHERE id=? AND revoked_at IS NULL RETURNING revoked_at` defense-in-
+# depth (single Postgres clock for DB column + audit metadata +
+# mutation output — eliminates clock drift). UndoToast `undoLabel:
+# string | null` added; cancel-confirmation surface passes null →
+# fixes the :undone:undone infinite loop. Cleanup-on-unmount snapshots
+# keys before iterating (Map-mutation-during-iteration future-proof).
+# revokingTokenIds cleared BEFORE invalidateQueries (no more
+# Revogando→Revogado→Revogando flicker). AccessLogTokenStatus enum
+# split into Server (Zod output schema) + Client (extends with
+# revoked-pending) — closes the leak vector. Revoke button drops
+# `expanded` gate (visible in compact view; more discoverable).
+# progressPct NaN guard; .output() wired on mutation; CLAUDE.md
+# "Revoke discipline" appendix added documenting deferred-server-
+# write + web beforeunload trade-off accepted (decision A: row stays
+# active on unload, patient simply re-revokes).
 # Story 5.4 spec created → ready-for-dev. Stacks on 5.1+5.2+5.3 / PR #56.
 # Patient-side revoke flow. ADRs: deferred-server-write 5s undo
 # (cancelled revokes never hit DB — no audit noise); doctor-side
@@ -427,7 +447,7 @@ development_status:
   5-1-patient-configures-per-biomarker-sharing-with-a-named-doctor: review
   5-2-patient-generates-a-time-limited-sharing-link-with-duration-selection: review
   5-3-patient-views-the-access-log: review
-  5-4-patient-revokes-a-doctors-access-to-their-record: ready-for-dev
+  5-4-patient-revokes-a-doctors-access-to-their-record: review
   5-5-patient-exports-their-complete-health-record-as-json-or-pdf: backlog
   5-6-patient-permanently-deletes-their-account-and-all-data: backlog
   epic-5-retrospective: optional
