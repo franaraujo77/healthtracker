@@ -125,6 +125,7 @@ describe("buildJsonArtifact — AC3 shape", () => {
       patient_id: PATIENT_ID,
       format: "json",
       status: "generating",
+      requested_at: "2024-06-01T09:00:00+00:00",
     });
     const text = artifact.bytes.toString("utf8");
     // BOM is the first character.
@@ -134,7 +135,7 @@ describe("buildJsonArtifact — AC3 shape", () => {
     expect(text).toContain('\n  "patient": {');
     // PII hygiene — patient.id is uuid only; no email/displayName.
     expect(text).not.toMatch(/email|displayName/i);
-    // All eight required observation fields.
+    // All seven required observation fields.
     const parsed = JSON.parse(text.slice(1)) as {
       observations: Record<string, unknown>[];
       lifeEvents: unknown[];
@@ -166,6 +167,7 @@ describe("processOne — state transitions + audit", () => {
           patient_id: PATIENT_ID,
           format: "json",
           status: "queued",
+          requested_at: "2024-06-01T09:00:00+00:00",
         },
       ],
       selectObservations: async () => [],
@@ -203,7 +205,7 @@ describe("processOne — state transitions + audit", () => {
     expect(flattened).toContain("record.exported");
   });
 
-  it("on final-attempt upload failure: persists 'failed' + export.failed audit", async () => {
+  it("on final-attempt upload failure: persists 'failed' + export.failed audit (then rethrows)", async () => {
     const capture: SqlCall[] = [];
     const sql = makeFakeSql({
       capture,
@@ -213,15 +215,23 @@ describe("processOne — state transitions + audit", () => {
           patient_id: PATIENT_ID,
           format: "json",
           status: "queued",
+          requested_at: "2024-06-01T09:00:00+00:00",
         },
       ],
       selectObservations: async () => [],
       selectUploads: async () => [],
     });
     const supabase = makeFakeSupabase({ error: { message: "fetch failed" } });
+    const consoleSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
 
     // retrycount = 2 → next attempt is the LAST (retry_limit = 3).
-    await processOne({ sql, supabase }, EXPORT_ID, 2);
+    // Story 5.5 review-fix Patch #2 — final attempt persists `failed`
+    // AND rethrows (so pg-boss + Sentry record the underlying error).
+    await expect(processOne({ sql, supabase }, EXPORT_ID, 2)).rejects.toThrow(
+      /storage\.upload/,
+    );
 
     const tx = capture.find((c) => c.type === "begin");
     expect(tx).toBeDefined();
@@ -231,6 +241,50 @@ describe("processOne — state transitions + audit", () => {
       .map((c) => `${c.strings?.join("") ?? ""}::${JSON.stringify(c.values)}`)
       .join("|");
     expect(flattened).toContain("export.failed");
+    consoleSpy.mockRestore();
+  });
+
+  it("on final-attempt programmer error: persists 'failed' (Patch #2)", async () => {
+    // Simulate an unrecognised error shape by throwing inside the
+    // upload mock — but with a message that doesn't match the
+    // network-error regex. Previously this would re-queue forever.
+    const capture: SqlCall[] = [];
+    const sql = makeFakeSql({
+      capture,
+      selectExportRow: async () => [
+        {
+          id: EXPORT_ID,
+          patient_id: PATIENT_ID,
+          format: "json",
+          status: "queued",
+          requested_at: "2024-06-01T09:00:00+00:00",
+        },
+      ],
+      selectObservations: async () => [],
+      selectUploads: async () => [],
+    });
+    const supabase = {
+      storage: {
+        from: () => ({
+          upload: async () => {
+            throw new TypeError("Cannot read properties of undefined");
+          },
+          remove: async () => ({ error: null }),
+        }),
+      },
+    } as unknown as Parameters<typeof processOne>[0]["supabase"];
+    const consoleSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
+    await expect(
+      processOne({ sql, supabase }, EXPORT_ID, 2),
+    ).rejects.toBeInstanceOf(TypeError);
+
+    const tx = capture.find((c) => c.type === "begin");
+    const txText = tx?.txCalls?.map((c) => c.strings?.join("")).join("|") ?? "";
+    expect(txText).toContain("SET status = 'failed'");
+    consoleSpy.mockRestore();
   });
 
   it("skips rows already 'ready' (idempotent retry)", async () => {

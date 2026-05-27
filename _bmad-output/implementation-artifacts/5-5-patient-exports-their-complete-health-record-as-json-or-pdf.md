@@ -1,6 +1,6 @@
 # Story 5.5: Patient exports their complete health record as JSON or PDF
 
-Status: ready-for-dev
+Status: review
 
 > **Stacked on Stories 5.1 + 5.2 + 5.3 + 5.4 / PR #56.** LGPD Art. 18 data-portability surface. Async pg-boss job + Supabase Storage signed URL pattern (mirrors Story 4.1 letter-generation queue topology). Adds `exports` table + RLS, `sharingRouter.requestExport` / `getExport` procedures, a new `record.export.generate` pg-boss queue, a new `services/llm` consumer that emits JSON / PDF via `@react-pdf/renderer`, and a Configurações > Dados > Exportar registro screen.
 >
@@ -35,7 +35,7 @@ Status: ready-for-dev
    - The screen does NOT block navigation — the patient can leave and come back; on re-mount, the polling resumes against the same `exportId` (stored in `useState` + AsyncStorage on Expo; URL query param on web).
    - Spec says "delivered to the app within 60 seconds" — that's a soft target; the worker may take longer for large records. The card states "até 60 segundos" but does NOT show a timeout error at 60s; only `status === "failed"` from the server.
 
-3. **AC3 — JSON export shape (self-contained).** Given the JSON export is generated, when the patient opens the file, then every `observations` row includes the eight required fields per AC verbatim: `loincCode`, `biomarkerName` (pt-BR human label resolved from `loinc_ref` table; Story 2.3 territory — falls back to `biomarker_name` from observations if loinc_ref missing), `valueNumeric`, `unitUcum`, `collectedAt` (ISO 8601), `labName`, `sourceType`. The top-level shape:
+3. **AC3 — JSON export shape (self-contained).** Given the JSON export is generated, when the patient opens the file, then every `observations` row includes the seven required fields per AC verbatim: `loincCode`, `biomarkerName` (pt-BR human label resolved from `loinc_ref` table; Story 2.3 territory — falls back to `biomarker_name` from observations if loinc_ref missing), `valueNumeric`, `unitUcum`, `collectedAt` (ISO 8601), `labName`, `sourceType`. The top-level shape:
 
    ```json
    {
@@ -314,6 +314,69 @@ _To be filled by dev agent._
 ### Completion Notes List
 
 ### File List
+
+### Review fixes applied (2026-05-27)
+
+All 11 "Patch (apply before merge)" items plus the three resolved decisions (A: partial unique index dedup; B: `LEFT JOIN loinc_ref` with `coalesce(biomarker_name_pt, biomarker_name)`; C: 5-minute client-side polling timeout) were applied.
+
+- **Decision A — partial unique index `exports_active_uq`:** added on `packages/db/src/schema/sharing.ts` over `(patient_id) WHERE status IN ('queued','generating')`. `requestExport` wraps the INSERT in a narrow `23505` catch, re-SELECTs the racing active row via `inArray(Exports.status, ["queued","generating"])`, and skips the outbox enqueue + audit on the conflict path (the winning tx already did them). Mirrors `createShareToken` (Story 5.1 R1). `inArray` added to the `@healthtracker/db` re-exports.
+- **Decision B — `LEFT JOIN loinc_ref`:** `loinc_ref` column verified as `biomarker_name_pt` (not `display_name_pt_br`; the spec text in resolved-decision-B was prescriptive but the actual schema name is what shipped). Consumer `loadObservations` now SELECTs `coalesce(lr.biomarker_name_pt, observations.biomarker_name)`. Existing test fixture unchanged (the SELECT now returns the coalesced value via the same `biomarker_name` column alias).
+- **Decision C — `EXPORT_POLL_TIMEOUT_MS = 5 * 60_000`:** new constant in validators + new `EXPORT_STUCK_PT_BR` + `EXPORT_STUCK_BUTTON_PT_BR` copy. Both clients store `pollStartAt` in a ref and stop polling once elapsed (via `refetchInterval: false`). The Expo and web screens render the stuck CTA via new `stuck` prop on `ExportProgressCard` (web inlines the JSX).
+- **Patch #1 (HIGH expired-ready):** `getExportOutputSchema` extended with `expired: boolean`. Resolver computes `expired = status === 'ready' && expiresAt <= now()`. Both clients render `EXPORT_EXPIRED_PT_BR` + "Tentar novamente" CTA when set; `ExportProgressCard` gained an `expired` prop.
+- **Patch #2 (HIGH programmer-error retry):** final attempt (`retrycount + 1 >= RETRY_LIMIT`) now persists `status='failed'` + emits `export.failed` audit regardless of error recognition, then rethrows so Sentry still records programmer errors. `failure_reason` is `INTERNAL_ERROR` for unrecognised shapes (vs. `DB_ERROR` / `NETWORK_ERROR`). Added a new unit test covering `TypeError` final-attempt → `failed`.
+- **Patch #3 (HIGH storage orphan):** wrapped the post-upload tx in inner try/catch. Tx failure AND final-attempt-failed branch both call `tryDeleteStorageObject(supabase, uploadedObjectPath)` — best-effort delete, swallowed cleanup error.
+- **Patch #4 (HIGH worker-clock requestedAt):** consumer SELECT now also fetches `requested_at::text`; the `record.exported` audit metadata writes `row.requested_at` verbatim instead of `deps.now()`. Both fixtures updated.
+- **Patch #5 (MEDIUM cross-origin filename):** `createExportDownloadSignedUrl` accepts a `filename?: string` arg and forwards `{ download: filename }` to `supabase.storage.createSignedUrl`. `getExport` computes the filename via `exportFilename(row.format, row.completedAt ?? row.expiresAt)`.
+- **Patch #6 (MEDIUM client filename mid-poll switch):** both clients use `pollQuery.data?.format ?? format` when computing the download filename.
+- **Patch #7 (MEDIUM Number precision/NaN):** new `parseNumericOrNull` helper preserves the parse-or-null contract for JSON exports. Documented in a banner comment.
+- **Patch #8 (MEDIUM eager Supabase env):** `services/llm/src/index.ts` calls `getSupabaseClient()` once at boot after queue creation; failure aborts the process.
+- **Patch #9 (LOW CLAUDE.md):** new "Export discipline (Story 5.5)" paragraph added under the code-review-discipline section.
+- **Patch #10 (LOW rls-review-checklist):** `docs/rls-review-checklist.md` is identity-based, not table-list-based — skipped per the spec's "if it doesn't exist, skip" guidance.
+- **Patch #11 (LOW spec text):** AC3 "eight required fields" → "seven required fields"; matching test comment updated.
+
+**Verification gates:**
+
+- `pnpm typecheck` — 17/17 PASS
+- `pnpm lint` — 15/15 PASS (one transient warning about `Number.isFinite` narrowing was fixed by dropping the redundant `undefined` branch from `parseNumericOrNull`)
+- `pnpm --filter @healthtracker/api test:unit` — 220/220 PASS
+- `pnpm --filter @healthtracker/llm-service test:unit` — 26/26 PASS (added 1 new test for Patch #2 programmer-error final-attempt failed)
+
+### Review Findings (2026-05-27)
+
+Three-layer adversarial review. Two convergent issues: **expired-ready silent no-op** (Blind HIGH + Edge LOW) and **`record.exported` audit time uses worker clock, not request clock** (Blind + Edge). Plus several unique findings.
+
+#### Decision-needed
+
+- [ ] [Review][Decision] **Concurrent "Exportar" double-tap dedup** — `singleton_key = record.export.${exportId}` is per-row (exportId is freshly minted each resolver call) → useless for dedup. Two rapid taps create two rows + two jobs + two `record.exported` audit rows (duplicate Access Log entries) + two Storage uploads. Options: (a) client-side debounce (e.g. `mutation.isPending` already guards within one screen but not cross-device; add a 5s grace period after a successful submit); (b) partial unique index `ON exports (patient_id) WHERE status IN ('queued','generating')` — server-enforced single-in-flight; (c) accept and document (audit log will show duplicate "Você exportou" rows which is true history).
+- [ ] [Review][Decision] **`biomarkerName` provenance** — spec said "resolved from `loinc_ref` table; falls back to `observations.biomarker_name`". Implementation skips the JOIN entirely, always uses `observations.biomarker_name`. Options: (a) add the `LEFT JOIN loinc_ref ON loinc_ref.loinc_code = observations.loinc_code` and coalesce; (b) keep current (`biomarker_name` is already pt-BR populated for extracted rows — `loinc_ref` adds nothing for most cases); (c) follow up in Story 5.x polish.
+- [ ] [Review][Decision] **Stuck-export UX escape hatch** — polling runs forever if the worker is dead and the row stays at `queued`/`generating`. Options: (a) add a 5-minute client-side timeout that surfaces "Geração demorando mais que o esperado — pode tentar novamente" with a "Tentar novamente" CTA; (b) server-side reconciliation job (Story 5.7 / out of scope); (c) keep current — operator detects via metrics + pg-boss's 15-min `expireInSeconds` will reclaim the job.
+
+#### Patch (apply before merge)
+
+- [ ] [Review][Patch] **HIGH — Expired-ready silent no-op** — `packages/api/src/router/sharing.ts:660-670`, `apps/expo/.../exportar.tsx:122-127`, web `:295-306`. When `status === 'ready'` but `expires_at < now()`, `downloadUrl` is null; UI still renders "Pronto + Baixar" but tap silently no-ops. Fix: resolver returns a new `status='expired'` (or wraps `status='ready' + downloadUrl=null` with a flag), and the screen renders an `EXPORT_EXPIRED_PT_BR` ("Este link expirou. Toque em 'Exportar' novamente.") + a Tier-2 "Tentar novamente" button that resets `exportId=null` and surfaces the format picker again.
+- [ ] [Review][Patch] **HIGH — Programmer-error retry never reaches `failed`** — `services/llm/src/consumers/generate-export.ts:2981-2991`. Unrecognised error shapes (TypeError/ReferenceError/SyntaxError) re-throw on every attempt including the last — never persist `status='failed'`, never write `export.failed` audit, row stuck at `queued` forever. Fix: the retry-budget check (`retrycount + 1 < RETRY_LIMIT`) must gate the rethrow ONLY (not the `UPDATE status='queued'`); on the final attempt, persist `failed` + audit + rethrow. OR: programmer errors are also persisted as `failed` (Sentry catches the rethrow either way; the row terminal state matters for the patient).
+- [ ] [Review][Patch] **HIGH — Storage object orphaned on tx failure** — `services/llm/src/consumers/generate-export.ts:2915-2924`. Upload happens BEFORE the tx; if the tx fails (UPDATE deadlock, etc.) the file remains in Storage with no row pointer. Fix: on tx failure in the success path, `supabase.storage.from(EXPORTS_BUCKET).remove([objectPath])` before re-queueing. Same on final-attempt-failed branch.
+- [ ] [Review][Patch] **HIGH — `record.exported.metadata.requestedAt` is worker time, not request time** — `services/llm/src/consumers/generate-export.ts:2965`. Patient-actor audit row's metadata claims `requestedAt` from `deps.now()` (worker clock), but the actual request time is `Exports.requestedAt` (resolver-time INSERT default). Fix: SELECT `requested_at` from the `exports` row at the start of `processOne` and use that value in the metadata. The Access Log will then surface the patient's actual request time, not the generation completion time.
+- [ ] [Review][Patch] **MEDIUM — Web `<a download>` is advisory for cross-origin URLs** — `apps/web/.../exportar-client.tsx:299-305`. Supabase signed URLs are cross-origin; browsers ignore the `download` attribute filename and use the URL path basename (`{exportId}.json`). Fix: pass `{download: filename}` as the 3rd arg to `supabase.storage.from(...).createSignedUrl(path, ttl, {download: filename})` — this sets `Content-Disposition: attachment; filename=...` server-side. The filename helper output is then authoritative.
+- [ ] [Review][Patch] **MEDIUM — Filename uses client-side `format` state not `pollQuery.data.format`** — `apps/expo/.../exportar.tsx:141`, web `:301`. If patient picks JSON, taps Exportar, switches the radio to PDF mid-poll, then taps Baixar — the filename says `.pdf` but the artifact is JSON. Fix: derive filename from `pollQuery.data?.format` (server is authoritative).
+- [ ] [Review][Patch] **MEDIUM — `Number(value_numeric)` precision loss + NaN→null** — `services/llm/src/consumers/generate-export.ts:3052`. `value_numeric` is `::text` in the SELECT then re-parsed via `Number(...)`. High-precision decimals lose digits; non-numeric/null become NaN which JSON.stringify emits as `null`. Fix: keep `value_numeric` as a string in the JSON payload (preserves fidelity); or use `parseFloat` with NaN guard `Number.isFinite(n) ? n : null` and document the precision contract.
+- [ ] [Review][Patch] **MEDIUM — Supabase env check is lazy** — `services/llm/src/supabase.ts:3545-3565`. `getSupabaseClient()` reads env only on first call. A misconfigured production worker boots happily, accepts jobs, then explodes on first export with retries. Fix: eagerly invoke `getSupabaseClient()` in `services/llm/src/index.ts` after queue creation; failure aborts boot.
+- [ ] [Review][Patch] **LOW — CLAUDE.md "Export discipline" + `docs/rls-review-checklist.md`** — T7.2 + T7.3 from the spec were missed. Append a one-paragraph "Export discipline (Story 5.5)" note to CLAUDE.md (LGPD exception from premium gate; signed-URL TTL 1h; file lifetime 24h; deferred-server-write/multi-device gap; orphan-cleanup is post-merge work). Add `exports` to the patient-only-RLS table list.
+- [ ] [Review][Patch] **LOW — Singleton-key comment misleading** — `packages/api/src/router/sharing.ts:602`. Comment says "Singleton key per row dedups". pg-boss only enforces singleton_key with `singleton_seconds`/etc., and the ON CONFLICT clause matches no unique constraint. Either fix the comment ("inert — exportId is fresh per call; reserved for future per-patient dedup") or wire actual dedup (decision #1 above).
+- [ ] [Review][Patch] **LOW — Spec AC3 says "eight required fields" but enumerates 7** — `_bmad-output/.../5-5-...md` AC3. The example shape has 7. Implementation emits 7. Fix the spec text: change "eight" to "seven" so future readers don't hunt for a missing field.
+
+#### Deferred (pre-existing or out-of-scope)
+
+- [x] [Review][Defer] **PDF Lora/DM Sans fonts** — no font files in repo (spec assumed Story 4.1 bundled them). Uses built-in Helvetica. Story 5.x polish.
+- [x] [Review][Defer] **Multi-device export discovery** — no `listMyExports` query. Patient on mobile can't see an in-flight export from web. Acceptable for v1.
+- [x] [Review][Defer] **PDF `wrap={false}` overflow on dates with hundreds of biomarkers** — typical scale OK; document.
+- [x] [Review][Defer] **JSON BOM** — by design (Excel UTF-8 interop); JSON.parse consumers must strip.
+- [x] [Review][Defer] **`exportFilename` uses UTC date** — minor cosmetic drift on midnight-boundary downloads.
+- [x] [Review][Defer] **Test non-null assertion `parsed.observations[0]!`** — fragile if fixture trimmed; currently safe.
+- [x] [Review][Defer] **Drive-by lint fix in `biomarker-suggestion.test.ts`** — 5 unnecessary casts auto-removed by `lint:fix`. Type-safe; pre-existing debt.
+- [x] [Review][Defer] **Reference range columns SELECTed but discarded from JSON** — runtime-safe (columns exist); minor waste.
+- [x] [Review][Defer] **Storage object cleanup post-`expires_at`** — Supabase Storage lifecycle rule OR scheduled `record.export.cleanup` job; tracked in deferred-work.
+- [x] [Review][Defer] **`Share.share({url, message: url})` redundancy** — cross-platform parity; harmless.
 
 ### Known infra blockers (out-of-code)
 

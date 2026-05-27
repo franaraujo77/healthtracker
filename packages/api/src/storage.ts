@@ -152,11 +152,20 @@ export async function statLabUploadObject(
 export async function createExportDownloadSignedUrl(
   objectPath: string,
   ttlSeconds: number,
+  filename?: string,
 ): Promise<string> {
   const supabase = getStorageClient();
+  // Story 5.5 review-fix Patch #5 — `{ download: filename }` makes
+  // Supabase return `Content-Disposition: attachment; filename=...`
+  // on the GET. Cross-origin browsers honor the header even though
+  // they ignore the `<a download>` attribute.
   const { data, error } = await supabase.storage
     .from(EXPORTS_BUCKET)
-    .createSignedUrl(objectPath, ttlSeconds);
+    .createSignedUrl(
+      objectPath,
+      ttlSeconds,
+      filename ? { download: filename } : undefined,
+    );
   if (error) {
     throw new Error(`createSignedUrl(exports) failed: ${error.message}`);
   }

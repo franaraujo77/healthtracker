@@ -8,7 +8,7 @@ import type {
   ServerAccessLogTokenStatus,
   ShareDuration,
 } from "@healthtracker/validators";
-import { and, desc, eq, gt, isNull, or, sql } from "@healthtracker/db";
+import { and, desc, eq, gt, inArray, isNull, or, sql } from "@healthtracker/db";
 import {
   ConversationStarterCache,
   Exports,
@@ -22,6 +22,7 @@ import {
   createPendingInviteInputSchema,
   createShareTokenInputSchema,
   EXPORT_DOWNLOAD_TTL_SECONDS,
+  exportFilename,
   getDraftConfigInputSchema,
   getExportInputSchema,
   getExportOutputSchema,
@@ -783,9 +784,13 @@ export const sharingRouter = {
    * Singleton key: `record.export.${exportId}` — unique per row so a
    * single export's job is dedup'd; we never re-enqueue the same id.
    *
-   * Idempotency note (AC12): NO partial-unique index against active
-   * exports per patient. Re-tapping "Exportar" before the worker
-   * finishes creates a fresh row + job. Cheap; spec-sanctioned.
+   * Story 5.5 review-fix Decision A — partial unique index
+   * `exports_active_uq` on `(patient_id) WHERE status IN
+   * ('queued','generating')` enforces single-in-flight per patient at
+   * the DB layer. The INSERT is wrapped in a narrow `23505` catch:
+   * on collision we SELECT the active row and return its `exportId`
+   * (skipping the outbox enqueue + audit since the original create
+   * already did them). Mirrors `createShareToken` (Story 5.1 R1).
    */
   requestExport: protectedProcedure
     .input(requestExportInputSchema)
@@ -794,22 +799,47 @@ export const sharingRouter = {
       const patientId = ctx.session.user.id;
 
       return ctx.db.transaction(async (tx) => {
-        const inserted = await tx
-          .insert(Exports)
-          .values({
-            patientId,
-            format: input.format,
-            status: "queued",
-          })
-          .returning({ id: Exports.id });
-        const row = inserted[0];
-        if (!row) {
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: "requestExport: insert returned no row",
-          });
+        let exportId: string;
+        try {
+          const inserted = await tx
+            .insert(Exports)
+            .values({
+              patientId,
+              format: input.format,
+              status: "queued",
+            })
+            .returning({ id: Exports.id });
+          const row = inserted[0];
+          if (!row) {
+            throw new TRPCError({
+              code: "INTERNAL_SERVER_ERROR",
+              message: "requestExport: insert returned no row",
+            });
+          }
+          exportId = row.id;
+        } catch (err) {
+          if (isUniqueViolation(err)) {
+            // Concurrent double-tap raced past the in-memory guard —
+            // the partial unique index pinned the first INSERT; this
+            // one collides. Re-SELECT the racing active row and
+            // return its id. Do NOT re-enqueue the job or re-write
+            // the audit row (the winning tx already did both).
+            const raced = await tx
+              .select({ id: Exports.id })
+              .from(Exports)
+              .where(
+                and(
+                  eq(Exports.patientId, patientId),
+                  inArray(Exports.status, ["queued", "generating"]),
+                ),
+              )
+              .limit(1);
+            if (raced[0]) {
+              return { exportId: raced[0].id };
+            }
+          }
+          throw err;
         }
-        const exportId = row.id;
 
         // Outbox: enqueue inside the same tx (Story 5.2 precedent).
         const jobPayload = {
@@ -877,15 +907,26 @@ export const sharingRouter = {
         throw new TRPCError({ code: "NOT_FOUND" });
       }
 
+      const now = new Date();
+      // Story 5.5 review-fix Patch #1 — surface a separate `expired`
+      // flag so the UI can render a stuck-link CTA instead of a
+      // silent-no-op "Baixar" button.
+      const expired = row.status === "ready" && row.expiresAt <= now;
       let downloadUrl: string | null = null;
-      if (
-        row.status === "ready" &&
-        row.objectPath !== null &&
-        row.expiresAt > new Date()
-      ) {
+      if (row.status === "ready" && row.objectPath !== null && !expired) {
+        // Story 5.5 review-fix Patch #5 — pass `download: filename` so
+        // the cross-origin Supabase Storage response carries
+        // `Content-Disposition: attachment; filename=...`. The web
+        // `<a download>` attribute is advisory for cross-origin URLs;
+        // server-side header is authoritative.
+        const filename = exportFilename(
+          row.format,
+          row.completedAt ?? row.expiresAt,
+        );
         downloadUrl = await createExportDownloadSignedUrl(
           row.objectPath,
           EXPORT_DOWNLOAD_TTL_SECONDS,
+          filename,
         );
       }
 
@@ -896,6 +937,7 @@ export const sharingRouter = {
         completedAt: row.completedAt ? row.completedAt.toISOString() : null,
         expiresAt: row.expiresAt.toISOString(),
         downloadUrl,
+        expired,
       };
     }),
 

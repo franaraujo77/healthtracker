@@ -1,21 +1,25 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 
 import type { ExportFormat } from "@healthtracker/validators";
 import {
   EXPORT_DOWNLOAD_BUTTON_PT_BR,
+  EXPORT_EXPIRED_PT_BR,
   EXPORT_FAILED_PT_BR,
   EXPORT_FORMAT_GROUP_A11Y_PT_BR,
   EXPORT_FORMAT_OPTIONS,
   EXPORT_POLL_INTERVAL_MS,
+  EXPORT_POLL_TIMEOUT_MS,
   EXPORT_PROGRESS_PT_BR,
   EXPORT_READY_PT_BR,
   EXPORT_RETRY_BUTTON_PT_BR,
   EXPORT_SCREEN_BODY_PT_BR,
   EXPORT_SCREEN_TITLE_PT_BR,
+  EXPORT_STUCK_BUTTON_PT_BR,
+  EXPORT_STUCK_PT_BR,
   EXPORT_SUBMIT_A11Y_PT_BR_FN,
   EXPORT_SUBMIT_BUTTON_PT_BR,
   exportFilename,
@@ -44,6 +48,10 @@ export function ExportarClient(): React.ReactElement {
   const [format, setFormat] = useState<ExportFormat>("json");
   const [exportId, setExportId] = useState<string | null>(queryExportId);
   const [downloadInFlight, setDownloadInFlight] = useState(false);
+  // Story 5.5 review-fix Decision C — 5-min client-side polling
+  // timeout anchor. See Expo screen for shape rationale.
+  const pollStartAtRef = useRef<number | null>(null);
+  const [nowTick, setNowTick] = useState(0);
 
   // Sync URL query param ⇄ state.
   useEffect(() => {
@@ -58,6 +66,7 @@ export function ExportarClient(): React.ReactElement {
     trpc.sharing.requestExport.mutationOptions({
       onSuccess: (data) => {
         setExportId(data.exportId);
+        pollStartAtRef.current = Date.now();
         const next = new URLSearchParams(searchParams.toString());
         next.set("exportId", data.exportId);
         router.replace(`?${next.toString()}`);
@@ -65,21 +74,44 @@ export function ExportarClient(): React.ReactElement {
     }),
   );
 
+  // Anchor `pollStartAt` on URL-resumed exports too.
+  useEffect(() => {
+    if (exportId !== null && pollStartAtRef.current === null) {
+      pollStartAtRef.current = Date.now();
+    }
+  }, [exportId]);
+
   const pollQuery = useQuery({
     ...trpc.sharing.getExport.queryOptions(
       { exportId: exportId ?? "00000000-0000-0000-0000-000000000000" },
       {
         enabled: exportId !== null,
+        // Story 5.5 review-fix Decision C — stop after 5min of
+        // non-terminal polling. Patient gets a stuck-CTA path.
         refetchInterval: (query) => {
           const data = query.state.data;
           if (!data) return EXPORT_POLL_INTERVAL_MS;
-          return data.status === "ready" || data.status === "failed"
-            ? false
-            : EXPORT_POLL_INTERVAL_MS;
+          if (data.status === "ready" || data.status === "failed") return false;
+          const startedAt = pollStartAtRef.current;
+          if (
+            startedAt !== null &&
+            Date.now() - startedAt >= EXPORT_POLL_TIMEOUT_MS
+          ) {
+            return false;
+          }
+          setNowTick((t) => t + 1);
+          return EXPORT_POLL_INTERVAL_MS;
         },
       },
     ),
   });
+
+  const isStuck =
+    pollStartAtRef.current !== null &&
+    Date.now() - pollStartAtRef.current >= EXPORT_POLL_TIMEOUT_MS &&
+    (pollQuery.data?.status === "queued" ||
+      pollQuery.data?.status === "generating");
+  void nowTick;
 
   const onSubmit = useCallback(() => {
     requestMutation.mutate({ format });
@@ -93,9 +125,10 @@ export function ExportarClient(): React.ReactElement {
       const url = fresh.data?.downloadUrl;
       if (url) {
         // Programmatic anchor download — Story 5.2 share-sheet pattern.
+        // Story 5.5 review-fix Patch #6 — server-authoritative format.
         const a = document.createElement("a");
         a.href = url;
-        a.download = exportFilename(format, new Date());
+        a.download = exportFilename(fresh.data?.format ?? format, new Date());
         a.rel = "noopener";
         document.body.appendChild(a);
         a.click();
@@ -108,6 +141,7 @@ export function ExportarClient(): React.ReactElement {
 
   const onRetry = useCallback(() => {
     setExportId(null);
+    pollStartAtRef.current = null;
     const next = new URLSearchParams(searchParams.toString());
     next.delete("exportId");
     router.replace(`?${next.toString()}`);
@@ -115,6 +149,7 @@ export function ExportarClient(): React.ReactElement {
   }, [format, requestMutation, router, searchParams]);
 
   const status = pollQuery.data?.status ?? null;
+  const expired = pollQuery.data?.expired === true;
 
   return (
     <section className="space-y-6">
@@ -163,6 +198,38 @@ export function ExportarClient(): React.ReactElement {
         >
           {EXPORT_SUBMIT_BUTTON_PT_BR}
         </button>
+      ) : expired ? (
+        <div
+          data-testid="export-expired"
+          className="space-y-3 rounded-lg border border-stone-300 bg-stone-50 p-4"
+        >
+          <p role="alert" className="text-stone-800">
+            {EXPORT_EXPIRED_PT_BR}
+          </p>
+          <button
+            type="button"
+            onClick={onRetry}
+            className="rounded-lg border border-teal-700 px-4 py-2 font-medium text-teal-800 hover:bg-teal-50"
+          >
+            {EXPORT_RETRY_BUTTON_PT_BR}
+          </button>
+        </div>
+      ) : isStuck ? (
+        <div
+          data-testid="export-stuck"
+          className="space-y-3 rounded-lg border border-stone-300 bg-stone-50 p-4"
+        >
+          <p role="alert" className="text-stone-800">
+            {EXPORT_STUCK_PT_BR}
+          </p>
+          <button
+            type="button"
+            onClick={onRetry}
+            className="rounded-lg border border-teal-700 px-4 py-2 font-medium text-teal-800 hover:bg-teal-50"
+          >
+            {EXPORT_STUCK_BUTTON_PT_BR}
+          </button>
+        </div>
       ) : status === "ready" ? (
         <div className="space-y-3 rounded-lg border border-stone-300 bg-stone-50 p-4">
           <p className="text-lg">{EXPORT_READY_PT_BR}</p>

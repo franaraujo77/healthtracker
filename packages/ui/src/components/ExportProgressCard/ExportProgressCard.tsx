@@ -5,10 +5,13 @@ import { Button, Spinner, Text, YStack } from "tamagui";
 import type { ExportStatus } from "@healthtracker/validators";
 import {
   EXPORT_DOWNLOAD_BUTTON_PT_BR,
+  EXPORT_EXPIRED_PT_BR,
   EXPORT_FAILED_PT_BR,
   EXPORT_PROGRESS_PT_BR,
   EXPORT_READY_PT_BR,
   EXPORT_RETRY_BUTTON_PT_BR,
+  EXPORT_STUCK_BUTTON_PT_BR,
+  EXPORT_STUCK_PT_BR,
 } from "@healthtracker/validators";
 
 /**
@@ -31,12 +34,25 @@ export interface ExportProgressCardProps {
   onRetry?: () => void;
   /** When true (download click in flight), disable the button. */
   downloadInFlight?: boolean;
+  /**
+   * Story 5.5 review-fix Patch #1 — server-reported `ready` but the
+   * 24h storage TTL elapsed. Renders the expired-link CTA instead of
+   * the silent-no-op "Baixar" button.
+   */
+  expired?: boolean;
+  /**
+   * Story 5.5 review-fix Decision C — client-side polling timed out
+   * (5min). Renders a stuck-CTA so the patient can re-tap "Exportar"
+   * without staring at an indeterminate spinner.
+   */
+  stuck?: boolean;
 }
 
 export function ExportProgressCard(
   props: ExportProgressCardProps,
 ): React.ReactElement {
-  const { status, onDownload, onRetry, downloadInFlight } = props;
+  const { status, onDownload, onRetry, downloadInFlight, expired, stuck } =
+    props;
   return (
     <YStack
       testID="export-progress-card"
@@ -47,7 +63,43 @@ export function ExportProgressCard(
       borderColor="$border"
       gap="$3"
     >
-      {status === "ready" ? (
+      {expired === true ? (
+        <>
+          <Text
+            testID="export-expired-text"
+            accessibilityRole="alert"
+            fontSize="$4"
+            color="$textPrimary"
+          >
+            {EXPORT_EXPIRED_PT_BR}
+          </Text>
+          <Button
+            testID="export-expired-retry-button"
+            onPress={onRetry}
+            accessibilityLabel={EXPORT_RETRY_BUTTON_PT_BR}
+          >
+            {EXPORT_RETRY_BUTTON_PT_BR}
+          </Button>
+        </>
+      ) : stuck === true ? (
+        <>
+          <Text
+            testID="export-stuck-text"
+            accessibilityRole="alert"
+            fontSize="$4"
+            color="$textPrimary"
+          >
+            {EXPORT_STUCK_PT_BR}
+          </Text>
+          <Button
+            testID="export-stuck-retry-button"
+            onPress={onRetry}
+            accessibilityLabel={EXPORT_STUCK_BUTTON_PT_BR}
+          >
+            {EXPORT_STUCK_BUTTON_PT_BR}
+          </Button>
+        </>
+      ) : status === "ready" ? (
         <>
           <Text fontSize="$5" color="$textPrimary">
             {EXPORT_READY_PT_BR}

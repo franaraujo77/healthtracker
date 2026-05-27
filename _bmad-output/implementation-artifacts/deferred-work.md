@@ -380,3 +380,15 @@
 - Integration test it.todo() coverage of FOR UPDATE / concurrent / cross-patient — matches Story 5.x precedent.
 - VoiceOver `alert` role focus-stealing UX — Story 5.x polish.
 - Android hardware back on RevokeConfirmDialog — Tamagui Dialog default; verify in manual QA.
+
+## Deferred from: code review of story-5.5 (2026-05-27)
+
+- PDF Lora/DM Sans font bundle — no font files in repo today; uses Helvetica. Story 5.x polish.
+- Multi-device export discovery — no listMyExports query; patient can't see other-device in-flight exports.
+- PDF wrap={false} overflow on date groups with hundreds of biomarkers — typical scale OK.
+- exportFilename UTC date drift on midnight-boundary downloads — cosmetic.
+- JSON BOM design — consumers must strip before JSON.parse (jq/python accept BOM; some tools don't).
+- Reference range columns SELECTed but discarded from JSON — minor waste.
+- Storage object cleanup post-expires_at — Supabase Storage lifecycle rule OR scheduled record.export.cleanup job.
+- Test non-null assertion fragility in generate-export.test.ts — defensive guard would harden.
+- Drive-by lint fix in biomarker-suggestion.test.ts (5 unnecessary casts) — type-safe, pre-existing debt.

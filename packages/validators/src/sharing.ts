@@ -636,6 +636,13 @@ export const getExportOutputSchema = z.object({
   completedAt: z.iso.datetime().nullable(),
   expiresAt: z.iso.datetime(),
   downloadUrl: z.url().nullable(),
+  /**
+   * Story 5.5 review-fix Patch #1 — when `status === 'ready'` but the
+   * 24h storage TTL has elapsed, `downloadUrl` is null AND `expired`
+   * is true. The UI distinguishes this from queued/generating by
+   * rendering `EXPORT_EXPIRED_PT_BR` + a "Tentar novamente" CTA.
+   */
+  expired: z.boolean(),
 });
 export type GetExportOutput = z.infer<typeof getExportOutputSchema>;
 
@@ -674,6 +681,21 @@ export const EXPORT_DOWNLOAD_BUTTON_PT_BR = "Baixar";
 export const EXPORT_RETRY_BUTTON_PT_BR = "Tentar novamente";
 export const EXPORT_SUBMIT_BUTTON_PT_BR = "Exportar";
 export const EXPORT_FORMAT_GROUP_A11Y_PT_BR = "Formato do registro";
+/**
+ * Story 5.5 review-fix Patch #1 — surfaced when `status === 'ready'`
+ * but the 24h storage TTL has elapsed (signed-URL mint would silently
+ * no-op). Paired with a Tier-2 "Tentar novamente" CTA.
+ */
+export const EXPORT_EXPIRED_PT_BR =
+  "Este link expirou. Toque em 'Exportar' novamente.";
+/**
+ * Story 5.5 review-fix Decision C — surfaced when client-side polling
+ * has elapsed `EXPORT_POLL_TIMEOUT_MS` without reaching ready/failed.
+ * Polling stops; the patient can re-tap "Exportar" (no server cancel —
+ * the worker may still finish in the background).
+ */
+export const EXPORT_STUCK_PT_BR = "Geração demorando mais que o esperado.";
+export const EXPORT_STUCK_BUTTON_PT_BR = "Tentar novamente";
 
 export function EXPORT_SUBMIT_A11Y_PT_BR_FN(format: ExportFormat): string {
   return `Exportar registro como ${format.toUpperCase()}`;
@@ -688,6 +710,12 @@ export const EXPORT_SCREEN_BODY_PT_BR =
 export const EXPORT_DOWNLOAD_TTL_SECONDS = 3600;
 /** AC2 — polling interval for `getExport`. */
 export const EXPORT_POLL_INTERVAL_MS = 2000;
+/**
+ * Story 5.5 review-fix Decision C — client-side ceiling. After this
+ * elapsed wall-clock window the screen stops polling and renders
+ * `EXPORT_STUCK_PT_BR` + a retry CTA. No server cancel.
+ */
+export const EXPORT_POLL_TIMEOUT_MS = 5 * 60_000;
 /** Storage file lifetime — client display only; server is authoritative. */
 export const EXPORT_FILE_LIFETIME_MS = 24 * 60 * 60 * 1000;
 /** AC3 — top-level `schemaVersion` for the JSON export. */

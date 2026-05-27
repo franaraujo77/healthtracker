@@ -222,6 +222,10 @@ Two rounds of code review per story is a hard process gate, not a recommendation
 - **Don't use `pnpm db:push` for partial-index `WHERE` changes in prod.** See ops note above.
 - **6-identity RLS matrix mandatory for new sharing-related tables:** `correctPatient`, `wrongPatient`, `serviceRole`, `doctorWithActiveToken`, `doctorWithExpiredToken`, `doctorWithRevokedToken`. Story 5.1 round-2 found three tests claiming the full matrix but shipping only the patient subset; round-1 reviewers must verify every identity in the docstring has a corresponding `it(...)` block before approving.
 
+### Export discipline (Story 5.5)
+
+LGPD Art. 18 data-portability is the one sharing-adjacent surface NOT gated by `premiumProcedure` — gating it on subscription tier would be illegal. `requestExport` uses `protectedProcedure`; reviewers must verify the gate stays off when touching this code. Generation runs through the `record.export.generate` pg-boss queue hosted in `services/llm`; the consumer uploads to the private `exports` Supabase Storage bucket at `<patient_id>/<export_id>.<format>` and the API resolver mints a fresh signed URL (`EXPORT_DOWNLOAD_TTL_SECONDS = 3600` — 1h) on each `getExport` poll. The storage object lifetime is 24h (`expires_at` column default). Concurrent double-tap dedup is server-enforced via the `exports_active_uq` partial unique index `(patient_id) WHERE status IN ('queued','generating')` + the resolver's narrow `23505` catch (mirrors Story 5.1's `createShareToken` idempotency-shield). Storage orphan cleanup on tx-failure and final-attempt-failed branches is handled inside the consumer (best-effort `supabase.storage.remove`). The Lora / DM Sans PDF font bundle is deferred (currently Helvetica fallback) and tracked in deferred-work.
+
 ## Tooling conventions
 
 - **TypeScript**: strict mode, `noUncheckedIndexedAccess`, `moduleResolution: "Bundler"`, ES2022 target.

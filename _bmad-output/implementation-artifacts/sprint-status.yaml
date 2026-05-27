@@ -36,6 +36,26 @@
 
 generated: 2026-05-15
 last_updated: 2026-05-27
+# Story 5.5 implementation + R1 review complete → review. PR #56 (stacked).
+# Headline R1 fixes: partial unique index exports_active_uq +
+# narrow 23505 catch in requestExport (concurrent double-tap dedup
+# server-side; no duplicate audit/Storage); LEFT JOIN loinc_ref +
+# coalesce on biomarker_name_pt in worker SELECT (spec-faithful
+# pt-BR labels in JSON/PDF); 5-min client-side polling timeout +
+# stuck-state UX (Tier-2 "Tentar novamente" when worker silent);
+# new `expired` flag on getExport output → screen renders
+# EXPORT_EXPIRED_PT_BR + retry CTA; programmer-error final-attempt
+# now persists status=failed + export.failed audit; Storage object
+# cleanup on tx/upload failure (orphan prevention); record.exported
+# .metadata.requestedAt sourced from exports.requested_at (resolver
+# time, not worker time); cross-origin <a download> filename
+# preserved via createSignedUrl({download: filename}) Content-
+# Disposition; filename uses pollQuery.data.format (server
+# authoritative); parseNumericOrNull preserves precision for
+# value_numeric; eager getSupabaseClient() at worker boot. CLAUDE
+# .md "Export discipline" appendix added. typecheck 17/17;
+# lint 15/15; api test:unit 220/220; llm-service test:unit 26/26
+# (+1 programmer-error final-attempt test).
 # Story 5.5 spec created → ready-for-dev. Stacks on 5.1+5.2+5.3+5.4 / PR #56.
 # LGPD Art. 18 data-portability surface. ADRs: async pg-boss + Supabase
 # Storage signed URL (NO bytes in tRPC); @react-pdf/renderer in
@@ -463,7 +483,7 @@ development_status:
   5-2-patient-generates-a-time-limited-sharing-link-with-duration-selection: review
   5-3-patient-views-the-access-log: review
   5-4-patient-revokes-a-doctors-access-to-their-record: review
-  5-5-patient-exports-their-complete-health-record-as-json-or-pdf: ready-for-dev
+  5-5-patient-exports-their-complete-health-record-as-json-or-pdf: review
   5-6-patient-permanently-deletes-their-account-and-all-data: backlog
   epic-5-retrospective: optional
 

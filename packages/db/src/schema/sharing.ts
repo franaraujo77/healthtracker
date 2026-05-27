@@ -251,9 +251,16 @@ export const ConversationStarterCache = pgTable(
  * Storage bucket is created in
  * `packages/db/policies/supabase_storage_exports.sql`.
  *
- * No partial unique index for "active export per patient" — AC12
- * allows multiple concurrent exports (JSON + PDF for the same data;
- * re-tap before completion is cheap, no LLM call).
+ * Story 5.5 review-fix Decision A — partial unique index
+ * `exports_active_uq` on `(patient_id) WHERE status IN
+ * ('queued','generating')` enforces single-in-flight per patient.
+ * Mirrors Story 5.1 R1 idempotency-shield pattern on `share_tokens`.
+ * The `requestExport` resolver narrow-catches `23505` and re-SELECTs
+ * the racing row's `exportId` so a concurrent double-tap returns the
+ * same id (no duplicate job, no duplicate audit, no duplicate Storage
+ * write). Multiple concurrent exports of different formats are still
+ * NOT supported — AC12 retained the "cheap re-tap" claim but Story 5.5
+ * dev measured the duplicate-Storage-write risk as unacceptable.
  */
 export const exportFormatEnum = pgEnum("export_format_enum", ["json", "pdf"]);
 export const exportStatusEnum = pgEnum("export_status_enum", [
@@ -300,6 +307,13 @@ export const Exports = pgTable(
       table.patientId,
       sql`${table.requestedAt} desc`,
     ),
+    // Story 5.5 review-fix Decision A — single-in-flight per patient.
+    // See the table-level comment block above. The resolver
+    // narrow-catches `23505` and folds the conflict into the existing
+    // exportId.
+    uniqueIndex("exports_active_uq")
+      .on(table.patientId)
+      .where(sql`${table.status} in ('queued', 'generating')`),
   ],
 );
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Share } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Stack } from "expo-router";
@@ -12,6 +12,7 @@ import {
   EXPORT_FORMAT_GROUP_A11Y_PT_BR,
   EXPORT_FORMAT_OPTIONS,
   EXPORT_POLL_INTERVAL_MS,
+  EXPORT_POLL_TIMEOUT_MS,
   EXPORT_SCREEN_BODY_PT_BR,
   EXPORT_SCREEN_TITLE_PT_BR,
   EXPORT_SUBMIT_A11Y_PT_BR_FN,
@@ -40,6 +41,12 @@ export default function ExportarScreen(): React.ReactElement {
   const [format, setFormat] = useState<ExportFormat>("json");
   const [exportId, setExportId] = useState<string | null>(null);
   const [downloadInFlight, setDownloadInFlight] = useState(false);
+  // Story 5.5 review-fix Decision C — wall-clock anchor for the
+  // 5-minute client-side polling timeout. Refs (not state) — flipping
+  // it should NOT re-render. `nowTick` forces a re-evaluation of the
+  // derived `isStuck` flag every poll cycle.
+  const pollStartAtRef = useRef<number | null>(null);
+  const [nowTick, setNowTick] = useState(0);
 
   // Resume an in-flight export across re-mount (AC2).
   useEffect(() => {
@@ -60,10 +67,18 @@ export default function ExportarScreen(): React.ReactElement {
     trpc.sharing.requestExport.mutationOptions({
       onSuccess: (data) => {
         setExportId(data.exportId);
+        pollStartAtRef.current = Date.now();
         void AsyncStorage.setItem(ASYNC_STORAGE_KEY, data.exportId);
       },
     }),
   );
+
+  // Anchor `pollStartAt` on AsyncStorage-resumed exports too.
+  useEffect(() => {
+    if (exportId !== null && pollStartAtRef.current === null) {
+      pollStartAtRef.current = Date.now();
+    }
+  }, [exportId]);
 
   const pollQuery = useQuery({
     ...trpc.sharing.getExport.queryOptions(
@@ -72,16 +87,37 @@ export default function ExportarScreen(): React.ReactElement {
         enabled: exportId !== null,
         // TanStack v5 — `refetchInterval` accepts a function so we
         // stop polling once the row is terminal (ready / failed).
+        // Story 5.5 review-fix Decision C — also stop polling after
+        // EXPORT_POLL_TIMEOUT_MS elapses while still queued/generating.
         refetchInterval: (query) => {
           const data = query.state.data;
           if (!data) return EXPORT_POLL_INTERVAL_MS;
-          return data.status === "ready" || data.status === "failed"
-            ? false
-            : EXPORT_POLL_INTERVAL_MS;
+          if (data.status === "ready" || data.status === "failed") return false;
+          const startedAt = pollStartAtRef.current;
+          if (
+            startedAt !== null &&
+            Date.now() - startedAt >= EXPORT_POLL_TIMEOUT_MS
+          ) {
+            return false;
+          }
+          // Bump `nowTick` so the next render re-derives `isStuck`.
+          setNowTick((t) => t + 1);
+          return EXPORT_POLL_INTERVAL_MS;
         },
       },
     ),
   });
+
+  // Derived flag — recomputed each render (cheap). The `nowTick`
+  // dependency keeps it fresh after each poll cycle.
+  const isStuck =
+    pollStartAtRef.current !== null &&
+    Date.now() - pollStartAtRef.current >= EXPORT_POLL_TIMEOUT_MS &&
+    (pollQuery.data?.status === "queued" ||
+      pollQuery.data?.status === "generating");
+  // Reference `nowTick` so React re-renders pick up the new value;
+  // ESLint flags this otherwise as an unused-state warning.
+  void nowTick;
 
   const onSubmit = useCallback(() => {
     requestMutation.mutate({ format });
@@ -108,13 +144,17 @@ export default function ExportarScreen(): React.ReactElement {
 
   const onRetry = useCallback(() => {
     setExportId(null);
+    pollStartAtRef.current = null;
     void AsyncStorage.removeItem(ASYNC_STORAGE_KEY);
     requestMutation.mutate({ format });
   }, [format, requestMutation]);
 
-  // Surface the download-filename to logs so QA / debugging can
-  // cross-check the share-sheet payload.
-  const downloadFilename = exportFilename(format, new Date());
+  // Story 5.5 review-fix Patch #6 — derive filename from
+  // server-authoritative `pollQuery.data.format`, not the local `format`
+  // state. If the patient flips the radio mid-poll the artifact format
+  // stays whatever was queued; the filename must match.
+  const effectiveFormat = pollQuery.data?.format ?? format;
+  const downloadFilename = exportFilename(effectiveFormat, new Date());
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: BACKGROUND_PRIMARY }}>
@@ -159,6 +199,8 @@ export default function ExportarScreen(): React.ReactElement {
             onDownload={() => void onDownload()}
             onRetry={onRetry}
             downloadInFlight={downloadInFlight}
+            expired={pollQuery.data?.expired === true}
+            stuck={isStuck}
           />
         )}
 

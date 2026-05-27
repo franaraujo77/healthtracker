@@ -12,6 +12,7 @@ import { registerGenerateLetterConsumer } from "./consumers/generate-letter.js";
 import { sql } from "./db.js";
 import { registerBiomarkerSuggestionRoute } from "./routes/biomarker-suggestion.js";
 import { registerLetterStreamRoute } from "./routes/letter-stream.js";
+import { getSupabaseClient } from "./supabase.js";
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const PORT = Number(process.env.PORT ?? "3001");
@@ -61,6 +62,12 @@ await boss.createQueue("record.export.generate", {
   retryDelay: 30,
   retryBackoff: true,
 });
+// Story 5.5 review-fix Patch #8 — eagerly resolve the Supabase
+// service-role client at boot. A misconfigured worker should abort
+// the process immediately rather than accept jobs and explode on the
+// first export attempt (which then re-queues and burns the retry
+// budget against a permanent env defect).
+getSupabaseClient();
 
 await registerGenerateLetterConsumer(boss, { sql, llm });
 await registerGenerateConversationStarterConsumer(boss, { sql, llm });
