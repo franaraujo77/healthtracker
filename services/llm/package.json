@@ -16,15 +16,18 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@healthtracker/types": "workspace:*",
+    "@react-pdf/renderer": "^4.5.1",
     "@supabase/supabase-js": "catalog:",
     "fastify": "^5.2.0",
     "pg-boss": "12.18.2",
-    "postgres": "catalog:"
+    "postgres": "catalog:",
+    "react": "catalog:react19"
   },
   "devDependencies": {
     "@healthtracker/eslint-config": "workspace:*",
     "@healthtracker/validators": "workspace:*",
     "@types/node": "catalog:",
+    "@types/react": "catalog:react19",
     "eslint": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

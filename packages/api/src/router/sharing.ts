@@ -11,6 +11,7 @@ import type {
 import { and, desc, eq, gt, isNull, or, sql } from "@healthtracker/db";
 import {
   ConversationStarterCache,
+  Exports,
   PendingInvites,
   ShareTokenBiomarkers,
   ShareTokens,
@@ -20,13 +21,19 @@ import {
   configureBiomarkersInputSchema,
   createPendingInviteInputSchema,
   createShareTokenInputSchema,
+  EXPORT_DOWNLOAD_TTL_SECONDS,
   getDraftConfigInputSchema,
+  getExportInputSchema,
+  getExportOutputSchema,
   isAccessLogEventKind,
   listAccessLogInputSchema,
+  requestExportInputSchema,
+  requestExportOutputSchema,
   revokeShareTokenInputSchema,
   revokeShareTokenOutputSchema,
   SHARING_AUDIT_CONFIGURED,
   SHARING_AUDIT_CONVERSATION_STARTER_QUEUED,
+  SHARING_AUDIT_EXPORT_QUEUED,
   SHARING_AUDIT_PENDING_INVITE_CREATED,
   SHARING_AUDIT_TOKEN_CREATED,
   SHARING_AUDIT_TOKEN_REVOKED,
@@ -43,6 +50,7 @@ import {
   getDistinctCategoriesForPatient,
   hashIdentifier,
 } from "../sharing";
+import { createExportDownloadSignedUrl } from "../storage";
 import { protectedProcedure } from "../trpc";
 
 /**
@@ -758,6 +766,138 @@ export const sharingRouter = {
 
     return { shares: rows };
   }),
+
+  /**
+   * Story 5.5 AC6 — `requestExport`. Enqueues a record-export job.
+   *
+   * **NOT** wrapped in `premiumProcedure`. LGPD Art. 18 data-portability
+   * is a non-negotiable right; gating it on subscription tier would
+   * violate the law. This is the only sharing-related mutation that's
+   * free-for-all. Documented in spec AC6 + CLAUDE.md anti-patterns.
+   *
+   * Tx wraps INSERT + outbox + audit per the Story 5.2 outbox pattern
+   * (raw `INSERT INTO pgboss.job` so the enqueue and the row INSERT
+   * commit atomically — `boss.send()` opens its own connection and is
+   * not tx-aware against the Drizzle `tx` handle).
+   *
+   * Singleton key: `record.export.${exportId}` — unique per row so a
+   * single export's job is dedup'd; we never re-enqueue the same id.
+   *
+   * Idempotency note (AC12): NO partial-unique index against active
+   * exports per patient. Re-tapping "Exportar" before the worker
+   * finishes creates a fresh row + job. Cheap; spec-sanctioned.
+   */
+  requestExport: protectedProcedure
+    .input(requestExportInputSchema)
+    .output(requestExportOutputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const patientId = ctx.session.user.id;
+
+      return ctx.db.transaction(async (tx) => {
+        const inserted = await tx
+          .insert(Exports)
+          .values({
+            patientId,
+            format: input.format,
+            status: "queued",
+          })
+          .returning({ id: Exports.id });
+        const row = inserted[0];
+        if (!row) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "requestExport: insert returned no row",
+          });
+        }
+        const exportId = row.id;
+
+        // Outbox: enqueue inside the same tx (Story 5.2 precedent).
+        const jobPayload = {
+          jobId: crypto.randomUUID(),
+          patientId,
+          correlationId: exportId,
+          payload: { exportId },
+          createdAt: new Date().toISOString(),
+        };
+        const singletonKey = `record.export.${exportId}`;
+        await tx.execute(sql`
+          INSERT INTO pgboss.job
+            (name, data, retry_limit, retry_delay, retry_backoff, singleton_key)
+          VALUES (
+            'record.export.generate',
+            ${JSON.stringify(jobPayload)}::jsonb,
+            3, 30, true,
+            ${singletonKey}
+          )
+          ON CONFLICT DO NOTHING
+        `);
+
+        await writeAuditLog(tx, {
+          actorId: patientId,
+          actorType: "patient",
+          event: SHARING_AUDIT_EXPORT_QUEUED,
+          resourceId: exportId,
+          resourceType: "export",
+          metadata: { format: input.format },
+        });
+
+        return { exportId };
+      });
+    }),
+
+  /**
+   * Story 5.5 AC7 — `getExport`. Polling endpoint. 404 on cross-patient
+   * lookup (no enumeration oracle; Story 5.1 R1 discipline). When
+   * `status === "ready"` AND not past `expires_at`, mints a fresh
+   * Supabase Storage signed URL (1h TTL).
+   *
+   * NOT cached — every tap re-runs (CLAUDE.md anti-pattern).
+   */
+  getExport: protectedProcedure
+    .input(getExportInputSchema)
+    .output(getExportOutputSchema)
+    .query(async ({ ctx, input }) => {
+      const patientId = ctx.session.user.id;
+      const rows = await ctx.db
+        .select({
+          status: Exports.status,
+          format: Exports.format,
+          objectPath: Exports.objectPath,
+          requestedAt: Exports.requestedAt,
+          completedAt: Exports.completedAt,
+          expiresAt: Exports.expiresAt,
+        })
+        .from(Exports)
+        .where(
+          and(eq(Exports.id, input.exportId), eq(Exports.patientId, patientId)),
+        )
+        .limit(1);
+      const row = rows[0];
+      if (!row) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+
+      let downloadUrl: string | null = null;
+      if (
+        row.status === "ready" &&
+        row.objectPath !== null &&
+        row.expiresAt > new Date()
+      ) {
+        downloadUrl = await createExportDownloadSignedUrl(
+          row.objectPath,
+          EXPORT_DOWNLOAD_TTL_SECONDS,
+        );
+      }
+
+      return {
+        status: row.status,
+        format: row.format,
+        requestedAt: row.requestedAt.toISOString(),
+        completedAt: row.completedAt ? row.completedAt.toISOString() : null,
+        expiresAt: row.expiresAt.toISOString(),
+        downloadUrl,
+      };
+    }),
 
   /**
    * Story 5.3 — paginated Access Log feed (AC1, AC4, AC5, AC11, AC12).

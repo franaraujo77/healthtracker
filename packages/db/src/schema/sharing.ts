@@ -239,6 +239,70 @@ export const ConversationStarterCache = pgTable(
   ],
 );
 
+/**
+ * Story 5.5 — `exports` table. LGPD Art. 18 data-portability surface.
+ * Each row is one patient-initiated export request. `status` advances
+ * `queued → generating → ready` (or `→ failed`); the artifact lives
+ * in Supabase Storage at `exports/{patient_id}/{id}.{format}` and is
+ * never returned in tRPC responses (signed URLs only).
+ *
+ * RLS lives in `packages/db/policies/custom_rls_exports.sql` —
+ * patient SELECT-own only; service-role bypass for the worker writes.
+ * Storage bucket is created in
+ * `packages/db/policies/supabase_storage_exports.sql`.
+ *
+ * No partial unique index for "active export per patient" — AC12
+ * allows multiple concurrent exports (JSON + PDF for the same data;
+ * re-tap before completion is cheap, no LLM call).
+ */
+export const exportFormatEnum = pgEnum("export_format_enum", ["json", "pdf"]);
+export const exportStatusEnum = pgEnum("export_status_enum", [
+  "queued",
+  "generating",
+  "ready",
+  "failed",
+]);
+
+export const Exports = pgTable(
+  "exports",
+  (t) => ({
+    id: t.uuid().notNull().primaryKey().defaultRandom(),
+    patientId: t
+      .uuid()
+      .notNull()
+      .references(() => Users.id, { onDelete: "cascade" }),
+    format: exportFormatEnum("format").notNull(),
+    status: exportStatusEnum("status").notNull().default("queued"),
+    /** `exports/{patient_id}/{id}.{format}` — NULL until ready. */
+    objectPath: t.text(),
+    fileSizeBytes: t.integer(),
+    failureReason: t.text(),
+    requestedAt: t
+      .timestamp({ mode: "date", withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    completedAt: t.timestamp({ mode: "date", withTimezone: true }),
+    /**
+     * Storage object lifetime. The signed URL TTL (1h, in
+     * `EXPORT_DOWNLOAD_TTL_SECONDS`) is independent — clients can
+     * re-request a fresh URL via `getExport` until this timestamp.
+     * Cleanup of the storage object is deferred (Story 5.x polish /
+     * Supabase lifecycle rule).
+     */
+    expiresAt: t
+      .timestamp({ mode: "date", withTimezone: true })
+      .notNull()
+      .default(sql`now() + interval '24 hours'`),
+  }),
+  (table) => [
+    // AC5 — "previous exports" list ordering (UI ships in a future story).
+    index("exports_patient_requested_idx").on(
+      table.patientId,
+      sql`${table.requestedAt} desc`,
+    ),
+  ],
+);
+
 // Inferred row types for downstream consumers.
 export type PendingInvite = typeof PendingInvites.$inferSelect;
 export type NewPendingInvite = typeof PendingInvites.$inferInsert;
@@ -250,3 +314,7 @@ export type ConversationStarterCacheRow =
   typeof ConversationStarterCache.$inferSelect;
 export type NewConversationStarterCache =
   typeof ConversationStarterCache.$inferInsert;
+export type ExportRow = typeof Exports.$inferSelect;
+export type NewExport = typeof Exports.$inferInsert;
+export type ExportFormat = ExportRow["format"];
+export type ExportStatus = ExportRow["status"];

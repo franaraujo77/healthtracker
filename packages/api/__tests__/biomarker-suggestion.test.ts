@@ -47,7 +47,7 @@ describe("generateBiomarkerSuggestion", () => {
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
       ),
-    ) as unknown as typeof globalThis.fetch;
+    );
     const out = await generateBiomarkerSuggestion(db, {
       patientId: PATIENT_ID,
       supabaseAccessToken: SUPABASE_ACCESS_TOKEN,
@@ -81,7 +81,7 @@ describe("generateBiomarkerSuggestion", () => {
         new Response(JSON.stringify({ suggestion: "ok?" }), { status: 200 }),
       ),
     );
-    globalThis.fetch = fetchSpy as unknown as typeof globalThis.fetch;
+    globalThis.fetch = fetchSpy;
     await generateBiomarkerSuggestion(db, {
       patientId: PATIENT_ID,
       supabaseAccessToken: SUPABASE_ACCESS_TOKEN,
@@ -104,7 +104,7 @@ describe("generateBiomarkerSuggestion", () => {
       Promise.resolve(
         new Response(JSON.stringify({ code: "COOLDOWN" }), { status: 429 }),
       ),
-    ) as unknown as typeof globalThis.fetch;
+    );
     await expect(
       generateBiomarkerSuggestion(db, {
         patientId: PATIENT_ID,
@@ -124,7 +124,7 @@ describe("generateBiomarkerSuggestion", () => {
     const { db, insertFn } = makeDb();
     globalThis.fetch = vi.fn(() =>
       Promise.resolve(new Response("boom", { status: 502 })),
-    ) as unknown as typeof globalThis.fetch;
+    );
     await expect(
       generateBiomarkerSuggestion(db, {
         patientId: PATIENT_ID,
@@ -166,7 +166,7 @@ describe("generateBiomarkerSuggestion", () => {
       Promise.resolve(
         new Response(JSON.stringify({ suggestion: "" }), { status: 200 }),
       ),
-    ) as unknown as typeof globalThis.fetch;
+    );
     await expect(
       generateBiomarkerSuggestion(db, {
         patientId: PATIENT_ID,

@@ -7,6 +7,7 @@ import {
   createStubLLMAdapter,
 } from "./adapters/anthropic.js";
 import { registerGenerateConversationStarterConsumer } from "./consumers/generate-conversation-starter.js";
+import { registerGenerateExportConsumer } from "./consumers/generate-export.js";
 import { registerGenerateLetterConsumer } from "./consumers/generate-letter.js";
 import { sql } from "./db.js";
 import { registerBiomarkerSuggestionRoute } from "./routes/biomarker-suggestion.js";
@@ -52,9 +53,18 @@ await boss.createQueue("conversation_starter.generate", {
   retryDelay: 30,
   retryBackoff: true,
 });
+// Story 5.5 — patient record-export queue. Same retry shape as the
+// LLM queues; after exhaustion the consumer persists `status='failed'`
+// + emits the `export.failed` audit row.
+await boss.createQueue("record.export.generate", {
+  retryLimit: 3,
+  retryDelay: 30,
+  retryBackoff: true,
+});
 
 await registerGenerateLetterConsumer(boss, { sql, llm });
 await registerGenerateConversationStarterConsumer(boss, { sql, llm });
+await registerGenerateExportConsumer(boss, { sql });
 
 const app = Fastify({ logger: false });
 app.get("/healthz", () => ({ ok: true }));

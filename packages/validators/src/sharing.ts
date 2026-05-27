@@ -314,6 +314,11 @@ export const ACCESS_LOG_EVENT_KINDS = [
   "conversation_starter.failed",
   "share_token.revoked",
   "share_token.read",
+  // Story 5.5 — patient-actor surface for record exports (AC10).
+  // The system-actor `export.generated` / `export.failed` events are
+  // intentionally NOT in this allowlist; they are operational telemetry,
+  // not patient-visible actions.
+  "record.exported",
 ] as const;
 export type AccessLogEventKind = (typeof ACCESS_LOG_EVENT_KINDS)[number];
 
@@ -451,6 +456,12 @@ export interface AccessLogEventCopyArgs {
   displayName: string;
   durationLabel?: string;
   biomarkerChangeCount?: number;
+  /**
+   * Story 5.5 — `record.exported` rows carry the format in
+   * `audit_log.metadata.format` ("json" | "pdf"). The Access Log
+   * row renderer threads it here.
+   */
+  exportFormat?: string;
 }
 
 export function ACCESS_LOG_EVENT_LABEL_PT_BR_FN(
@@ -485,6 +496,16 @@ export function ACCESS_LOG_EVENT_LABEL_PT_BR_FN(
       return `Você revogou o acesso de ${displayName}.`;
     case "share_token.read":
       return `${displayName} visualizou seus dados.`;
+    case "record.exported": {
+      // Story 5.5 AC10 — patient-self event; `displayName` is the
+      // resolver's "Você" fallback (no doctor on the resource). The
+      // export format lives in `metadata.format`, surfaced via the
+      // optional `exportFormat` field on `AccessLogEventCopyArgs`.
+      const fmt = args.exportFormat ?? "";
+      return fmt.length > 0
+        ? `Você exportou seu registro completo (${fmt.toUpperCase()}).`
+        : "Você exportou seu registro completo.";
+    }
   }
 }
 
@@ -559,3 +580,126 @@ export const REVOKE_FAILED_PT_BR = "Não foi possível revogar. Tente novamente.
  * 5s timer runs, so the patient knows where to find the undo.
  */
 export const ACCESS_LOG_REVOKING_HINT_PT_BR = "(Desfazer no toast)";
+
+// ---------------------------------------------------------------------------
+// Story 5.5 — Patient-initiated record export (LGPD Art. 18)
+// ---------------------------------------------------------------------------
+
+/**
+ * Export format enum + status enum. Mirror the pgEnum + CHECK
+ * constraints in `packages/db/src/schema/sharing.ts`.
+ */
+export const EXPORT_FORMATS = ["json", "pdf"] as const;
+export type ExportFormat = (typeof EXPORT_FORMATS)[number];
+
+export const EXPORT_STATUSES = [
+  "queued",
+  "generating",
+  "ready",
+  "failed",
+] as const;
+export type ExportStatus = (typeof EXPORT_STATUSES)[number];
+
+/** Audit event constants (AC10). */
+export const SHARING_AUDIT_EXPORT_QUEUED = "export.queued" as const;
+export const SHARING_AUDIT_EXPORT_GENERATED = "export.generated" as const;
+export const SHARING_AUDIT_EXPORT_FAILED = "export.failed" as const;
+/** Patient-actor surface — extends `ACCESS_LOG_EVENT_KINDS`. */
+export const SHARING_AUDIT_RECORD_EXPORTED = "record.exported" as const;
+
+/** AC6 input — only the format. */
+export const requestExportInputSchema = z.object({
+  format: z.enum(EXPORT_FORMATS),
+});
+export type RequestExportInput = z.infer<typeof requestExportInputSchema>;
+
+export const requestExportOutputSchema = z.object({
+  exportId: z.uuid(),
+});
+export type RequestExportOutput = z.infer<typeof requestExportOutputSchema>;
+
+export const getExportInputSchema = z.object({
+  exportId: z.uuid(),
+});
+export type GetExportInput = z.infer<typeof getExportInputSchema>;
+
+/**
+ * AC7 output — `downloadUrl` is a freshly-minted Supabase Storage
+ * signed URL (1h TTL) when `status === "ready"` and not past the
+ * 24h `expires_at`; null otherwise. Clients MUST NOT cache the URL
+ * — every "Baixar" tap re-runs the query.
+ */
+export const getExportOutputSchema = z.object({
+  status: z.enum(EXPORT_STATUSES),
+  format: z.enum(EXPORT_FORMATS),
+  requestedAt: z.iso.datetime(),
+  completedAt: z.iso.datetime().nullable(),
+  expiresAt: z.iso.datetime(),
+  downloadUrl: z.url().nullable(),
+});
+export type GetExportOutput = z.infer<typeof getExportOutputSchema>;
+
+/**
+ * AC1 — the patient-facing format-selector options. Order is
+ * visually load-bearing (JSON first; the spec pre-selects JSON).
+ */
+export const EXPORT_FORMAT_OPTIONS: readonly {
+  value: ExportFormat;
+  label: string;
+  hint: string;
+}[] = [
+  {
+    value: "json",
+    label: "JSON",
+    hint: "Para análise em outras ferramentas.",
+  },
+  {
+    value: "pdf",
+    label: "PDF",
+    hint: "Documento formatado para impressão ou compartilhamento.",
+  },
+] as const;
+
+export const EXPORT_FORMAT_HINT_JSON_PT_BR =
+  "Para análise em outras ferramentas.";
+export const EXPORT_FORMAT_HINT_PDF_PT_BR =
+  "Documento formatado para impressão ou compartilhamento.";
+
+/** AC2 — progress / terminal / button copy. */
+export const EXPORT_FAILED_PT_BR =
+  "Não foi possível gerar o registro. Tente novamente.";
+export const EXPORT_PROGRESS_PT_BR = "Gerando seu registro… (até 60 segundos)";
+export const EXPORT_READY_PT_BR = "Pronto";
+export const EXPORT_DOWNLOAD_BUTTON_PT_BR = "Baixar";
+export const EXPORT_RETRY_BUTTON_PT_BR = "Tentar novamente";
+export const EXPORT_SUBMIT_BUTTON_PT_BR = "Exportar";
+export const EXPORT_FORMAT_GROUP_A11Y_PT_BR = "Formato do registro";
+
+export function EXPORT_SUBMIT_A11Y_PT_BR_FN(format: ExportFormat): string {
+  return `Exportar registro como ${format.toUpperCase()}`;
+}
+
+/** Screen title + helper copy. */
+export const EXPORT_SCREEN_TITLE_PT_BR = "Exportar registro";
+export const EXPORT_SCREEN_BODY_PT_BR =
+  "Baixe uma cópia completa do seu registro de saúde.";
+
+/** AC11 — signed-URL TTL. */
+export const EXPORT_DOWNLOAD_TTL_SECONDS = 3600;
+/** AC2 — polling interval for `getExport`. */
+export const EXPORT_POLL_INTERVAL_MS = 2000;
+/** Storage file lifetime — client display only; server is authoritative. */
+export const EXPORT_FILE_LIFETIME_MS = 24 * 60 * 60 * 1000;
+/** AC3 — top-level `schemaVersion` for the JSON export. */
+export const EXPORT_JSON_SCHEMA_VERSION = "1.0.0";
+
+/** Routes (AC1). */
+export const EXPORT_ROUTE = "/configuracoes/dados/exportar";
+
+/** Filename helper for the download trigger (T5.5). */
+export function exportFilename(format: ExportFormat, date: Date): string {
+  const yyyy = date.getUTCFullYear();
+  const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(date.getUTCDate()).padStart(2, "0");
+  return `healthtracker-export-${yyyy}-${mm}-${dd}.${format}`;
+}

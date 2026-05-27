@@ -14,6 +14,8 @@ import { createClient } from "@healthtracker/auth";
  */
 
 export const LAB_UPLOADS_BUCKET = "lab-uploads";
+/** Story 5.5 — bucket for patient-initiated record exports. Private. */
+export const EXPORTS_BUCKET = "exports";
 
 let cachedClient: ReturnType<typeof createClient> | null = null;
 
@@ -135,4 +137,31 @@ export async function statLabUploadObject(
   const rawMime = match.metadata?.mimetype;
   const contentType = typeof rawMime === "string" ? rawMime : null;
   return { sizeBytes: rawSize, contentType };
+}
+
+/**
+ * Story 5.5 — issues a short-lived signed download URL for a record-
+ * export artifact in the private `exports` bucket. TTL is `ttlSeconds`
+ * (validators ship `EXPORT_DOWNLOAD_TTL_SECONDS = 3600`).
+ *
+ * The path convention is `<patient_id>/<export_id>.<format>`; the
+ * `objectPath` column on `exports` carries this verbatim. Anti-pattern
+ * note (CLAUDE.md): clients MUST NOT cache the URL — every "Baixar"
+ * tap re-runs `getExport` to mint a fresh URL.
+ */
+export async function createExportDownloadSignedUrl(
+  objectPath: string,
+  ttlSeconds: number,
+): Promise<string> {
+  const supabase = getStorageClient();
+  const { data, error } = await supabase.storage
+    .from(EXPORTS_BUCKET)
+    .createSignedUrl(objectPath, ttlSeconds);
+  if (error) {
+    throw new Error(`createSignedUrl(exports) failed: ${error.message}`);
+  }
+  if (!data.signedUrl) {
+    throw new Error("createSignedUrl(exports) returned no signedUrl");
+  }
+  return data.signedUrl;
 }
