@@ -36,6 +36,21 @@
 
 generated: 2026-05-15
 last_updated: 2026-05-27
+# Story 5.5 spec created → ready-for-dev. Stacks on 5.1+5.2+5.3+5.4 / PR #56.
+# LGPD Art. 18 data-portability surface. ADRs: async pg-boss + Supabase
+# Storage signed URL (NO bytes in tRPC); @react-pdf/renderer in
+# services/llm (reuses persistent Railway worker; no headless browser);
+# life_events deferred to Epic 7 (JSON empty-array slot; PDF empty-
+# state section). NEW exports table (id, patient_id, format ENUM
+# json/pdf, status ENUM queued/generating/ready/failed, object_path,
+# expires_at default now()+24h). NEW sharingRouter.requestExport
+# (NO premium gate — LGPD exception) + getExport (returns short-
+# lived signed URL with 1h TTL; refetches every 2s for polling).
+# NEW services/llm consumer generate-export + RecordExportPdf.tsx
+# (Lora + DM Sans). NEW record.exported / export.queued / generated
+# / failed audit constants. ACCESS_LOG_EVENT_KINDS extended with
+# record.exported. NEW Configurações > Dados > Exportar registro
+# screen Expo + web, with ExportProgressCard polling UX.
 # Story 5.4 implementation + R1 review complete → review. PR #56 (stacked).
 # Both Blind Hunter and Edge Case Hunter converged on missing onError
 # handler as the LGPD-relevant headline. Patched: revokeMutation onError
@@ -448,7 +463,7 @@ development_status:
   5-2-patient-generates-a-time-limited-sharing-link-with-duration-selection: review
   5-3-patient-views-the-access-log: review
   5-4-patient-revokes-a-doctors-access-to-their-record: review
-  5-5-patient-exports-their-complete-health-record-as-json-or-pdf: backlog
+  5-5-patient-exports-their-complete-health-record-as-json-or-pdf: ready-for-dev
   5-6-patient-permanently-deletes-their-account-and-all-data: backlog
   epic-5-retrospective: optional
 
