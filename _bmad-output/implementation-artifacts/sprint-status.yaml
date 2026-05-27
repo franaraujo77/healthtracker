@@ -36,6 +36,19 @@
 
 generated: 2026-05-15
 last_updated: 2026-05-26
+# Story 5.4 spec created → ready-for-dev. Stacks on 5.1+5.2+5.3 / PR #56.
+# Patient-side revoke flow. ADRs: deferred-server-write 5s undo
+# (cancelled revokes never hit DB — no audit noise); doctor-side
+# 403 + share_token.rejected deferred to Epic 6 (Story 5.1's
+# verifyShareToken is already revoked-aware); revoked-pending UI
+# state owned client-side only. NEW protectedProcedure.mutation
+# sharingRouter.revokeShareToken (tx + SELECT FOR UPDATE +
+# share_token.revoked audit). NEW UndoToast + RevokeConfirmDialog
+# Tamagui components. AccessLogItem gains "revoked-pending"
+# tokenStatus + onRevokePress prop. Cleanup on unmount fires
+# pending revokes (don't lose user-confirmed actions). No new
+# schema, no new RLS files, no new env vars. Audit constant
+# SHARING_AUDIT_TOKEN_REVOKED added.
 # Story 5.3 implementation + R1 review complete → review. PR #56 (stacked).
 # R1 verified F18 RLS-bypass concern was safe (protectedProcedure
 # wraps tx + set_config(app.current_patient_id, ...)). Headline fixes:
@@ -414,7 +427,7 @@ development_status:
   5-1-patient-configures-per-biomarker-sharing-with-a-named-doctor: review
   5-2-patient-generates-a-time-limited-sharing-link-with-duration-selection: review
   5-3-patient-views-the-access-log: review
-  5-4-patient-revokes-a-doctors-access-to-their-record: backlog
+  5-4-patient-revokes-a-doctors-access-to-their-record: ready-for-dev
   5-5-patient-exports-their-complete-health-record-as-json-or-pdf: backlog
   5-6-patient-permanently-deletes-their-account-and-all-data: backlog
   epic-5-retrospective: optional
