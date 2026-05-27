@@ -36,6 +36,27 @@
 
 generated: 2026-05-15
 last_updated: 2026-05-27
+# Story 5.6 spec created → ready-for-dev. Stacks on 5.1-5.5 / PR #56.
+# LGPD Art. 18 right-to-erasure. ADRs: async pg-boss + immediate
+# client signout (no waiting on worker); SHA-256 pseudonymization
+# of audit_log via ACCOUNT_DELETION_SALT env (deterministic; salt
+# rotation invalidates linkability across boundary — documented);
+# EXCLUIR magic-word + 30s visible cooldown (Story 5.4 deferred-
+# server-write pattern, longer window because irreversible).
+# NEW account_deletion_requests table (patient_id deliberately NO
+# FK — ledger row outlives the user). NEW accountRouter
+# .requestDeletion + getDeletionStatus. NEW services/llm consumer
+# generate-account-deletion (pseudonymize → Storage cleanup →
+# cascade-delete public → auth.admin.deleteUser → status='complete';
+# audit emit BEFORE auth admin call so partial failure is traced).
+# 3 new audit kinds (account.deletion_requested/completed/failed);
+# ACCESS_LOG_EVENT_KINDS extended with .deletion_requested. FK
+# cascade audit prerequisite (T2): inventory all FKs to users(id)
+# and add onDelete: cascade where missing. NEW env
+# ACCOUNT_DELETION_SALT (64-byte base64, prod-required). Spec
+# AC7 deviates from spec text — "Conta não encontrada" specific
+# error is account-enumeration risk; keep Supabase default
+# Invalid login credentials.
 # Story 5.5 implementation + R1 review complete → review. PR #56 (stacked).
 # Headline R1 fixes: partial unique index exports_active_uq +
 # narrow 23505 catch in requestExport (concurrent double-tap dedup
@@ -484,7 +505,7 @@ development_status:
   5-3-patient-views-the-access-log: review
   5-4-patient-revokes-a-doctors-access-to-their-record: review
   5-5-patient-exports-their-complete-health-record-as-json-or-pdf: review
-  5-6-patient-permanently-deletes-their-account-and-all-data: backlog
+  5-6-patient-permanently-deletes-their-account-and-all-data: ready-for-dev
   epic-5-retrospective: optional
 
   # Epic 6: Doctor Can View a Patient's Conversation Starter
