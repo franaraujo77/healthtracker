@@ -38,6 +38,9 @@ afterEach(() => {
 describe("generateBiomarkerSuggestion", () => {
   it("returns the suggestion + writes a biomarker_suggestion.generated audit on 200", async () => {
     const { db, insertFn, auditValues } = makeDb();
+    // Cast: undici-types' Response (pulled transitively) lacks `bytes()` and
+    // isn't assignable to lib.dom's global Response that typeof fetch expects.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- see comment above
     globalThis.fetch = vi.fn(() =>
       Promise.resolve(
         new Response(
@@ -47,7 +50,7 @@ describe("generateBiomarkerSuggestion", () => {
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
       ),
-    );
+    ) as unknown as typeof globalThis.fetch;
     const out = await generateBiomarkerSuggestion(db, {
       patientId: PATIENT_ID,
       supabaseAccessToken: SUPABASE_ACCESS_TOKEN,
@@ -81,7 +84,8 @@ describe("generateBiomarkerSuggestion", () => {
         new Response(JSON.stringify({ suggestion: "ok?" }), { status: 200 }),
       ),
     );
-    globalThis.fetch = fetchSpy;
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- undici-types Response divergence
+    globalThis.fetch = fetchSpy as unknown as typeof globalThis.fetch;
     await generateBiomarkerSuggestion(db, {
       patientId: PATIENT_ID,
       supabaseAccessToken: SUPABASE_ACCESS_TOKEN,
@@ -100,11 +104,12 @@ describe("generateBiomarkerSuggestion", () => {
 
   it("translates a 429 cooldown into TRPC TOO_MANY_REQUESTS without writing audit", async () => {
     const { db, insertFn } = makeDb();
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- undici-types Response divergence
     globalThis.fetch = vi.fn(() =>
       Promise.resolve(
         new Response(JSON.stringify({ code: "COOLDOWN" }), { status: 429 }),
       ),
-    );
+    ) as unknown as typeof globalThis.fetch;
     await expect(
       generateBiomarkerSuggestion(db, {
         patientId: PATIENT_ID,
@@ -122,9 +127,10 @@ describe("generateBiomarkerSuggestion", () => {
 
   it("translates a 5xx into TRPC INTERNAL_SERVER_ERROR without writing audit", async () => {
     const { db, insertFn } = makeDb();
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- undici-types Response divergence
     globalThis.fetch = vi.fn(() =>
       Promise.resolve(new Response("boom", { status: 502 })),
-    );
+    ) as unknown as typeof globalThis.fetch;
     await expect(
       generateBiomarkerSuggestion(db, {
         patientId: PATIENT_ID,
@@ -142,9 +148,10 @@ describe("generateBiomarkerSuggestion", () => {
 
   it("translates a network/fetch failure into INTERNAL_SERVER_ERROR without writing audit", async () => {
     const { db, insertFn } = makeDb();
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- undici-types Response divergence
     globalThis.fetch = vi.fn(() =>
       Promise.reject(new TypeError("fetch failed")),
-    );
+    ) as unknown as typeof globalThis.fetch;
     await expect(
       generateBiomarkerSuggestion(db, {
         patientId: PATIENT_ID,
@@ -162,11 +169,12 @@ describe("generateBiomarkerSuggestion", () => {
 
   it("rejects malformed responses (missing/empty suggestion) without writing audit", async () => {
     const { db, insertFn } = makeDb();
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- undici-types Response divergence
     globalThis.fetch = vi.fn(() =>
       Promise.resolve(
         new Response(JSON.stringify({ suggestion: "" }), { status: 200 }),
       ),
-    );
+    ) as unknown as typeof globalThis.fetch;
     await expect(
       generateBiomarkerSuggestion(db, {
         patientId: PATIENT_ID,
@@ -186,7 +194,8 @@ describe("generateBiomarkerSuggestion", () => {
     delete process.env.LLM_SERVICE_URL;
     const { db, insertFn } = makeDb();
     const fetchSpy = vi.fn();
-    globalThis.fetch = fetchSpy;
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- undici-types Response divergence
+    globalThis.fetch = fetchSpy as unknown as typeof globalThis.fetch;
     await expect(
       generateBiomarkerSuggestion(db, {
         patientId: PATIENT_ID,
