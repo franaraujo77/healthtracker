@@ -25,16 +25,19 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { asIdentity } from "./helpers";
-import { serviceClient } from "./setup";
+import { cleanupSeededUsers, seedUser, serviceClient } from "./setup";
 
 const seededInviteIds: string[] = [];
 const seededTokenIds: string[] = [];
+const seededUserIds: string[] = [];
 
 async function seedToken(args: {
   patientId: string;
   expiresAt?: Date | null;
   revokedAt?: Date | null;
 }): Promise<string> {
+  await seedUser(args.patientId);
+  seededUserIds.push(args.patientId);
   const inviteId = crypto.randomUUID();
   const tokenId = crypto.randomUUID();
   const { error: e1 } = await serviceClient.from("pending_invites").insert({
@@ -75,6 +78,10 @@ afterEach(async () => {
       .delete()
       .in("id", seededInviteIds);
     seededInviteIds.length = 0;
+  }
+  if (seededUserIds.length > 0) {
+    await cleanupSeededUsers(seededUserIds);
+    seededUserIds.length = 0;
   }
 });
 

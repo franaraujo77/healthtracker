@@ -6,15 +6,18 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { asIdentity } from "./helpers";
-import { serviceClient } from "./setup";
+import { cleanupSeededUsers, seedUser, serviceClient } from "./setup";
 
 const seededIds: string[] = [];
+const seededUserIds: string[] = [];
 
 async function seedInvite(args: {
   patientId: string;
   identifierHash: string;
   displayName?: string;
 }): Promise<string> {
+  await seedUser(args.patientId);
+  seededUserIds.push(args.patientId);
   const id = crypto.randomUUID();
   const { error } = await serviceClient.from("pending_invites").insert({
     id,
@@ -28,9 +31,14 @@ async function seedInvite(args: {
 }
 
 afterEach(async () => {
-  if (seededIds.length === 0) return;
-  await serviceClient.from("pending_invites").delete().in("id", seededIds);
-  seededIds.length = 0;
+  if (seededIds.length > 0) {
+    await serviceClient.from("pending_invites").delete().in("id", seededIds);
+    seededIds.length = 0;
+  }
+  if (seededUserIds.length > 0) {
+    await cleanupSeededUsers(seededUserIds);
+    seededUserIds.length = 0;
+  }
 });
 
 describe("pending_invites RLS", () => {

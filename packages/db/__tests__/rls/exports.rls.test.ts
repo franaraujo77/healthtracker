@@ -12,11 +12,14 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { asIdentity } from "./helpers";
-import { serviceClient } from "./setup";
+import { cleanupSeededUsers, seedUser, serviceClient } from "./setup";
 
 const seededExportIds: string[] = [];
+const seededUserIds: string[] = [];
 
 async function seedExport(patientId: string): Promise<string> {
+  await seedUser(patientId);
+  seededUserIds.push(patientId);
   const exportId = crypto.randomUUID();
   const { error } = await serviceClient.from("exports").insert({
     id: exportId,
@@ -32,6 +35,10 @@ afterEach(async () => {
   if (seededExportIds.length > 0) {
     await serviceClient.from("exports").delete().in("id", seededExportIds);
     seededExportIds.length = 0;
+  }
+  if (seededUserIds.length > 0) {
+    await cleanupSeededUsers(seededUserIds);
+    seededUserIds.length = 0;
   }
 });
 

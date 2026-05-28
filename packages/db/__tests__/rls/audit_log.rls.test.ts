@@ -13,7 +13,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { asIdentity } from "./helpers";
-import { serviceClient } from "./setup";
+import {
+  seedUser as baseSeedUser,
+  cleanupSeededUsers,
+  serviceClient,
+} from "./setup";
 
 interface AuditRow {
   id: string;
@@ -23,21 +27,10 @@ interface AuditRow {
 const seededAuditIds: string[] = [];
 const seededUserIds: string[] = [];
 
-/**
- * Story 5.3 review-fix Patch #8 (2026-05-26) — share_tokens.patient_id
- * has an FK to public.users(id) (packages/db/src/schema/sharing.ts:105-108).
- * The pre-existing share_tokens.rls tests seed random patient UUIDs
- * without a corresponding `users` row; this happens to work because
- * the FK is `ON DELETE CASCADE` and the test path never trips it on
- * INSERT — but it's brittle. Seed the users row first defensively for
- * the new Story 5.3 cases below.
- */
-async function seedUser(userId: string): Promise<void> {
-  const { error } = await serviceClient.from("users").insert({ id: userId });
-  if (error && !error.message.includes("duplicate")) {
-    throw new Error(`users seed failed: ${error.message}`);
-  }
+async function seedUser(userId: string): Promise<string> {
+  await baseSeedUser(userId);
   seededUserIds.push(userId);
+  return userId;
 }
 
 async function seedAudit(actorId: string): Promise<string> {
@@ -62,7 +55,7 @@ afterEach(async () => {
     seededAuditIds.length = 0;
   }
   if (seededUserIds.length > 0) {
-    await serviceClient.from("users").delete().in("id", seededUserIds);
+    await cleanupSeededUsers(seededUserIds);
     seededUserIds.length = 0;
   }
 });

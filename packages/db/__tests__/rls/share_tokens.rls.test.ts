@@ -10,16 +10,19 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { asIdentity } from "./helpers";
-import { serviceClient } from "./setup";
+import { cleanupSeededUsers, seedUser, serviceClient } from "./setup";
 
 const seededInviteIds: string[] = [];
 const seededTokenIds: string[] = [];
+const seededUserIds: string[] = [];
 
 async function seedToken(args: {
   patientId: string;
   expiresAt?: Date;
   revokedAt?: Date | null;
 }): Promise<string> {
+  await seedUser(args.patientId);
+  seededUserIds.push(args.patientId);
   const inviteId = crypto.randomUUID();
   const tokenId = crypto.randomUUID();
   const { error: e1 } = await serviceClient.from("pending_invites").insert({
@@ -58,6 +61,10 @@ afterEach(async () => {
       .delete()
       .in("id", seededInviteIds);
     seededInviteIds.length = 0;
+  }
+  if (seededUserIds.length > 0) {
+    await cleanupSeededUsers(seededUserIds);
+    seededUserIds.length = 0;
   }
 });
 
@@ -139,6 +146,8 @@ describe("share_tokens RLS", () => {
   // visible under the updated `(IS NULL OR > now())` predicate.
   it("doctorWithNoExpiryToken sees the bound token when expires_at IS NULL", async () => {
     const patientId = crypto.randomUUID();
+    await seedUser(patientId);
+    seededUserIds.push(patientId);
     const inviteId = crypto.randomUUID();
     const tokenId = crypto.randomUUID();
     await serviceClient.from("pending_invites").insert({

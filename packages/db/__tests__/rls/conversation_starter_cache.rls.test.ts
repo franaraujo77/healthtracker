@@ -9,11 +9,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { asIdentity } from "./helpers";
-import { serviceClient } from "./setup";
+import { cleanupSeededUsers, seedUser, serviceClient } from "./setup";
 
 const seededTokenIds: string[] = [];
 const seededInviteIds: string[] = [];
 const seededCacheIds: string[] = [];
+const seededUserIds: string[] = [];
 
 async function seedTokenWithCache(args: {
   patientId: string;
@@ -21,6 +22,8 @@ async function seedTokenWithCache(args: {
   expiresAt?: Date | null;
   revokedAt?: Date | null;
 }): Promise<{ tokenId: string; cacheId: string }> {
+  await seedUser(args.patientId);
+  seededUserIds.push(args.patientId);
   const inviteId = crypto.randomUUID();
   const tokenId = crypto.randomUUID();
   const cacheId = crypto.randomUUID();
@@ -78,6 +81,10 @@ afterEach(async () => {
       .delete()
       .in("id", seededInviteIds);
     seededInviteIds.length = 0;
+  }
+  if (seededUserIds.length > 0) {
+    await cleanupSeededUsers(seededUserIds);
+    seededUserIds.length = 0;
   }
 });
 

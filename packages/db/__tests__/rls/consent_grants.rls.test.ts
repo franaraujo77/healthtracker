@@ -12,7 +12,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { asIdentity } from "./helpers";
-import { anonClient, serviceClient } from "./setup";
+import {
+  anonClient,
+  cleanupSeededUsers,
+  seedUser,
+  serviceClient,
+} from "./setup";
 
 interface ConsentRow {
   id: string;
@@ -21,11 +26,14 @@ interface ConsentRow {
 }
 
 const seededIds: string[] = [];
+const seededUserIds: string[] = [];
 
 async function seedConsent(
   patientId: string,
   consentType = "blood_test_results",
 ): Promise<string> {
+  await seedUser(patientId);
+  seededUserIds.push(patientId);
   const id = crypto.randomUUID();
   const { error } = await serviceClient.from("consent_grants").insert({
     id,
@@ -40,14 +48,21 @@ async function seedConsent(
 }
 
 afterEach(async () => {
-  if (seededIds.length === 0) return;
-  await serviceClient.from("consent_grants").delete().in("id", seededIds);
-  seededIds.length = 0;
+  if (seededIds.length > 0) {
+    await serviceClient.from("consent_grants").delete().in("id", seededIds);
+    seededIds.length = 0;
+  }
+  if (seededUserIds.length > 0) {
+    await cleanupSeededUsers(seededUserIds);
+    seededUserIds.length = 0;
+  }
 });
 
 describe("consent_grants RLS isolation (append-only)", () => {
   it("correctPatient can INSERT a consent row for themselves", async () => {
     const patientId = crypto.randomUUID();
+    await seedUser(patientId);
+    seededUserIds.push(patientId);
     const run = asIdentity("correctPatient", { patientId });
 
     const inserted = await run(
