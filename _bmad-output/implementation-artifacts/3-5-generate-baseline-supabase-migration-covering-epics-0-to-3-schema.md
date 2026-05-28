@@ -1,6 +1,6 @@
 # Story 3.5: Generate baseline Supabase migration covering Epics 0–3 schema
 
-Status: review
+Status: done
 
 <!-- Validation is optional. Run validate-create-story for quality check before dev-story. -->
 <!-- Epic 3 carry: final story of Epic 3 is 3.4 (done). 3.5 is the cross-epic DevOps story that closes the gap left by `pnpm db:push`-only delivery in Epics 0–2. Production DB (wkjwnwwzsulkfzpaihkp) is empty; dev DB (jhklzsdxlrvyprysfeku) is the source of truth for the baseline. -->
