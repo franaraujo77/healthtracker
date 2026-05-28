@@ -1,5 +1,5 @@
 # generated: 2026-05-15
-# last_updated: 2026-05-17
+# last_updated: 2026-05-28
 # project: healthtracker
 # project_key: NOKEY
 # tracking_system: file-system
@@ -535,8 +535,8 @@ development_status:
   epic-5-retrospective: optional
 
   # Epic 6: Doctor Can View a Patient's Conversation Starter
-  epic-6: backlog
-  6-1-doctor-views-pre-auth-landing-page-showing-patient-name-and-share-context: backlog
+  epic-6: in-progress
+  6-1-doctor-views-pre-auth-landing-page-showing-patient-name-and-share-context: review
   6-2-doctor-authenticates-via-magic-link-and-views-the-conversation-starter-report: backlog
   6-3-doctor-activates-a-professional-account-from-the-conversation-starter-view: backlog
   6-4-doctor-invites-a-patient-to-create-a-health-tracker-account: backlog

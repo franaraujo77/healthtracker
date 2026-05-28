@@ -468,6 +468,13 @@ export interface AccessLogEventCopyArgs {
    * row renderer threads it here.
    */
   exportFormat?: string;
+  /**
+   * Story 6.1 AC6 — `share_token.read` audit rows carry
+   * `metadata.phase`. `"pre-auth"` (Story 6.1) and `"post-auth"`
+   * (Story 6.2 — not yet emitted) render distinct pt-BR labels.
+   * Legacy rows without `phase` fall back to the original label.
+   */
+  shareTokenReadPhase?: string;
 }
 
 export function ACCESS_LOG_EVENT_LABEL_PT_BR_FN(
@@ -500,8 +507,20 @@ export function ACCESS_LOG_EVENT_LABEL_PT_BR_FN(
       return `Não foi possível pré-gerar o sumário para ${displayName}.`;
     case "share_token.revoked":
       return `Você revogou o acesso de ${displayName}.`;
-    case "share_token.read":
+    case "share_token.read": {
+      // Story 6.1 AC6 — branch on `metadata.phase`. pre-auth = doctor
+      // opened the landing screen; post-auth (Story 6.2) = doctor
+      // opened the actual history. Legacy rows fall back to the
+      // pre-Story-6.1 label so existing audit data still renders.
+      const phase = args.shareTokenReadPhase;
+      if (phase === SHARE_TOKEN_READ_PHASE_PRE_AUTH) {
+        return `${displayName} abriu a tela de entrada do link.`;
+      }
+      if (phase === SHARE_TOKEN_READ_PHASE_POST_AUTH) {
+        return `${displayName} abriu o histórico.`;
+      }
       return `${displayName} visualizou seus dados.`;
+    }
     case "record.exported": {
       // Story 5.5 AC10 — patient-self event; `displayName` is the
       // resolver's "Você" fallback (no doctor on the resource). The
@@ -743,3 +762,85 @@ export function exportFilename(format: ExportFormat, date: Date): string {
   const dd = String(date.getUTCDate()).padStart(2, "0");
   return `healthtracker-export-${yyyy}-${mm}-${dd}.${format}`;
 }
+
+// ---------------------------------------------------------------------------
+// Story 6.1 — Pre-auth landing (doctor-side)
+// ---------------------------------------------------------------------------
+
+/**
+ * Discriminator for the four pre-auth landing states. The resolver
+ * collapses unknown-id, bad-HMAC, and malformed-segment all into
+ * `invalid` to avoid an enumeration oracle.
+ */
+export const preAuthStatusSchema = z.enum([
+  "active",
+  "expired",
+  "revoked",
+  "invalid",
+]);
+export type PreAuthStatus = z.infer<typeof preAuthStatusSchema>;
+
+export const getPreAuthContextInputSchema = z.object({
+  shareTokenId: z.uuid(),
+  tokenHmac: z.string().min(1).max(128),
+  userAgent: z.string().max(200).optional(),
+});
+export type GetPreAuthContextInput = z.infer<
+  typeof getPreAuthContextInputSchema
+>;
+
+export const getPreAuthContextOutputSchema = z.object({
+  status: preAuthStatusSchema,
+  patientFirstName: z.string().nullable(),
+  sharedAt: z.date().nullable(),
+  expiresAt: z.date().nullable(),
+});
+export type GetPreAuthContextOutput = z.infer<
+  typeof getPreAuthContextOutputSchema
+>;
+
+/**
+ * AC9 — sentinel `actorId` / `resourceId` for audit rows emitted on a
+ * malformed `[token]` URL segment. The client-supplied id might be
+ * garbage; the sentinel makes "probe attempts" filterable in the
+ * Access Log resolver. Other Epic 6 stories should reuse this when
+ * logging unknown-doctor probes.
+ */
+export const SHARE_TOKEN_UNKNOWN_SENTINEL =
+  "00000000-0000-0000-0000-000000000000";
+
+// pt-BR copy (AC5).
+export function PRE_AUTH_LANDING_ACTIVE_HEADING_FN(firstName: string): string {
+  return `${firstName} compartilhou um histórico de saúde com você.`;
+}
+export const PRE_AUTH_LANDING_ACTIVE_FALLBACK_NAME_PT_BR = "Alguém";
+export const PRE_AUTH_LANDING_ACTIVE_BODY_PT_BR =
+  "Para preparar a sua próxima consulta.";
+export const PRE_AUTH_LANDING_EXPIRED_HEADING_PT_BR = "Este link expirou.";
+export const PRE_AUTH_LANDING_EXPIRED_BODY_PT_BR =
+  "Peça ao paciente um novo link.";
+export const PRE_AUTH_LANDING_REVOKED_HEADING_PT_BR =
+  "O paciente revogou o acesso a este link.";
+export const PRE_AUTH_LANDING_REVOKED_BODY_PT_BR =
+  "Peça um novo link se ainda precisar do histórico.";
+export const PRE_AUTH_LANDING_INVALID_HEADING_PT_BR = "Link inválido.";
+export const PRE_AUTH_LANDING_INVALID_BODY_PT_BR =
+  "Verifique se o link está completo ou peça um novo ao paciente.";
+export const PRE_AUTH_LANDING_CTA_PT_BR = "Ver histórico";
+
+/** AC5 — accessibilityLabel for the active-state CTA. */
+export function PRE_AUTH_LANDING_CTA_A11Y_PT_BR_FN(firstName: string): string {
+  return `Ver histórico de ${firstName}`;
+}
+
+/**
+ * Story 6.1 AC6 — the audit row written on every pre-auth attempt
+ * carries `metadata.phase = "pre-auth"`. Story 6.2 will emit
+ * `phase = "post-auth"` for the doctor's authenticated read. The
+ * Access Log label fn branches on this to render distinct copy.
+ */
+export const SHARE_TOKEN_READ_PHASE_PRE_AUTH = "pre-auth" as const;
+export const SHARE_TOKEN_READ_PHASE_POST_AUTH = "post-auth" as const;
+export type ShareTokenReadPhase =
+  | typeof SHARE_TOKEN_READ_PHASE_PRE_AUTH
+  | typeof SHARE_TOKEN_READ_PHASE_POST_AUTH;

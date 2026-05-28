@@ -60,6 +60,11 @@ export { UndoToast } from "./components/UndoToast";
 export type { UndoToastProps } from "./components/UndoToast";
 export { DeleteAccountConfirmationCard } from "./components/DeleteAccountConfirmationCard";
 export type { DeleteAccountConfirmationCardProps } from "./components/DeleteAccountConfirmationCard";
+export { PreAuthLandingCard } from "./components/PreAuthLandingCard";
+export type {
+  PreAuthLandingCardProps,
+  PreAuthLandingStatus,
+} from "./components/PreAuthLandingCard";
 export {
   Toast,
   ToastProvider,

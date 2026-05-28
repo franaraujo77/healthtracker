@@ -26,12 +26,15 @@ import {
   getDraftConfigInputSchema,
   getExportInputSchema,
   getExportOutputSchema,
+  getPreAuthContextInputSchema,
+  getPreAuthContextOutputSchema,
   isAccessLogEventKind,
   listAccessLogInputSchema,
   requestExportInputSchema,
   requestExportOutputSchema,
   revokeShareTokenInputSchema,
   revokeShareTokenOutputSchema,
+  SHARE_TOKEN_READ_PHASE_PRE_AUTH,
   SHARING_AUDIT_CONFIGURED,
   SHARING_AUDIT_CONVERSATION_STARTER_QUEUED,
   SHARING_AUDIT_EXPORT_QUEUED,
@@ -40,19 +43,25 @@ import {
   SHARING_AUDIT_TOKEN_REVOKED,
 } from "@healthtracker/validators";
 
+import type { AuditDb } from "../audit";
 import { writeAuditLog } from "../audit";
 import { isPremium, premiumProcedure } from "../middleware/entitlements";
 import {
   buildShareUrl,
   computeAccessLogTokenStatus,
+  constantTimeEqualHmac,
   decodeAccessLogCursor,
   encodeAccessLogCursor,
   generateShareToken,
   getDistinctCategoriesForPatient,
   hashIdentifier,
+  resolvePatientFirstName,
 } from "../sharing";
-import { createExportDownloadSignedUrl } from "../storage";
-import { protectedProcedure } from "../trpc";
+import {
+  createExportDownloadSignedUrl,
+  getSupabaseAdminClient,
+} from "../storage";
+import { protectedProcedure, publicProcedure } from "../trpc";
 
 /**
  * Story 5.1 — `sharingRouter`. Patient-side sharing ceremony
@@ -1084,7 +1093,191 @@ export const sharingRouter = {
 
       return { items, nextCursor, upgradeRequired: false };
     }),
+  /**
+   * Story 6.1 AC2 — pre-auth landing context resolver.
+   *
+   * **Intentionally `publicProcedure`** (NOT `doctorProcedure`). The
+   * doctor has not yet authenticated at this point — there is no
+   * `x-share-token` header — and we need to distinguish the three
+   * dead-link states (expired / revoked / invalid) from the active
+   * state. The doctor-side RLS predicate on `share_tokens` filters
+   * `revoked_at IS NULL AND (expires_at IS NULL OR > now())`, so
+   * running this resolver under `doctorProcedure` would collapse
+   * every non-active state into `invalid` and erase the patient's
+   * surveillance surface. The `share_token.read` audit row writes
+   * MUST still fire for `revoked` / `expired` / `invalid` attempts
+   * — that's the entire point of the Access Log here.
+   *
+   * Do NOT "fix" this back to `doctorProcedure` (RLS test file
+   * `share_tokens_preauth.rls.test.ts` guards against this regression).
+   *
+   * Information disclosure: only the `active` branch returns the
+   * patient-facing context (first name + timestamps). Expired /
+   * revoked / invalid render generic copy with no patient hints.
+   *
+   * No transaction is opened — `publicProcedure` provides a bare
+   * connection (no GUC). The SELECT + audit-INSERT are autonomous;
+   * a narrow try/catch around the audit insert keeps a single
+   * failed insert from 500-ing the landing page (the patient's
+   * Access Log degrades by one row, the doctor's first impression
+   * does not).
+   */
+  getPreAuthContext: publicProcedure
+    .input(getPreAuthContextInputSchema)
+    .output(getPreAuthContextOutputSchema)
+    .query(async ({ ctx, input }) => {
+      const truncatedUa =
+        input.userAgent && input.userAgent.length > 0
+          ? input.userAgent.slice(0, 200)
+          : null;
+
+      // No-RLS lookup — service-role connection, no GUC set. See
+      // docblock above for why we deliberately bypass doctorProcedure.
+      const rows = await ctx.db
+        .select({
+          id: ShareTokens.id,
+          tokenHmac: ShareTokens.tokenHmac,
+          patientId: ShareTokens.patientId,
+          expiresAt: ShareTokens.expiresAt,
+          revokedAt: ShareTokens.revokedAt,
+          createdAt: ShareTokens.createdAt,
+        })
+        .from(ShareTokens)
+        .where(eq(ShareTokens.id, input.shareTokenId))
+        .limit(1);
+
+      const row = rows[0];
+
+      // Unknown shareTokenId. Same `invalid` discriminator as a bad
+      // HMAC or a malformed segment — no enumeration oracle.
+      if (!row) {
+        await writePreAuthAudit(ctx.db, {
+          shareTokenId: input.shareTokenId,
+          status: "invalid",
+          userAgent: truncatedUa,
+        });
+        return {
+          status: "invalid" as const,
+          patientFirstName: null,
+          sharedAt: null,
+          expiresAt: null,
+        };
+      }
+
+      // Constant-time HMAC compare. Two persisted HMAC strings (URL
+      // segment vs DB column) — use `constantTimeEqualHmac`, not
+      // `verifyShareToken` (which is raw-vs-signature).
+      const hmacOk = constantTimeEqualHmac(row.tokenHmac, input.tokenHmac);
+      if (!hmacOk) {
+        await writePreAuthAudit(ctx.db, {
+          shareTokenId: input.shareTokenId,
+          status: "invalid",
+          userAgent: truncatedUa,
+        });
+        return {
+          status: "invalid" as const,
+          patientFirstName: null,
+          sharedAt: null,
+          expiresAt: null,
+        };
+      }
+
+      // Order matters: revoke is the more user-actionable state — a
+      // token revoked yesterday and expired today should render as
+      // `revoked` (Story 5.4 retro lesson).
+      const now = new Date();
+      let status: "active" | "expired" | "revoked";
+      if (row.revokedAt !== null) {
+        status = "revoked";
+      } else if (
+        row.expiresAt !== null &&
+        row.expiresAt.getTime() <= now.getTime()
+      ) {
+        status = "expired";
+      } else {
+        status = "active";
+      }
+
+      let patientFirstName: string | null = null;
+      if (status === "active") {
+        // Defensive: `resolvePatientFirstName` is contracted not to
+        // throw, but even if it did the audit row MUST still fire.
+        // Narrow catch — programmer errors propagate.
+        try {
+          patientFirstName = await resolvePatientFirstName(
+            getSupabaseAdminClient(),
+            row.patientId,
+          );
+        } catch (err) {
+          if (
+            err instanceof TypeError ||
+            err instanceof ReferenceError ||
+            err instanceof SyntaxError
+          ) {
+            throw err;
+          }
+          patientFirstName = null;
+        }
+      }
+
+      await writePreAuthAudit(ctx.db, {
+        shareTokenId: input.shareTokenId,
+        status,
+        userAgent: truncatedUa,
+      });
+
+      return {
+        status,
+        patientFirstName,
+        sharedAt: status === "active" ? row.createdAt : null,
+        expiresAt: status === "active" ? row.expiresAt : null,
+      };
+    }),
 } satisfies TRPCRouterRecord;
+
+/**
+ * Story 6.1 — best-effort audit write for the pre-auth resolver.
+ * The patient's surveillance surface is critical: every doctor
+ * probe MUST be logged. But a single audit-row INSERT failure must
+ * not 500 the doctor's first impression of the link. We log to
+ * console and continue. The narrow catch leaves programmer errors
+ * to propagate.
+ */
+export async function writePreAuthAudit(
+  db: AuditDb,
+  args: {
+    shareTokenId: string;
+    status: "active" | "expired" | "revoked" | "invalid";
+    userAgent: string | null;
+  },
+): Promise<void> {
+  try {
+    await writeAuditLog(db, {
+      actorId: args.shareTokenId,
+      actorType: "doctor",
+      event: "share_token.read",
+      resourceId: args.shareTokenId,
+      resourceType: "share_token",
+      metadata: {
+        phase: SHARE_TOKEN_READ_PHASE_PRE_AUTH,
+        status: args.status,
+        ...(args.userAgent !== null ? { userAgent: args.userAgent } : {}),
+      },
+    });
+  } catch (err) {
+    if (
+      err instanceof TypeError ||
+      err instanceof ReferenceError ||
+      err instanceof SyntaxError
+    ) {
+      throw err;
+    }
+    console.warn(
+      "[sharing.getPreAuthContext] audit write failed — continuing",
+      err,
+    );
+  }
+}
 
 /**
  * Postgres unique-constraint violation. Drizzle surfaces these via

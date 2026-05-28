@@ -278,6 +278,108 @@ export function computeAccessLogTokenStatus(
   return "ativo";
 }
 
+// ---------------------------------------------------------------------------
+// Story 6.1 — Pre-auth landing helpers (doctor-side)
+// ---------------------------------------------------------------------------
+
+/**
+ * Story 6.1 T2.1 — Constant-time compare of two persisted HMAC
+ * strings. The pre-auth resolver receives one HMAC from the URL
+ * (`tokenHmac` segment after the `.`) and looks up the other from
+ * `share_tokens.token_hmac`. Both are already signatures; there is
+ * no `raw` value on the doctor side, so `verifyShareToken(raw, sig)`
+ * is the wrong primitive — use this instead.
+ *
+ * Returns `false` on differing lengths (`timingSafeEqual` throws on
+ * unequal-length buffers; we guard explicitly). Returns `false` on
+ * any difference. Never throws on string content.
+ */
+export function constantTimeEqualHmac(a: string, b: string): boolean {
+  const aBuf = Buffer.from(a);
+  const bBuf = Buffer.from(b);
+  if (aBuf.length !== bBuf.length) return false;
+  return timingSafeEqual(aBuf, bBuf);
+}
+
+/**
+ * Story 6.1 T2.2 — Derive a patient-facing first name from an email
+ * local-part. Lower-cases the local-part, splits on `[._-]+`, and
+ * Title-Cases each non-empty word. Returns `null` for inputs that
+ * cannot be sensibly humanized (no local-part / only separators).
+ *
+ * Examples:
+ *   - `francis.araujo@x.com` → `"Francis Araujo"`
+ *   - `f@x.com`              → `"F"`
+ *   - `@x.com`               → `null`
+ *   - `""`                   → `null`
+ *   - `f__o-bar.baz@x`       → `"F O Bar Baz"`
+ *
+ * Pure — does not throw, does not call any service.
+ */
+export function humanizeEmailLocal(email: string): string | null {
+  if (typeof email !== "string" || email.length === 0) return null;
+  const atIdx = email.indexOf("@");
+  const local = atIdx === -1 ? email : email.slice(0, atIdx);
+  if (local.length === 0) return null;
+  const parts = local
+    .toLowerCase()
+    .split(/[._-]+/)
+    .filter((part) => part.length > 0)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1));
+  if (parts.length === 0) return null;
+  return parts.join(" ");
+}
+
+/**
+ * Story 6.1 T2.3 — Resolve the patient's first name for the pre-auth
+ * landing UI. Uses Supabase Auth Admin API to read the user's email,
+ * then `humanizeEmailLocal` to produce a displayable string. No
+ * `users.first_name` column exists yet (Story 6.4 may add one); this
+ * derivation is the MVP path.
+ *
+ * MUST NOT THROW. Any failure — admin call rejects, returns no user,
+ * empty email — degrades to `null` so the UI renders the "Alguém"
+ * fallback rather than 500-ing the landing page. The catch is narrow:
+ * `TypeError` / `ReferenceError` / `SyntaxError` still propagate
+ * (CLAUDE.md narrow-catch discipline).
+ */
+export async function resolvePatientFirstName(
+  supabaseAdmin: {
+    auth: {
+      admin: {
+        getUserById: (id: string) => Promise<{
+          data: { user: { email?: string | null } | null };
+          error: { message: string } | null;
+        }>;
+      };
+    };
+  },
+  patientId: string,
+): Promise<string | null> {
+  let result: {
+    data: { user: { email?: string | null } | null };
+    error: { message: string } | null;
+  };
+  try {
+    result = await supabaseAdmin.auth.admin.getUserById(patientId);
+  } catch (err) {
+    // Programmer errors propagate; SDK/network failures fall through
+    // to a null return (the UI's "Alguém" fallback handles it).
+    if (
+      err instanceof TypeError ||
+      err instanceof ReferenceError ||
+      err instanceof SyntaxError
+    ) {
+      throw err;
+    }
+    return null;
+  }
+  if (result.error) return null;
+  const email = result.data.user?.email;
+  if (typeof email !== "string" || email.length === 0) return null;
+  return humanizeEmailLocal(email);
+}
+
 /**
  * AC4 — `tokenStatus` for a row that has no joined share_token
  * (e.g. `pending_invite.created` with `resource_type = 'pending_invite'`).

@@ -19,6 +19,17 @@ export const EXPORTS_BUCKET = "exports";
 
 let cachedClient: ReturnType<typeof createClient> | null = null;
 
+/**
+ * Story 6.1 — exported for the pre-auth resolver (`resolvePatientFirstName`).
+ * Same env reads + same caching as the storage client; reuses the
+ * single connection rather than spinning up a second admin client.
+ * The Supabase JS SDK's admin namespace is on every service-role
+ * client — storage + auth.admin share the underlying HTTP client.
+ */
+export function getSupabaseAdminClient(): ReturnType<typeof createClient> {
+  return getStorageClient();
+}
+
 function getStorageClient(): ReturnType<typeof createClient> {
   if (cachedClient) return cachedClient;
   // Read directly from `process.env` rather than `authEnv()` — that
