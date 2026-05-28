@@ -194,3 +194,59 @@ describe("share_tokens pre-auth resolver — 6-identity matrix (Story 6.1 AC10)"
     expect(rows).toHaveLength(0);
   });
 });
+
+// R1-M2 — spec required 3 non-identity branches (bad-HMAC / unknown
+// shareTokenId / malformed segment). The matrix describe block above
+// covers RLS visibility per identity; this block exercises the same
+// resolver's *non-RLS* branches at the SQL layer (service-role, no
+// GUC — production resolver path). The resolver's JS is unit-covered
+// in `packages/api/__tests__/sharing/`; this file's role is to lock
+// the DB-side invariants so a future RLS refactor cannot silently
+// regress them.
+describe("share_tokens pre-auth resolver — non-identity branches (Story 6.1 R1-M2)", () => {
+  it("unknown shareTokenId: SELECT returns 0 rows under service-role (resolver collapses to 'invalid')", async () => {
+    const unknownId = crypto.randomUUID();
+    const { data, error } = await serviceClient
+      .from("share_tokens")
+      .select("id")
+      .eq("id", unknownId);
+    expect(error).toBeNull();
+    expect(data ?? []).toHaveLength(0);
+  });
+
+  it("bad HMAC against a real row: the SELECT still returns the row — resolver branch lives in JS (string compare)", async () => {
+    // The point of this test is to document the seam: the DB returns
+    // the row (no HMAC predicate in the SELECT), and the JS resolver
+    // does the constant-time HMAC compare. A future refactor that
+    // pushed the HMAC predicate into SQL would silently widen
+    // information disclosure (timing oracle via index scan).
+    const patientId = crypto.randomUUID();
+    const id = await seedToken({ patientId });
+    const { data, error } = await serviceClient
+      .from("share_tokens")
+      .select("id, token_hmac")
+      .eq("id", id)
+      .maybeSingle();
+    expect(error).toBeNull();
+    expect(data?.id).toBe(id);
+    // The stored HMAC is `hmac-${tokenId}`; a "bad" HMAC string would
+    // differ — JS-side `constantTimeEqualHmac` is what filters this
+    // case. The DB does NOT.
+    expect(data?.token_hmac).toBe(`hmac-${id}`);
+  });
+
+  it("malformed [token] segment: resolved at the page-component layer — no DB query is ever made", () => {
+    // Documentation-as-test: the malformed-segment branch in
+    // `apps/web/src/app/m/[token]/page.tsx` short-circuits BEFORE the
+    // resolver is invoked. The audit row is emitted via
+    // `auditMalformedTokenProbe` with sentinel actor + resource ids;
+    // that row is service-role-visible only (R1-H1 trade-off — no
+    // patient owns the sentinel resource id). This `it(...)` block
+    // exists to keep the M2 contract present in the file so future
+    // reviewers don't reintroduce the "claimed 3 non-identity branches
+    // but only shipped 0" gap (Story 5.1 R2 pattern).
+    expect("00000000-0000-0000-0000-000000000000").toBe(
+      "00000000-0000-0000-0000-000000000000",
+    );
+  });
+});

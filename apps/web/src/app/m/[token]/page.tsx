@@ -3,12 +3,10 @@ import { headers } from "next/headers";
 
 import {
   appRouter,
+  auditMalformedTokenProbe,
   createTRPCContext,
-  writePreAuthAudit,
 } from "@healthtracker/api";
-import { db } from "@healthtracker/db/client";
 import { PreAuthLandingCard } from "@healthtracker/ui";
-import { SHARE_TOKEN_UNKNOWN_SENTINEL } from "@healthtracker/validators";
 
 /**
  * Story 6.1 — pre-auth doctor landing page (AC1, AC7, AC8, AC9).
@@ -19,9 +17,15 @@ import { SHARE_TOKEN_UNKNOWN_SENTINEL } from "@healthtracker/validators";
  * in Story 5.2. We split on the first `.`, validate the prefix is a
  * uuid, and call `sharing.getPreAuthContext` via the RSC-side tRPC
  * caller. The malformed-segment branch renders `invalid` directly
- * (without round-tripping the resolver) and emits its own audit row
- * with the unknown-sentinel actor/resource id so the patient's
- * Access Log still surfaces the probe.
+ * (without round-tripping the resolver) and emits a forensic audit
+ * row via `auditMalformedTokenProbe` (R1-M1 wrapper — keeps the raw
+ * `db` handle out of the apps layer). R1-H1 trade-off: that audit
+ * row is service-role-visible only — no patient owns the sentinel
+ * resource id, so `audit_log_select_own` RLS hides it from every
+ * patient. Forensic ledger preserved; Access Log surfaces only the
+ * attributable branches (bad-HMAC against a real row still shows up
+ * for the owning patient). See `writePreAuthAudit` docblock + CLAUDE.md
+ * "Pre-auth landing discipline" for the rationale.
  *
  * `noindex,nofollow` — the URL is a secret; we never want a search
  * engine to index a shared link's landing page.
@@ -66,13 +70,11 @@ export default async function PreAuthLandingPage({
     dotIdx <= 0 || tokenHmac.length === 0 || !UUID_REGEX.test(shareTokenId);
 
   if (malformed) {
-    // Emit audit row directly — bypass the resolver because the
-    // shareTokenId is not a valid uuid (Zod would reject the input).
-    // Use the unknown-sentinel as actor/resource id so future
-    // probes show up under a single filterable bucket.
-    await writePreAuthAudit(db, {
-      shareTokenId: SHARE_TOKEN_UNKNOWN_SENTINEL,
-      status: "invalid",
+    // R1-M1 — emit audit row via the apps-layer wrapper. The wrapper
+    // internally writes with `actorId = resourceId =
+    // SHARE_TOKEN_UNKNOWN_SENTINEL` (R1-H1: forensic-only, not surfaced
+    // to any patient — no patient owns the sentinel resource id).
+    await auditMalformedTokenProbe({
       userAgent: userAgent.length > 0 ? userAgent : null,
     });
     return (
@@ -98,6 +100,13 @@ export default async function PreAuthLandingPage({
   // connection, no RLS principal (intentional — see resolver
   // docblock for why doctorProcedure would collapse the state
   // discriminator).
+  //
+  // R1-L1: we use `appRouter.createCaller` directly (vs the
+  // `trpc/server.tsx` `createTRPCOptionsProxy`) because this is a
+  // pre-auth surface with no session — calling `getSession()` from
+  // the proxy's `createContext` would attempt a Supabase auth read
+  // we explicitly want to skip. `session: null` keeps the resolver
+  // RLS-naïve as designed.
   const ctx = createTRPCContext({ headers: reqHeaders, session: null });
   const caller = appRouter.createCaller(ctx);
   const result = await caller.sharing.getPreAuthContext({

@@ -78,13 +78,19 @@ export function PreAuthLandingCard(
         <Text fontSize="$3" color="$textSecondary">
           {PRE_AUTH_LANDING_ACTIVE_BODY_PT_BR}
         </Text>
-        <a href={href} style={{ textDecoration: "none" }} aria-label={ctaA11y}>
-          <Button
-            testID="pre-auth-landing-cta"
-            variant="primary"
-            accessibilityLabel={ctaA11y}
-            accessibilityRole="button"
-          >
+        {/*
+         * R1-N2 — single link element. Wrapping a Button (role=button)
+         * inside an <a> (role=link) made screen readers announce both
+         * roles. The anchor IS the actuator; the Button render is a
+         * styled child whose `accessibilityRole` is stripped here.
+         */}
+        <a
+          href={href}
+          role="link"
+          aria-label={ctaA11y}
+          style={{ textDecoration: "none" }}
+        >
+          <Button testID="pre-auth-landing-cta" variant="primary">
             {PRE_AUTH_LANDING_CTA_PT_BR}
           </Button>
         </a>

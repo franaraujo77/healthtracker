@@ -392,3 +392,8 @@
 - Storage object cleanup post-expires_at — Supabase Storage lifecycle rule OR scheduled record.export.cleanup job.
 - Test non-null assertion fragility in generate-export.test.ts — defensive guard would harden.
 - Drive-by lint fix in biomarker-suggestion.test.ts (5 unnecessary casts) — type-safe, pre-existing debt.
+
+## Deferred from: code review of story-6.1 (2026-05-28)
+
+- Pre-auth landing DoS surface (`/m/<random>.<random>` audit-row spam) — mitigation lands at the Next.js edge / Vercel WAF, NOT in the resolver. Keeping the resolver dumb keeps the audit promise honest. Future infra story (Epic 6.x).
+- Malformed-segment audit rows are service-role-visible only (no patient owns the sentinel `resource_id`). Surfacing per-patient probes would require a per-patient short-code in the URL — not in scope for Epic 6. R1-H1 trade-off documented in `writePreAuthAudit` + CLAUDE.md "Pre-auth landing discipline".

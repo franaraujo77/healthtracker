@@ -35,6 +35,7 @@ import {
   revokeShareTokenInputSchema,
   revokeShareTokenOutputSchema,
   SHARE_TOKEN_READ_PHASE_PRE_AUTH,
+  SHARE_TOKEN_UNKNOWN_SENTINEL,
   SHARING_AUDIT_CONFIGURED,
   SHARING_AUDIT_CONVERSATION_STARTER_QUEUED,
   SHARING_AUDIT_EXPORT_QUEUED,
@@ -1150,9 +1151,17 @@ export const sharingRouter = {
 
       // Unknown shareTokenId. Same `invalid` discriminator as a bad
       // HMAC or a malformed segment — no enumeration oracle.
+      // R1-M3 fix: use sentinel for BOTH actor and resource ids. The
+      // URL-supplied uuid is Zod-shaped but unverified — could be any
+      // random uuid. The sentinel collects every "no real row matched"
+      // probe under one filterable bucket. Trade-off: the row is
+      // service-role-visible only (no patient owns it). See the
+      // `writePreAuthAudit` / `auditMalformedTokenProbe` docblocks
+      // and CLAUDE.md "Pre-auth landing discipline" for the H1 trade-off.
       if (!row) {
         await writePreAuthAudit(ctx.db, {
-          shareTokenId: input.shareTokenId,
+          actorId: SHARE_TOKEN_UNKNOWN_SENTINEL,
+          resourceId: SHARE_TOKEN_UNKNOWN_SENTINEL,
           status: "invalid",
           userAgent: truncatedUa,
         });
@@ -1169,8 +1178,14 @@ export const sharingRouter = {
       // `verifyShareToken` (which is raw-vs-signature).
       const hmacOk = constantTimeEqualHmac(row.tokenHmac, input.tokenHmac);
       if (!hmacOk) {
+        // R1-M3 fix: bad-HMAC against a REAL row IS attributable —
+        // keep `resourceId = input.shareTokenId` so the owning patient
+        // sees the probe in their Access Log (the RLS `audit_log_select_own`
+        // policy joins through `share_tokens`). `actorId` uses the
+        // sentinel because the doctor's identity is still unverified.
         await writePreAuthAudit(ctx.db, {
-          shareTokenId: input.shareTokenId,
+          actorId: SHARE_TOKEN_UNKNOWN_SENTINEL,
+          resourceId: input.shareTokenId,
           status: "invalid",
           userAgent: truncatedUa,
         });
@@ -1220,8 +1235,11 @@ export const sharingRouter = {
         }
       }
 
+      // active / expired / revoked: row is real, `shareTokenId` is
+      // verified (HMAC matched). Owning patient sees this row via RLS.
       await writePreAuthAudit(ctx.db, {
-        shareTokenId: input.shareTokenId,
+        actorId: input.shareTokenId,
+        resourceId: input.shareTokenId,
         status,
         userAgent: truncatedUa,
       });
@@ -1242,21 +1260,38 @@ export const sharingRouter = {
  * not 500 the doctor's first impression of the link. We log to
  * console and continue. The narrow catch leaves programmer errors
  * to propagate.
+ *
+ * **R1-H1 / R1-M3 visibility trade-off (`audit_log_select_own` RLS):**
+ *   - `resourceId` = real `share_tokens.id` → owning patient sees
+ *     the row via the policy's `EXISTS (SELECT 1 FROM share_tokens
+ *     WHERE share_tokens.id = audit_log.resource_id AND patient_id
+ *     = current_setting('app.current_patient_id'))` branch.
+ *   - `resourceId` = `SHARE_TOKEN_UNKNOWN_SENTINEL` → NO patient
+ *     owns the sentinel id, the EXISTS subquery returns FALSE, and
+ *     the row is **service-role-only**. This is the honest answer
+ *     for malformed-segment and unknown-id probes — the URL never
+ *     pointed at any patient's share, so there is no patient to
+ *     attribute the probe to. The row is still WRITTEN (forensic
+ *     ledger preserved); it is just not surfaced to the Access Log.
+ *
+ * `actorType="doctor"` because the principal hitting `/m/[token]` is
+ * always doctor-shaped — even when the URL is garbage.
  */
 export async function writePreAuthAudit(
   db: AuditDb,
   args: {
-    shareTokenId: string;
+    actorId: string;
+    resourceId: string;
     status: "active" | "expired" | "revoked" | "invalid";
     userAgent: string | null;
   },
 ): Promise<void> {
   try {
     await writeAuditLog(db, {
-      actorId: args.shareTokenId,
+      actorId: args.actorId,
       actorType: "doctor",
       event: "share_token.read",
-      resourceId: args.shareTokenId,
+      resourceId: args.resourceId,
       resourceType: "share_token",
       metadata: {
         phase: SHARE_TOKEN_READ_PHASE_PRE_AUTH,
@@ -1277,6 +1312,35 @@ export async function writePreAuthAudit(
       err,
     );
   }
+}
+
+/**
+ * Story 6.1 R1-M1 — narrow apps-facing wrapper. Lets
+ * `apps/web/src/app/m/[token]/page.tsx` emit the malformed-segment
+ * audit row without importing `@healthtracker/db/client` directly
+ * (R1 reviewer concern: app-layer code grabbing a raw `db` handle
+ * has previously caused RLS-on / RLS-off drift). This helper pulls
+ * the bare connection internally and exposes only the narrow
+ * malformed-segment contract.
+ *
+ * **Forensic-only ledger row** (see `writePreAuthAudit` docblock):
+ * the sentinel `resourceId` is not in `share_tokens`, so the row is
+ * NOT visible to any patient under `audit_log_select_own` RLS. The
+ * row exists for operational forensics — service-role queries can
+ * count + alert on `actorId = SHARE_TOKEN_UNKNOWN_SENTINEL`. This is
+ * an intentional trade-off documented in CLAUDE.md "Pre-auth landing
+ * discipline" and spec open-question #2.
+ */
+export async function auditMalformedTokenProbe(args: {
+  userAgent: string | null;
+}): Promise<void> {
+  const { db } = await import("@healthtracker/db/client");
+  await writePreAuthAudit(db, {
+    actorId: SHARE_TOKEN_UNKNOWN_SENTINEL,
+    resourceId: SHARE_TOKEN_UNKNOWN_SENTINEL,
+    status: "invalid",
+    userAgent: args.userAgent,
+  });
 }
 
 /**
