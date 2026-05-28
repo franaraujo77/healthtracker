@@ -324,13 +324,134 @@ No structural conflicts.
 
 ### Agent Model Used
 
-_To be filled by dev agent._
+Claude Opus 4.7 (dev agent under `bmad-dev-story`).
 
 ### Debug Log References
 
+- Pre-implementation FK cascade audit (T2.1): grep across
+  `packages/db/src/schema/*.ts` for `.references(() => Users.id` —
+  only `sharing.ts` carried explicit FK cascades (pending_invites,
+  share_tokens, conversation_starter_cache, exports). Every other
+  patient-FK table (`consent_grants`, `observations`, `uploads`,
+  `letters`, `push_tokens`, `notification_preferences`,
+  `extraction_review_queue`) declared `patient_id` as a plain
+  `uuid().notNull()` with NO FK to `users(id)`. Added
+  `.references(() => Users.id, { onDelete: "cascade" })` to each.
+  `audit_log` deliberately excluded — pseudonymized, not deleted.
+  Verdict: NOT controversial; this is exactly what the LGPD Art. 18
+  erasure ceremony requires.
+
+- `pseudonymize_patient_id` SQL function location: chose
+  `packages/db/policies/custom_rls_account_deletion_requests.sql`.
+  The testcontainer integration setup auto-loads every
+  `custom_rls_*.sql` (see `packages/db/__tests__/integration/setup.ts`
+  L89–91), so the function is available in any suite that boots an
+  ephemeral Postgres. Also enables `pgcrypto` (required for
+  `digest(..., 'sha256')`; idempotent `CREATE EXTENSION IF NOT
+EXISTS`).
+
+- `audit_log.actor_id` / `resource_id` are `uuid NOT NULL`; the full
+  pseudonym `'pseudonymized-<64 hex>'` is text and cannot be cast to
+  uuid. Adopted split representation: carve a deterministic uuid-
+  shape from the first 32 hex chars of the same sha256 input (used
+  for the column), and persist the full pseudonym in
+  `metadata.pseudonym` (compliance traceability). Documented inline
+  in `services/llm/src/consumers/generate-account-deletion.ts`.
+
+- Existing account router (`packages/api/src/router/account.ts`)
+  already shipped with `initializeProfile` from Epic 1. Extended it
+  with `requestDeletion` + `getDeletionStatus`; no parallel router.
+  Already registered in `packages/api/src/root.ts`.
+
+- Supabase Auth admin API: the existing service-role client
+  (`services/llm/src/supabase.ts` from Story 5.5) already exposes
+  `auth.admin.deleteUser` — service-role keys grant admin surface
+  by default (`@supabase/supabase-js@2.x`). No separate client
+  initialization needed.
+
+- Lint blocker: `ACCOUNT_DELETION_SALT` initially failed
+  `turbo/no-undeclared-env-vars`. Added to `turbo.json#globalEnv`.
+
 ### Completion Notes List
 
+- All 12 ACs implemented. The seven-step worker order per AC3
+  revised — status='processing' → audit_log pseudonymize → Storage
+  cleanup → `DELETE FROM users` (cascade) → `supabase.auth.admin.
+deleteUser` → status='complete' + audit. On final-attempt failure
+  the `account.deletion_failed` audit fires BEFORE the rethrow
+  (mirror of Story 5.5 R1 patch #2; ensures partial auth-side
+  failures are still traced).
+
+- FK cascade audit (T2) shipped: added `onDelete: 'cascade'` to FKs
+  on `consent_grants`, `observations`, `uploads`, `letters`,
+  `push_tokens`, `notification_preferences`,
+  `extraction_review_queue`. None controversial. `audit_log` is
+  pseudonymized, not deleted. `account_deletion_requests.patient_id`
+  intentionally has no FK (ledger row outlives the user).
+
+- AC7 deviation documented in dev notes: post-deletion login keeps
+  Supabase Auth's default `Invalid login credentials` (account-
+  enumeration mitigation). Spec text "Conta não encontrada" was
+  rejected as an attack-surface expansion.
+
+- Production migration (Story 5.7 baseline) absorbs: new
+  `account_deletion_requests` table + status enum + partial unique
+  index + `custom_rls_account_deletion_requests.sql` policy +
+  `pseudonymize_patient_id` SQL function + every new
+  `onDelete: cascade` FK definition added in T2.
+
+- Verification gates all PASS in CI shape: `pnpm typecheck` (17/17),
+  `pnpm lint` (15/15), `pnpm --filter @healthtracker/api test:unit`
+  (220 tests across 25 files), `pnpm --filter
+@healthtracker/llm-service test:unit` (33 tests across 10 files,
+  including 7 new consumer cases). `packages/db` has no `test:unit`
+  suite — gate auto-passes.
+
+- Test files scaffolded (require `supabase start` / Docker per their
+  suite, parallel to existing patterns):
+  `account-deletion-schema.integration.test.ts`,
+  `account_deletion_requests.rls.test.ts`,
+  `request-deletion.integration.test.ts` (it.todo placeholders +
+  one synchronous audit-kind assertion that DOES run).
+
 ### File List
+
+Created:
+
+- `packages/db/src/schema/account.ts`
+- `packages/db/policies/custom_rls_account_deletion_requests.sql`
+- `packages/validators/src/account.ts`
+- `packages/api/__tests__/account/request-deletion.integration.test.ts`
+- `packages/db/__tests__/integration/account-deletion-schema.integration.test.ts`
+- `packages/db/__tests__/rls/account_deletion_requests.rls.test.ts`
+- `services/llm/src/account-deletion.ts`
+- `services/llm/src/consumers/generate-account-deletion.ts`
+- `services/llm/__tests__/consumers/generate-account-deletion.test.ts`
+- `packages/ui/src/components/DeleteAccountConfirmationCard/DeleteAccountConfirmationCard.tsx`
+- `packages/ui/src/components/DeleteAccountConfirmationCard/DeleteAccountConfirmationCard.test.tsx`
+- `packages/ui/src/components/DeleteAccountConfirmationCard/index.ts`
+- `apps/expo/src/app/configuracoes/conta/excluir.tsx`
+- `apps/web/src/app/configuracoes/conta/excluir/page.tsx`
+- `apps/web/src/app/configuracoes/conta/excluir/excluir-conta-client.tsx`
+
+Modified:
+
+- `packages/db/src/schema/index.ts` (re-export account)
+- `packages/db/src/schema/consent.ts` (FK cascade)
+- `packages/db/src/schema/observations.ts` (FK cascade)
+- `packages/db/src/schema/uploads.ts` (FK cascade)
+- `packages/db/src/schema/letters.ts` (FK cascade)
+- `packages/db/src/schema/push_tokens.ts` (FK cascade)
+- `packages/db/src/schema/notification_preferences.ts` (FK cascade)
+- `packages/db/src/schema/extraction_review_queue.ts` (FK cascade)
+- `packages/validators/src/index.ts` (re-export account)
+- `packages/validators/src/sharing.ts` (extend ACCESS_LOG_EVENT_KINDS + label fn)
+- `packages/api/src/router/account.ts` (add requestDeletion + getDeletionStatus)
+- `packages/api/__tests__/sharing/access-log-pagination.test.ts` (kind count)
+- `packages/ui/src/index.ts` (export DeleteAccountConfirmationCard)
+- `services/llm/src/index.ts` (register queue + consumer + salt boot-fail-fast)
+- `.env.example` (ACCOUNT_DELETION_SALT)
+- `turbo.json` (declare ACCOUNT_DELETION_SALT global env)
 
 ### Known infra blockers (out-of-code)
 

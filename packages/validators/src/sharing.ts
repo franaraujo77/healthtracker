@@ -319,6 +319,12 @@ export const ACCESS_LOG_EVENT_KINDS = [
   // intentionally NOT in this allowlist; they are operational telemetry,
   // not patient-visible actions.
   "record.exported",
+  // Story 5.6 AC10 — patient-actor surface for the deletion-requested
+  // ceremony. `account.deletion_completed` / `account.deletion_failed`
+  // are system-actor and intentionally NOT in this allowlist (the
+  // patient cannot read the Access Log after the worker completes
+  // anyway — the auth user is gone).
+  "account.deletion_requested",
 ] as const;
 export type AccessLogEventKind = (typeof ACCESS_LOG_EVENT_KINDS)[number];
 
@@ -506,6 +512,12 @@ export function ACCESS_LOG_EVENT_LABEL_PT_BR_FN(
         ? `Você exportou seu registro completo (${fmt.toUpperCase()}).`
         : "Você exportou seu registro completo.";
     }
+    case "account.deletion_requested":
+      // Story 5.6 AC10 — patient-self event. In practice the patient
+      // immediately signs out on `requestDeletion` success and never
+      // reaches the Access Log again; this label exists for the
+      // theoretical pre-deletion-completion read.
+      return "Você solicitou exclusão de conta.";
   }
 }
 

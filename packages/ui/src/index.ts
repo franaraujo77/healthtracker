@@ -58,6 +58,8 @@ export { RevokeConfirmDialog } from "./components/RevokeConfirmDialog";
 export type { RevokeConfirmDialogProps } from "./components/RevokeConfirmDialog";
 export { UndoToast } from "./components/UndoToast";
 export type { UndoToastProps } from "./components/UndoToast";
+export { DeleteAccountConfirmationCard } from "./components/DeleteAccountConfirmationCard";
+export type { DeleteAccountConfirmationCardProps } from "./components/DeleteAccountConfirmationCard";
 export {
   Toast,
   ToastProvider,

@@ -2,10 +2,12 @@ import Fastify from "fastify";
 import { PgBoss } from "pg-boss";
 
 import type { LLMAdapter } from "./adapters/anthropic.js";
+import { getAccountDeletionSalt } from "./account-deletion.js";
 import {
   createAnthropicAdapter,
   createStubLLMAdapter,
 } from "./adapters/anthropic.js";
+import { registerGenerateAccountDeletionConsumer } from "./consumers/generate-account-deletion.js";
 import { registerGenerateConversationStarterConsumer } from "./consumers/generate-conversation-starter.js";
 import { registerGenerateExportConsumer } from "./consumers/generate-export.js";
 import { registerGenerateLetterConsumer } from "./consumers/generate-letter.js";
@@ -62,16 +64,33 @@ await boss.createQueue("record.export.generate", {
   retryDelay: 30,
   retryBackoff: true,
 });
+// Story 5.6 — patient account-deletion queue. Same retry shape; the
+// consumer narrow-catches PG / auth-admin / Storage errors and on
+// retry-exhaustion persists `status='failed'` + emits
+// `account.deletion_failed` audit (mirror of Story 5.5 R1 patch #2).
+await boss.createQueue("account.delete.generate", {
+  retryLimit: 3,
+  retryDelay: 30,
+  retryBackoff: true,
+});
 // Story 5.5 review-fix Patch #8 — eagerly resolve the Supabase
 // service-role client at boot. A misconfigured worker should abort
 // the process immediately rather than accept jobs and explode on the
 // first export attempt (which then re-queues and burns the retry
 // budget against a permanent env defect).
 getSupabaseClient();
+// Story 5.6 R1 pattern — eager resolve the account-deletion salt at
+// boot. Missing `ACCOUNT_DELETION_SALT` in production aborts the
+// process immediately rather than crashing on the first deletion job.
+const accountDeletionSalt = getAccountDeletionSalt();
 
 await registerGenerateLetterConsumer(boss, { sql, llm });
 await registerGenerateConversationStarterConsumer(boss, { sql, llm });
 await registerGenerateExportConsumer(boss, { sql });
+await registerGenerateAccountDeletionConsumer(boss, {
+  sql,
+  salt: accountDeletionSalt,
+});
 
 const app = Fastify({ logger: false });
 app.get("/healthz", () => ({ ok: true }));

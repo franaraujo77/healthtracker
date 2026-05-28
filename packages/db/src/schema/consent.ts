@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm";
 import { pgEnum, pgTable, uniqueIndex } from "drizzle-orm/pg-core";
 
+import { Users } from "./users";
+
 /**
  * `consent_type_enum` — the full vocabulary of consent surfaces.
  *
@@ -43,7 +45,12 @@ export const ConsentGrants = pgTable(
   "consent_grants",
   (t) => ({
     id: t.uuid().notNull().primaryKey().defaultRandom(),
-    patientId: t.uuid().notNull(),
+    // Story 5.6 FK cascade audit — `users(id)` is the parent. Account
+    // deletion (Story 5.6) cascades through this column.
+    patientId: t
+      .uuid()
+      .notNull()
+      .references(() => Users.id, { onDelete: "cascade" }),
     consentType: consentTypeEnum("consent_type").notNull(),
     version: t.text().notNull(),
     grantedAt: t

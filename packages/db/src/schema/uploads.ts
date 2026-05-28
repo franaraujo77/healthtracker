@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm";
 import { index, pgEnum, pgTable, uniqueIndex } from "drizzle-orm/pg-core";
 
+import { Users } from "./users";
+
 /**
  * Story 1.5 — `uploads` schema.
  *
@@ -43,7 +45,11 @@ export const Uploads = pgTable(
   "uploads",
   (t) => ({
     id: t.uuid().notNull().primaryKey().defaultRandom(),
-    patientId: t.uuid().notNull(),
+    // Story 5.6 FK cascade audit.
+    patientId: t
+      .uuid()
+      .notNull()
+      .references(() => Users.id, { onDelete: "cascade" }),
     idempotencyKey: t.text().notNull(),
     storagePath: t.text().notNull(),
     mimeType: t.text().notNull(),

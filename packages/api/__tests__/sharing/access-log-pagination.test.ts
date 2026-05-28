@@ -127,8 +127,10 @@ describe("Access Log input schema (Story 5.3 AC4)", () => {
 
 describe("Access Log event allowlist (Story 5.3 AC11)", () => {
   // Story 5.5 — `record.exported` added to the allowlist (AC10).
-  // The system-actor `export.generated` / `export.failed` stay OUT.
-  it("contains exactly the 9 share-related kinds", () => {
+  // Story 5.6 — `account.deletion_requested` added (AC10). The
+  // system-actor `export.generated` / `export.failed` /
+  // `account.deletion_completed` / `account.deletion_failed` stay OUT.
+  it("contains exactly the 10 patient-actor kinds", () => {
     expect(new Set(ACCESS_LOG_EVENT_KINDS)).toEqual(
       new Set([
         "pending_invite.created",
@@ -140,6 +142,7 @@ describe("Access Log event allowlist (Story 5.3 AC11)", () => {
         "share_token.revoked",
         "share_token.read",
         "record.exported",
+        "account.deletion_requested",
       ]),
     );
   });

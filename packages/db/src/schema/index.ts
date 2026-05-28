@@ -1,3 +1,4 @@
+export * from "./account";
 export * from "./audit";
 export * from "./consent";
 export * from "./extraction_review_queue";
