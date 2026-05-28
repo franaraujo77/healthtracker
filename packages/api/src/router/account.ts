@@ -126,6 +126,12 @@ export const accountRouter = {
                   inArray(AccountDeletionRequests.status, [
                     "queued",
                     "processing",
+                    // R1 fix — include 'complete'. If the worker is fast
+                    // enough to flip the row to 'complete' in the
+                    // milliseconds between the failed INSERT and this
+                    // SELECT, return the existing requestId (idempotent:
+                    // a completed deletion IS the requested outcome).
+                    "complete",
                   ]),
                 ),
               )

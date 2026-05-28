@@ -94,35 +94,63 @@ export async function removeAccountStorageObjects(
       errors: 0,
     };
     try {
-      const { data, error: listErr } = await supabase.storage
-        .from(bucket)
-        .list(patientId);
-      if (listErr) {
-        console.warn(
-          `[account.delete] storage.list(${bucket}/${patientId}) failed: ${listErr.message}`,
-        );
-        result.errors += 1;
+      // R1 fix — pagination loop. Supabase `list()` defaults to limit 100;
+      // max page size is 1000. A long-time patient with hundreds of files
+      // would silently orphan everything past page 1 without this loop
+      // (LGPD Art. 18 — erasure must be complete).
+      const PAGE = 1000;
+      const paths: string[] = [];
+      let offset = 0;
+      let listFailed = false;
+      while (true) {
+        const { data, error: listErr } = await supabase.storage
+          .from(bucket)
+          .list(patientId, { limit: PAGE, offset });
+        if (listErr) {
+          console.warn(
+            `[account.delete] storage.list(${bucket}/${patientId}, offset=${offset}) failed: ${listErr.message}`,
+          );
+          result.errors += 1;
+          listFailed = true;
+          break;
+        }
+        if (data.length === 0) break;
+        for (const entry of data) {
+          if (entry.name && !entry.name.startsWith(".")) {
+            paths.push(`${patientId}/${entry.name}`);
+          }
+        }
+        if (data.length < PAGE) break;
+        offset += PAGE;
+      }
+      if (listFailed) {
         results.push(result);
         continue;
       }
-      const paths = data
-        .filter((entry) => entry.name && !entry.name.startsWith("."))
-        .map((entry) => `${patientId}/${entry.name}`);
+      console.log(
+        `[account.delete] storage_cleanup bucket=${bucket} patientId=${patientId} count=${paths.length}`,
+      );
       if (paths.length === 0) {
         results.push(result);
         continue;
       }
-      const { error: removeErr } = await supabase.storage
-        .from(bucket)
-        .remove(paths);
-      if (removeErr) {
-        console.warn(
-          `[account.delete] storage.remove(${bucket}) failed: ${removeErr.message}`,
-        );
-        result.errors += 1;
-      } else {
-        result.removed = paths.length;
+      // Supabase `remove()` accepts up to 1000 paths per call.
+      let removed = 0;
+      for (let i = 0; i < paths.length; i += 1000) {
+        const batch = paths.slice(i, i + 1000);
+        const { error: removeErr } = await supabase.storage
+          .from(bucket)
+          .remove(batch);
+        if (removeErr) {
+          console.warn(
+            `[account.delete] storage.remove(${bucket}) batch failed: ${removeErr.message}`,
+          );
+          result.errors += 1;
+        } else {
+          removed += batch.length;
+        }
       }
+      result.removed = removed;
     } catch (err) {
       // Narrow-catch — Storage SDK throws on network/transport failures.
       // Programmer errors (TypeError) propagate.

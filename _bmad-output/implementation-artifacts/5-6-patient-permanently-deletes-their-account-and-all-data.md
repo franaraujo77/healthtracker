@@ -1,6 +1,6 @@
 # Story 5.6: Patient permanently deletes their account and all data
 
-Status: ready-for-dev
+Status: review
 
 > **Stacked on Stories 5.1 + 5.2 + 5.3 + 5.4 + 5.5 / PR #56.** Final patient-side story of Epic 5. LGPD Art. 18 right-to-erasure surface. Async pg-boss job + Supabase Auth admin API + audit-log pseudonymization (AR20 ADR). Adds `account_deletion_requests` table + RLS, `accountRouter.requestDeletion` + `getDeletionStatus` procedures, a new `account.delete.generate` pg-boss queue, a new `services/llm` consumer (despite the name — `services/llm` is now the generic durable worker pool; the consumer does NO LLM call), and a Configurações > Conta > Excluir conta screen with EXCLUIR magic-word + 30s visible cooldown.
 >
@@ -47,7 +47,7 @@ Status: ready-for-dev
    4. **DELETE `users(id)` row** (cascades fire).
    5. **DELETE Supabase Auth `auth.users(id)`** via `supabase.auth.admin.deleteUser(patientId)`. Service-role required.
    6. UPDATE `account_deletion_requests SET status='complete', completed_at=now()` for this request. (The request row is itself in `account_deletion_requests`, which cascades from `users` — so step 4 already removed it. **Fix:** the `account_deletion_requests` table needs `ON DELETE SET NULL` on `patient_id` OR the request status must update happen on a separate, non-cascading "completion ledger" table. Simpler: status update happens BEFORE step 4 — see ordering revision below.)
-   - **Revised order (canonical):** 1 pseudonymize audit → 2 Storage delete → 3 status='processing' on `account_deletion_requests` → 4 cascade-delete public rows EXCEPT `account_deletion_requests` → 5 Supabase Auth admin delete → 6 status='complete' on `account_deletion_requests` (the row is preserved as the deletion ledger; `patient_id` column scrubbed to the pseudonym in step 6). The deletion-ledger row stays forever — proves to auditors that the deletion happened.
+   - **Revised order (canonical, as implemented):** 1 `status='processing'` on `account_deletion_requests` (visible to polling readers immediately) → 2 pseudonymize audit_log → 3 Storage delete → 4 pg-boss job cleanup (`pgboss.job` + `pgboss.archive` rows with `data->>'patientId'=$1`; R1 addition) → 5 cascade-delete public rows EXCEPT `account_deletion_requests` → 6a final-attempt pre-emit `account.deletion_failed` audit (R1 addition; only fires on `retrycount+1 >= RETRY_LIMIT` so partial auth-side failure is forensics-traced) → 6b Supabase Auth admin delete → 7 status='complete' on `account_deletion_requests` + `account.deletion_completed` audit (the deletion-ledger row is preserved; `patient_id` column scrubbed to the pseudonym only in audit_log, not the ledger). The deletion-ledger row stays forever — proves to auditors that the deletion happened.
    - **Narrow catches** per Story 5.1 R1 / 5.4 R1 / 5.5 R1 discipline: PG errors, Supabase admin API errors (HTTP shape), Storage 404 (best-effort). Programmer errors (TypeError) rethrow. On the final pg-boss attempt (retrycount + 1 >= retryLimit=3), persist `account_deletion_requests.status='failed'` + `failure_reason` + emit `account.deletion_failed` audit. **The audit emit happens BEFORE auth.users delete so a partial failure on the auth side still surfaces in the log.**
 
 4. **AC4 — Audit log pseudonymization (AR20 ADR).** Per AC3 step 1 — audit rows survive but lose identifying links. Implementation detail:
@@ -452,6 +452,46 @@ Modified:
 - `services/llm/src/index.ts` (register queue + consumer + salt boot-fail-fast)
 - `.env.example` (ACCOUNT_DELETION_SALT)
 - `turbo.json` (declare ACCOUNT_DELETION_SALT global env)
+
+### Review Findings (2026-05-28)
+
+Three-layer adversarial review. Two convergent CRITICAL findings (both reviewers caught the raw-patientId leak in the failed-audit; Edge Case Hunter escalated Storage pagination from MEDIUM to CRITICAL given LGPD Art. 18 stakes).
+
+#### Decision-needed
+
+- [ ] [Review][Decision] **In-flight pg-boss jobs cleanup at deletion time** — Edge H2. When the consumer cascade-deletes `users`, any in-flight `letter.generate` / `record.export.generate` / `conversation_starter.generate` job already dequeued (or about to be) will fire and SELECT 0 rows. All three consumers handle this gracefully. BUT: `pgboss.job` rows themselves carry `data->>'patientId'` in JSONB, leaking the raw uuid until pg-boss archive sweeps (default 7d). Options: (a) cancel by singleton_key prefix at step 4; (b) accept and document (only uuid in queue payload, no health data); (c) cancel only `record.export.generate` (most likely to hold exportable artifacts).
+
+- [ ] [Review][Decision] **`account.deletion_failed` audit ordering** — Auditor #3. Spec said emit BEFORE the auth.admin.deleteUser to trace partial auth-side failures. Implementation emits in the catch block AFTER the auth call throws. Options: (a) restructure to emit BEFORE attempt + UPDATE on success/failure (more code, stricter spec); (b) keep current (catch-block); (c) restructure ONLY for final attempt.
+
+#### Patch (apply before merge)
+
+- [ ] [Review][Patch] **CRITICAL — `account.deletion_failed` audit uses RAW patientId, not pseudonym** — `services/llm/src/consumers/generate-account-deletion.ts:2441`. Step 2 has already pseudonymized audit_log; the catch block then INSERTs a new row with `actor_id = ${patientId}::uuid` (raw). Re-leak of re-identification key. Fix: compute pseudonymUuid + pseudonymFull early in `processOne` (before try); use `${pseudonymUuid}::uuid` for the failed-audit `actor_id`; include `pseudonym: pseudonymFull, originalActorErased: true` in metadata. Mirror the success-path pattern.
+
+- [ ] [Review][Patch] **CRITICAL — Storage `list()` not paginated; LGPD violation for long-time patients** — `services/llm/src/account-deletion.ts:2116`. Supabase `list()` defaults to `limit: 100`. A patient with >100 files silently orphans every file past page 1. Post-cascade-DELETE, no hook will ever clean them. Fix: loop with `list(patientId, { limit: 1000, offset })` until `data.length < 1000`. Add per-bucket count log so ops can detect outliers.
+
+- [ ] [Review][Patch] **HIGH — 23505 idempotency catch fails-throw if status flips to `complete` between INSERT and SELECT** — `packages/api/src/router/account.ts:540-555`. SELECT filter is `status IN ('queued','processing')`. If the worker is fast enough to complete in the milliseconds between INSERT failure and SELECT, the SELECT returns empty → falls through → re-throws 23505 as INTERNAL_SERVER_ERROR. Fix: include `'complete'` in the SELECT filter — return the existing row's id (idempotent: a completed deletion IS the requested outcome). On `failed`, surface failure_reason via response OR allow fresh INSERT (failed rows don't block the partial unique).
+
+- [ ] [Review][Patch] **HIGH — Retries 1-2 leave NO audit trace** — `services/llm/src/consumers/generate-account-deletion.ts:2405-2413`. Retry path reverts `processing → queued` and rethrows. `account.deletion_failed` audit only fires on attempt 3 (final). Combined with CRITICAL #1, observability gap: partial-attempt failures invisible. Fix: emit `account.deletion_retry` audit on each non-final failure (using the pseudonym) with `metadata: { retrycount, reason }`. Add audit kind to validators. NOT in `ACCESS_LOG_EVENT_KINDS` (patient is signed out; system telemetry only).
+
+- [ ] [Review][Patch] **MEDIUM — Web `router.push` vs Expo `router.replace`; Back-button regression** — `apps/web/src/app/configuracoes/conta/excluir/excluir-conta-client.tsx:308`. Web leaves deletion screen on history stack; Back returns to unauth deletion screen (middleware re-redirects). Fix: use `router.replace("/auth/login")` to match Expo.
+
+- [ ] [Review][Patch] **MEDIUM — `auth.admin.deleteUser` 401/403 burns 3 retries** — `services/llm/src/consumers/generate-account-deletion.ts:2360-2364`. Any non-404 throws; pg-boss retries 3× regardless. 401 (env misconfig — permanent) burns retries indistinguishably from transient 500. Fix: classify HTTP status — 401/403 → immediate `failed` (no retry); 5xx → retry; 404 → success.
+
+- [ ] [Review][Patch] **MEDIUM — `localConcurrency: 1` AND `batchSize: 1` redundancy** — `services/llm/src/index.ts`. Both set; pick one (prefer `localConcurrency`).
+
+- [ ] [Review][Patch] **LOW — T8.2 + T8.3 docs not done** — CLAUDE.md "Account deletion discipline" paragraph + (optional) `docs/rls-review-checklist.md` update. Cover: async pg-boss + immediate signout; AR20 pseudonymization (salt rotation invalidates linkability); FK cascade audit discipline going forward; Storage cleanup bucket checklist; 30s cooldown variant of Story 5.4's pattern.
+
+- [ ] [Review][Patch] **LOW — Spec text inconsistency on AC3 ordering** — Spec says "pseudonymize FIRST" in one place and lists `status='processing'` as the first step in the revised-order block. Implementation does status='processing' first (for polling-reader visibility). Fix the spec to match implementation (cheaper) OR restructure implementation.
+
+#### Deferred (pre-existing or out-of-scope)
+
+- [x] [Review][Defer] **Pseudonym uuid-shape carving doesn't preserve UUID version/variant bits** — Postgres `uuid` accepts arbitrary 32-hex; collision 1 in 2^128.
+- [x] [Review][Defer] **Metadata regex base64 collision risk** — uuid in HMAC/base64 blob gets rewritten; 1 in 16^36; acceptable.
+- [x] [Review][Defer] **Cooldown timer behavior on app background (Expo)** — RN setTimeout pauses; worst case patient must re-confirm.
+- [x] [Review][Defer] **`getDeletionStatus` unreachable post-signout** — ops-only endpoint; documented.
+- [x] [Review][Defer] **EXCLUIR Cyrillic/RTL-override** — strict code-point equality is robust.
+- [x] [Review][Defer] **Salt rotation invalidates linkability** — accepted trade-off; documented.
+- [x] [Review][Defer] **Re-registration with same email** — correct LGPD semantics (fresh patient_id; no link to pseudonymized rows).
 
 ### Known infra blockers (out-of-code)
 

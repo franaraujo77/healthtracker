@@ -35,7 +35,28 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-05-15
-last_updated: 2026-05-27
+last_updated: 2026-05-28
+# Story 5.6 implementation + R1 review complete → review. PR #56 (stacked).
+# Two convergent CRITICAL findings caught: (1) account.deletion_failed
+# audit used raw patientId after step-2 pseudonymized everything else
+# (re-leak of re-identification key); (2) Storage list() not paginated
+# — long-time patients with >100 files would silently orphan all but
+# the first page (LGPD Art. 18 violation). Both fixed via pseudonym-
+# uuid usage in failed-audit + paginated list/remove loop (limit 1000;
+# offset stride). Plus 7 more patches: 23505 catch now includes
+# 'complete' status (idempotent on race-to-complete); new
+# account.deletion_retry audit kind covers retries 1-2 (was silent);
+# auth.admin 401/403 → UnrecoverableAuthError sentinel skips retry
+# budget; web router.push → replace (Back-button regression);
+# batchSize:1 redundancy removed; CLAUDE.md "Account deletion
+# discipline" appendix added; AC3 prose updated to match
+# implementation. 2 decisions: pg-boss job cleanup at step 4
+# (DELETE FROM pgboss.job + pgboss.archive WHERE data->>'patientId';
+# best-effort; logs rowCount); final-attempt failed-audit pre-emitted
+# BEFORE auth.admin.deleteUser (forensics survives partial auth
+# failure). Subagent API overload required manual patch application.
+# typecheck 17/17; lint 15/15; api test:unit 220/220; llm-service
+# test:unit 33/33.
 # Story 5.6 spec created → ready-for-dev. Stacks on 5.1-5.5 / PR #56.
 # LGPD Art. 18 right-to-erasure. ADRs: async pg-boss + immediate
 # client signout (no waiting on worker); SHA-256 pseudonymization
@@ -505,7 +526,7 @@ development_status:
   5-3-patient-views-the-access-log: review
   5-4-patient-revokes-a-doctors-access-to-their-record: review
   5-5-patient-exports-their-complete-health-record-as-json-or-pdf: review
-  5-6-patient-permanently-deletes-their-account-and-all-data: ready-for-dev
+  5-6-patient-permanently-deletes-their-account-and-all-data: review
   epic-5-retrospective: optional
 
   # Epic 6: Doctor Can View a Patient's Conversation Starter

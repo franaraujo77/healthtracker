@@ -86,7 +86,7 @@ export async function registerGenerateAccountDeletionConsumer(
     "account.delete.generate",
     // AC5 — serialize. A deletion job spans Storage + cascade +
     // auth admin delete; concurrency 1 keeps retries deterministic.
-    { localConcurrency: 1, batchSize: 1 },
+    { localConcurrency: 1 },
     async (jobs) => {
       for (const job of jobs) {
         const { requestId, patientId } = job.data.payload;
@@ -182,21 +182,73 @@ export async function processOne(
     // Step 3 — Storage cleanup. Best-effort; logs + continues.
     await removeAccountStorageObjects(supabase, patientId);
 
-    // Step 4 — cascade-DELETE public-schema rows. T2 FK cascade
+    // Step 4 — pg-boss job cleanup (Decision A from R1).
+    // Cancel in-flight jobs that reference this patient_id in their
+    // JSONB payload BEFORE cascade-DELETE so the queue payloads don't
+    // leak the raw uuid until pg-boss's archive sweep. Best-effort —
+    // won't kill already-running jobs (consumers gracefully no-op on
+    // missing rows post-cascade).
+    const queueDelete = await deps.sql`
+      DELETE FROM pgboss.job
+      WHERE name IN ('letter.generate','record.export.generate','conversation_starter.generate')
+        AND data->>'patientId' = ${patientId}
+    `;
+    const archiveDelete = await deps.sql`
+      DELETE FROM pgboss.archive
+      WHERE name IN ('letter.generate','record.export.generate','conversation_starter.generate')
+        AND data->>'patientId' = ${patientId}
+    `;
+    console.log(
+      `[account.delete] requestId=${requestId}: pg-boss cleanup queue=${queueDelete.count} archive=${archiveDelete.count}`,
+    );
+
+    // Step 5 — cascade-DELETE public-schema rows. T2 FK cascade
     // audit ensures every patient-FK table has onDelete:cascade.
     // `account_deletion_requests` is EXEMPT (intentionally no FK).
     await deps.sql`
       DELETE FROM users WHERE id = ${patientId}::uuid
     `;
 
-    // Step 5 — Supabase Auth admin delete. 404 ⇒ already-deleted
-    // (idempotent retry); narrow-catch.
+    // Step 6a — final-attempt forensics pre-emit (Decision B from R1).
+    // Emit `account.deletion_failed` BEFORE the auth admin call so that
+    // a partial-auth-side failure is traced even if the process dies
+    // mid-call. If auth succeeds, this row stays as a "pre_auth_
+    // precaution" record and is superseded by `account.deletion_
+    // completed` at step 7. Auditors distinguish via metadata.status.
+    const isFinalAttempt = retrycount + 1 >= RETRY_LIMIT;
+    if (isFinalAttempt) {
+      await deps.sql`
+        INSERT INTO audit_log
+          (actor_id, actor_type, event, resource_id, resource_type, metadata)
+        VALUES (
+          ${pseudonymUuid}::uuid,
+          'system',
+          'account.deletion_failed',
+          ${requestId}::uuid,
+          'account_deletion_request',
+          ${JSON.stringify({
+            pseudonym: pseudonymFull,
+            originalActorErased: true,
+            status: "pre_auth_precaution",
+            attemptedAt: new Date().toISOString(),
+          })}::jsonb
+        )
+      `;
+    }
+
+    // Step 6b — Supabase Auth admin delete. 404 ⇒ already-deleted
+    // (idempotent retry). 401/403 → UnrecoverableAuthError (skip
+    // retry budget — env misconfig won't auto-heal). 5xx → retry.
     const { error: authErr } = await supabase.auth.admin.deleteUser(patientId);
     if (authErr) {
       const status = (authErr as { status?: number }).status;
       if (status === 404) {
         console.log(
           `[account.delete] requestId=${requestId}: auth user already deleted (404 — success)`,
+        );
+      } else if (status === 401 || status === 403) {
+        throw new UnrecoverableAuthError(
+          `supabase.auth.admin.deleteUser permission denied (status=${status}): ${authErr.message}`,
         );
       } else {
         throw new Error(
@@ -243,51 +295,70 @@ export async function processOne(
       err,
     );
 
-    if (retrycount + 1 < RETRY_LIMIT) {
+    const isUnrecoverable = err instanceof UnrecoverableAuthError;
+    const isFinalAttempt = retrycount + 1 >= RETRY_LIMIT || isUnrecoverable;
+
+    const reason = isUnrecoverable
+      ? "AUTH_PERMISSION_ERROR"
+      : isPgError
+        ? "DB_ERROR"
+        : isAuthError
+          ? "AUTH_ADMIN_ERROR"
+          : isNetworkError
+            ? "NETWORK_ERROR"
+            : "INTERNAL_ERROR";
+
+    if (!isFinalAttempt) {
       // Earlier attempts — revert processing→queued so the next
-      // retry re-enters the happy path.
-      await deps.sql`
-        UPDATE account_deletion_requests
-        SET status = 'queued'
-        WHERE id = ${requestId}::uuid AND status = 'processing'
-      `;
+      // retry re-enters the happy path. Also emit a system-actor
+      // `account.deletion_retry` audit so retries 1-2 are traceable
+      // (R1 fix — was previously silent).
+      await deps.sql.begin(async (tx) => {
+        await tx`
+          UPDATE account_deletion_requests
+          SET status = 'queued'
+          WHERE id = ${requestId}::uuid AND status = 'processing'
+        `;
+        await tx`
+          INSERT INTO audit_log
+            (actor_id, actor_type, event, resource_id, resource_type, metadata)
+          VALUES (
+            ${pseudonymUuid}::uuid,
+            'system',
+            'account.deletion_retry',
+            ${requestId}::uuid,
+            'account_deletion_request',
+            ${JSON.stringify({
+              pseudonym: pseudonymFull,
+              retrycount,
+              reason,
+            })}::jsonb
+          )
+        `;
+      });
       throw err;
     }
 
-    // Final attempt — terminal failure. Persist `failed` + audit
-    // BEFORE the rethrow. The audit row uses the raw patient_id
-    // (the pseudonymize step may not have completed on this path);
-    // if a later retry succeeds, this row will get retroactively
-    // pseudonymized by that retry's step-2 — but on a final failure
-    // path there IS no later retry, so the link survives in the
-    // ledger. Acceptable: a failed deletion did not erase the
-    // patient (the failure traces the ceremony at the auth-side).
-    const reason = isPgError
-      ? "DB_ERROR"
-      : isAuthError
-        ? "AUTH_ADMIN_ERROR"
-        : isNetworkError
-          ? "NETWORK_ERROR"
-          : "INTERNAL_ERROR";
-    await deps.sql.begin(async (tx) => {
-      await tx`
-        UPDATE account_deletion_requests
-        SET status = 'failed', failure_reason = ${reason}
-        WHERE id = ${requestId}::uuid
-      `;
-      await tx`
-        INSERT INTO audit_log
-          (actor_id, actor_type, event, resource_id, resource_type, metadata)
-        VALUES (
-          ${patientId}::uuid,
-          'system',
-          'account.deletion_failed',
-          ${requestId}::uuid,
-          'account_deletion_request',
-          ${JSON.stringify({ reason })}::jsonb
-        )
-      `;
-    });
+    // Final attempt — terminal failure. Persist `failed` status. The
+    // `account.deletion_failed` audit row was pre-emitted at step 6a
+    // (before the auth admin call) using the pseudonym; we do NOT
+    // double-insert here — only flip the ledger row's status.
+    await deps.sql`
+      UPDATE account_deletion_requests
+      SET status = 'failed', failure_reason = ${reason}
+      WHERE id = ${requestId}::uuid
+    `;
     throw err;
+  }
+}
+
+/**
+ * Sentinel for HTTP 401/403 from `supabase.auth.admin.deleteUser`.
+ * Bypasses the pg-boss retry budget — env misconfig won't auto-heal.
+ */
+export class UnrecoverableAuthError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UnrecoverableAuthError";
   }
 }

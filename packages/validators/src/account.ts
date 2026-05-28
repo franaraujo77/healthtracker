@@ -39,6 +39,15 @@ export const ACCOUNT_AUDIT_DELETION_COMPLETED =
  */
 export const ACCOUNT_AUDIT_DELETION_FAILED = "account.deletion_failed" as const;
 
+/**
+ * System-actor audit kind emitted on each non-final retry of the
+ * account-deletion job (R1 fix — retries 1-2 were previously silent).
+ * `actor_id` is the pseudonym; metadata includes `{ retrycount, reason }`.
+ * NOT in `ACCESS_LOG_EVENT_KINDS` — system telemetry only (the patient
+ * is signed out before any retry fires).
+ */
+export const ACCOUNT_AUDIT_DELETION_RETRY = "account.deletion_retry" as const;
+
 // ---------------------------------------------------------------------------
 // Status enum + Zod schemas (AC2, AC8, AC9)
 // ---------------------------------------------------------------------------

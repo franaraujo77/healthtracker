@@ -38,7 +38,9 @@ export function ExcluirContaClient(): React.ReactElement {
           if (err instanceof TypeError) throw err;
           console.warn("[excluir-conta] signOut threw", err);
         }
-        router.push("/auth/login");
+        // R1 fix — `replace` (not `push`) keeps the deletion screen off the
+        // history stack so Back doesn't return to it. Matches Expo's router.replace.
+        router.replace("/auth/login");
       },
       onError: () => {
         setStatusMessage(DELETE_ACCOUNT_FAILED_PT_BR);

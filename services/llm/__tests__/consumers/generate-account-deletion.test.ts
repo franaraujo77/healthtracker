@@ -226,17 +226,19 @@ describe("processOne (account.delete) — failure + retry semantics", () => {
       processOne({ sql, supabase, salt: SALT }, REQUEST_ID, PATIENT_ID, 2),
     ).rejects.toThrow(/supabase\.auth\.admin/);
 
-    const failTx = capture
-      .filter((c) => c.type === "begin")
-      .find((c) =>
-        (c.txCalls ?? []).some((t) =>
-          /SET status = 'failed'/.test(t.strings?.join(" ") ?? ""),
-        ),
-      );
-    expect(failTx).toBeDefined();
-    const txText =
-      failTx?.txCalls?.map((c) => c.strings?.join("")).join("|") ?? "";
-    expect(txText).toContain("account.deletion_failed");
+    // R1 fix — final-attempt failed-audit is now pre-emitted BEFORE the
+    // auth call (not in a tx) so a partial auth-side failure is traced.
+    // The status='failed' UPDATE is also a bare query in catch. Verify
+    // both landed somewhere in the capture.
+    const allText = capture
+      .flatMap((c) =>
+        c.type === "begin"
+          ? (c.txCalls ?? []).map((t) => t.strings?.join("") ?? "")
+          : [c.strings?.join("") ?? ""],
+      )
+      .join("|");
+    expect(allText).toContain("SET status = 'failed'");
+    expect(allText).toContain("account.deletion_failed");
     errSpy.mockRestore();
   });
 
@@ -295,14 +297,15 @@ describe("processOne (account.delete) — failure + retry semantics", () => {
       processOne({ sql, supabase, salt: SALT }, REQUEST_ID, PATIENT_ID, 2),
     ).rejects.toBeInstanceOf(TypeError);
 
-    const failTx = capture
-      .filter((c) => c.type === "begin")
-      .find((c) =>
-        (c.txCalls ?? []).some((t) =>
-          /SET status = 'failed'/.test(t.strings?.join(" ") ?? ""),
-        ),
-      );
-    expect(failTx).toBeDefined();
+    // R1 fix — status='failed' UPDATE is now a bare query (not in a tx).
+    const allText = capture
+      .flatMap((c) =>
+        c.type === "begin"
+          ? (c.txCalls ?? []).map((t) => t.strings?.join("") ?? "")
+          : [c.strings?.join("") ?? ""],
+      )
+      .join("|");
+    expect(allText).toContain("SET status = 'failed'");
     errSpy.mockRestore();
   });
 });
