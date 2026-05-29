@@ -10,6 +10,7 @@ import { BiomarkerCard, ConversationStarterPrompt } from "@healthtracker/ui";
 
 import { ConversationStarterPolling } from "./ConversationStarterPolling";
 import { MarkStarterViewed } from "./MarkStarterViewed";
+import { ProfessionalAccountBanner } from "./ProfessionalAccountBanner";
 import { ReportLayout } from "./ReportLayout";
 
 /**
@@ -114,12 +115,22 @@ export default async function DoctorReportView({
   });
   const doctorCaller = appRouter.createCaller(doctorCtx);
 
+  // Story 6.3 T5.1 — parallel fetch alongside the conversation starter.
+  // Both resolvers run concurrently; the page waits on the slower one
+  // (NFR-P4 <3s budget intact — neither adds a serial RTT). The
+  // activation status is `auth.uid()`-scoped (NOT share-token-scoped),
+  // so a doctor activated via patient A's link surfaces as activated
+  // when viewing patient B's report.
   let report: RouterOutputs["sharing"]["getConversationStarter"];
+  let activationStatus: RouterOutputs["sharing"]["getActivationStatus"];
   try {
-    report = await doctorCaller.sharing.getConversationStarter({
-      shareTokenId,
-      tokenHmac,
-    });
+    [report, activationStatus] = await Promise.all([
+      doctorCaller.sharing.getConversationStarter({
+        shareTokenId,
+        tokenHmac,
+      }),
+      doctorCaller.sharing.getActivationStatus({}),
+    ]);
   } catch (err) {
     // R1-L3: narrow on `NOT_FOUND` (revoked / expired / cross-token /
     // unknown / bad-HMAC) → redirect to pre-auth landing for the
@@ -209,6 +220,19 @@ export default async function DoctorReportView({
           );
         })}
       </section>
+      {/*
+        Story 6.3 AC1 — activation offer rendered below the report when
+        the doctor is not yet activated. Per-session dismiss; deliberately
+        not persisted (see spec T5.2 deferred-work entry).
+      */}
+      {!activationStatus.activated && (
+        <ProfessionalAccountBanner
+          shareTokenId={shareTokenId}
+          tokenHmac={tokenHmac}
+          email={user.email ?? ""}
+          defaultDisplayName={user.email?.split("@")[0] ?? ""}
+        />
+      )}
     </ReportLayout>
   );
 }

@@ -41,6 +41,35 @@ last_updated: 2026-05-29
 # `epic-3: in-progress → done`. All 5 Epic 3 stories now done +
 # epic-3-retrospective already done (2026-05-23 with 3.5 addendum
 # 2026-05-27). Epic 3 fully closed.
+# Story 6.3 spec created → ready-for-dev. Stacks on Story 6.2 / PR #57.
+# Doctor activates professional account from Conversation Starter view.
+# ADRs locked: (a) NEW `professionals` table — PK = user_id, single
+# row per Supabase user; `onDelete: cascade` on FK to users. (b)
+# `pending_invites.resolved_user_id` finally gets FK declaration —
+# `onDelete: set null` (the ONE justified exception to Story 5.6's
+# cascade-rule: the invite encodes patient intent and outlives the
+# doctor's account; cascade would silently delete patient-authored
+# data on a third-party (doctor) deletion). (c) `claimInviteByDoctor`
+# integrated INTO `activateProfessionalAccount` mutation — single
+# atomic tx (SELECT FOR UPDATE + branch on resolved_user_id + INSERT
+# professionals + audit). Cross-doctor invite-claim race → CONFLICT
+# (first to activate wins). (d) `professional_account.activated`
+# audit kind is system telemetry; NOT in ACCESS_LOG_EVENT_KINDS
+# (round-1 product question whether patient should see "Dr. X
+# activated" deferred). (e) NEW `professionalCategoryEnum`
+# (endocrinologista|cardiologista|medicina_esportiva|nutrologo|
+# nutricionista|clinico_geral|outro); pgEnum + Zod twins; pt-BR
+# label map adjacent. (f) NO CRM/license validation (UX-DR9
+# frictionless; deferred for regulatory revisit). (g) Activation
+# status is user-scoped, NOT token-scoped (Doctor Acquisition Loop
+# closure: activated under patient A's token IS activated when
+# opening patient B's token). (h) Migration deferred to Story 6.6
+# (Epic 6 batched-migration pattern). New tRPC: sharingRouter.
+# activateProfessionalAccount + getActivationStatus (both
+# doctorProcedure). NEW web components: ProfessionalAccountBanner
+# + ProfessionalAccountModal mounted in /m/[token]/view RSC via
+# Promise.all parallel-RTT (NFR-P4 budget). 6-identity RLS matrix
+# on `professionals` mandatory.
 # Story 5.6 implementation + R1 review complete → review. PR #56 (stacked).
 # Two convergent CRITICAL findings caught: (1) account.deletion_failed
 # audit used raw patientId after step-2 pseudonymized everything else
@@ -538,7 +567,7 @@ development_status:
   epic-6: in-progress
   6-1-doctor-views-pre-auth-landing-page-showing-patient-name-and-share-context: done
   6-2-doctor-authenticates-via-magic-link-and-views-the-conversation-starter-report: review
-  6-3-doctor-activates-a-professional-account-from-the-conversation-starter-view: backlog
+  6-3-doctor-activates-a-professional-account-from-the-conversation-starter-view: review
   6-4-doctor-invites-a-patient-to-create-a-health-tracker-account: backlog
   6-5-doctor-configures-biomarker-staleness-thresholds-for-their-professional-view: backlog
   epic-6-retrospective: optional

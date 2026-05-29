@@ -33,6 +33,12 @@ export interface IdentityOptions {
   shareToken?: string;
   /** Story 5.1 — doctor-principal GUC value (`app.current_share_token_id`). */
   shareTokenId?: string;
+  /**
+   * Story 6.3 — doctor's Supabase user id, bound to
+   * `app.current_doctor_user_id` by `doctorProcedure`. Used by the
+   * `professionals` RLS policy (activation is `auth.uid()`-scoped).
+   */
+  doctorUserId?: string;
 }
 
 function getDbUrl(): string {
@@ -184,6 +190,12 @@ async function applyClaims(
       await setLocal(tx, "app.current_user_role", "doctor");
       if (opts.shareTokenId) {
         await setLocal(tx, "app.current_share_token_id", opts.shareTokenId);
+      }
+      // Story 6.3 — bind the doctor's Supabase uid so RLS policies
+      // gated on `app.current_doctor_user_id` (e.g. `professionals`)
+      // can be exercised in the matrix.
+      if (opts.doctorUserId) {
+        await setLocal(tx, "app.current_doctor_user_id", opts.doctorUserId);
       }
       break;
   }

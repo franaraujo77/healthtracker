@@ -155,6 +155,15 @@ export const doctorProcedure = t.procedure
       await tx.execute(
         sql`SELECT set_config('app.current_user_role', ${"doctor"}, true)`,
       );
+      // Story 6.3 — bind the doctor's Supabase user id for the
+      // `professionals` RLS predicate. Activation is `auth.uid()`-scoped,
+      // not share-token-scoped (a doctor activated via patient A's token
+      // IS activated viewing patient B's report — Doctor Acquisition
+      // Loop closure). Using the GUC pattern (vs raw `auth.uid()`)
+      // keeps the policy testable against the bare testcontainer.
+      await tx.execute(
+        sql`SELECT set_config('app.current_doctor_user_id', ${session.user.id}, true)`,
+      );
       return next({
         ctx: {
           session: { ...session, user: session.user },

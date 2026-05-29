@@ -6,6 +6,7 @@ export { formatBrazilianDecimal, parseBrazilianDecimal } from "./decimal";
 export { parseCollectedAt } from "./collected-at";
 export { formatAbsolutePtBr, formatRelativeTimePtBr } from "./dates";
 export * from "./account";
+export * from "./professional";
 export * from "./sharing";
 
 /**

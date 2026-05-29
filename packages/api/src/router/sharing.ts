@@ -13,11 +13,14 @@ import {
   ConversationStarterCache,
   Exports,
   PendingInvites,
+  Professionals,
   ShareTokenBiomarkers,
   ShareTokens,
 } from "@healthtracker/db/schema";
 import {
   ACCESS_LOG_EVENT_KINDS,
+  activateProfessionalAccountInputSchema,
+  activateProfessionalAccountOutputSchema,
   configureBiomarkersInputSchema,
   CONVERSATION_STARTER_FAILED_PT_BR,
   CONVERSATION_STARTER_PATIENT_FIRSTNAME_FALLBACK_PT_BR,
@@ -26,6 +29,8 @@ import {
   createShareTokenInputSchema,
   EXPORT_DOWNLOAD_TTL_SECONDS,
   exportFilename,
+  getActivationStatusInputSchema,
+  getActivationStatusOutputSchema,
   getConversationStarterInputSchema,
   getConversationStarterOutputSchema,
   getDraftConfigInputSchema,
@@ -33,8 +38,10 @@ import {
   getExportOutputSchema,
   getPreAuthContextInputSchema,
   getPreAuthContextOutputSchema,
+  INVITE_ALREADY_CLAIMED_BY_DIFFERENT_DOCTOR,
   isAccessLogEventKind,
   listAccessLogInputSchema,
+  PROFESSIONAL_ACCOUNT_ACTIVATED_AUDIT,
   requestExportInputSchema,
   requestExportOutputSchema,
   revokeShareTokenInputSchema,
@@ -1527,6 +1534,273 @@ export const sharingRouter = {
         );
       }
       return { ok: true as const };
+    }),
+  /**
+   * Story 6.3 AC4 — `getActivationStatus`. Render-time existence check
+   * for the doctor's `professionals` row.
+   *
+   * **No audit row** — this is a render-time existence check, not an
+   * access event. Mirrors the Story 6.2 R1-H1 "one audit row per view,
+   * never per render" invariant: the RSC may call this every report
+   * load (and side-by-side with `getConversationStarter` via
+   * `Promise.all` to keep NFR-P4 <3s intact), so emitting per-tap would
+   * mean N rows per cold-cache polling window.
+   *
+   * **`auth.uid()`-scoped, NOT share-token-scoped** — a doctor activated
+   * via patient A's token IS activated when viewing patient B's
+   * report (Doctor Acquisition Loop closure). The RLS predicate
+   * `current_setting('app.current_doctor_user_id', true) = user_id::text`
+   * enforces this; the resolver does NOT re-filter.
+   *
+   * Never throws for the "no row" case — returns `activated:false`
+   * with null fields. A throw would reject the RSC's `Promise.all`
+   * and 500 the report.
+   */
+  getActivationStatus: doctorProcedure
+    .input(getActivationStatusInputSchema)
+    .output(getActivationStatusOutputSchema)
+    .query(async ({ ctx }) => {
+      const rows = await ctx.db
+        .select({
+          displayName: Professionals.displayName,
+          category: Professionals.category,
+        })
+        .from(Professionals)
+        .where(eq(Professionals.userId, ctx.session.user.id))
+        .limit(1);
+      const row = rows[0];
+      if (!row) {
+        return {
+          activated: false as const,
+          displayName: null,
+          category: null,
+        };
+      }
+      return {
+        activated: true as const,
+        displayName: row.displayName,
+        category: row.category,
+      };
+    }),
+
+  /**
+   * Story 6.3 AC3 / AC5 — `activateProfessionalAccount`. The
+   * long-deferred `pending_invites.resolved_user_id` flip (Story 5.1
+   * hand-off) lands here, alongside the `professionals` row insert.
+   *
+   * Critical ordering (atomic tx):
+   *   1. SELECT share_tokens (RLS-bound to doctor principal) →
+   *      NOT_FOUND on any failure (revoked / expired / cross-token /
+   *      unknown — same shape; no enumeration oracle).
+   *   2. `constantTimeEqualHmac` re-check — defense-in-depth above
+   *      the GUC (mirrors `getConversationStarter`).
+   *   3. SET LOCAL ROLE postgres → SELECT FOR UPDATE pending_invites →
+   *      SET LOCAL ROLE NONE. The escalation is REQUIRED because the
+   *      doctor principal has no SELECT policy on `pending_invites`
+   *      (that surface is patient-side). The pair-bookend keeps the
+   *      escalation scoped to the lock acquisition; RLS is restored
+   *      before the INSERT below.
+   *   4. Branch on `resolved_user_id`:
+   *        - NULL → UPDATE (the canonical flip).
+   *        - = doctor's uid → no-op (idempotent re-tap).
+   *        - != doctor's uid → CONFLICT (cross-doctor invite race).
+   *   5. INSERT professionals ON CONFLICT (user_id) DO NOTHING.
+   *      `alreadyActivated` is true when RETURNING is empty (row
+   *      pre-existed); the post-INSERT SELECT fetches the existing
+   *      row's displayName + category.
+   *   6. Conditional audit — emit ONE `professional_account.activated`
+   *      row only when this call actually inserted (alreadyActivated
+   *      = false). Mirrors Story 6.2 R1-H1 "one row per activation,
+   *      ever" invariant.
+   *
+   * **Audit kind NOT in `ACCESS_LOG_EVENT_KINDS`** — doctor-side
+   * identity binding, not patient-data access. The patient does NOT
+   * see "Dr. X activated their account" in their Access Log.
+   *
+   * **Narrow catches:** the 23505 race on the `professionals.user_id`
+   * PK folds into success via `ON CONFLICT DO NOTHING`; no explicit
+   * catch needed for the INSERT. `CONFLICT` (cross-doctor) and
+   * `NOT_FOUND` (token issues) are thrown explicitly; nothing else is
+   * swallowed.
+   */
+  activateProfessionalAccount: doctorProcedure
+    .input(activateProfessionalAccountInputSchema)
+    .output(activateProfessionalAccountOutputSchema)
+    .mutation(async ({ ctx, input }) => {
+      if (ctx.shareTokenId !== input.shareTokenId) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+      const doctorUserId = ctx.session.user.id;
+
+      // RLS-bound SELECT — doctor principal sees only their bound
+      // active share_token. Revoked / expired / cross-token / unknown
+      // all collapse to NOT_FOUND (no enumeration oracle).
+      const tokenRows = await ctx.db
+        .select({
+          id: ShareTokens.id,
+          tokenHmac: ShareTokens.tokenHmac,
+          patientId: ShareTokens.patientId,
+          inviteId: ShareTokens.inviteId,
+        })
+        .from(ShareTokens)
+        .where(eq(ShareTokens.id, input.shareTokenId))
+        .limit(1);
+      const tokenRow = tokenRows[0];
+      if (!tokenRow) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+      if (!constantTimeEqualHmac(tokenRow.tokenHmac, input.tokenHmac)) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+
+      // Atomic tx — role escalation, FOR UPDATE lock, branch decision,
+      // INSERT, audit all commit-or-rollback together.
+      return ctx.db.transaction(async (tx) => {
+        // Step 3 — escalate ROLE briefly so we can SELECT FOR UPDATE
+        // pending_invites (the doctor principal has no patient-side
+        // RLS). The SET LOCAL is scoped to this tx; the explicit
+        // NONE-reset immediately after the lock acquisition restores
+        // RLS for the rest of the resolver's writes. SECURITY: a
+        // future patch that drops the NONE reset would leave RLS
+        // bypassed for the INSERT below — round-1 reviewers MUST
+        // verify the pair-bookend.
+        await tx.execute(sql`SET LOCAL ROLE postgres`);
+        let inviteRow: { id: string; resolved_user_id: string | null };
+        try {
+          const inviteRows = await tx.execute<{
+            id: string;
+            resolved_user_id: string | null;
+          }>(sql`
+            SELECT id, resolved_user_id
+            FROM ${PendingInvites}
+            WHERE ${PendingInvites.id} = ${tokenRow.inviteId}
+            FOR UPDATE
+          `);
+          const found = inviteRows[0];
+          if (!found) {
+            throw new TRPCError({ code: "NOT_FOUND" });
+          }
+          inviteRow = found;
+        } finally {
+          // De-escalate before ANY subsequent statement runs — keeps
+          // RLS enforcement on the INSERT + audit writes below. The
+          // `finally` guarantees the role is restored even if the
+          // SELECT throws.
+          await tx.execute(sql`SET LOCAL ROLE NONE`);
+        }
+
+        // Step 4 — branch on resolved_user_id.
+        if (inviteRow.resolved_user_id === null) {
+          // Canonical flip — service-role-equivalent UPDATE.
+          // Re-escalate briefly so RLS doesn't block the UPDATE
+          // (pending_invites has no patient-side UPDATE policy and
+          // no doctor-side policy at all).
+          await tx.execute(sql`SET LOCAL ROLE postgres`);
+          try {
+            await tx.execute(sql`
+              UPDATE ${PendingInvites}
+              SET resolved_user_id = ${doctorUserId}::uuid
+              WHERE ${PendingInvites.id} = ${tokenRow.inviteId}
+                AND resolved_user_id IS NULL
+            `);
+          } finally {
+            await tx.execute(sql`SET LOCAL ROLE NONE`);
+          }
+        } else if (inviteRow.resolved_user_id !== doctorUserId) {
+          // Cross-doctor race — patient invited Dr. A by email, Dr. A
+          // forwarded the link to a colleague Dr. B who also clicked.
+          // First-to-activate wins; the loser sees the pt-BR conflict
+          // copy. No professionals row written; no audit emitted.
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: INVITE_ALREADY_CLAIMED_BY_DIFFERENT_DOCTOR,
+          });
+        }
+        // else: resolved_user_id === doctorUserId → idempotent re-tap,
+        // no-op flip; fall through to the INSERT.
+
+        // Step 5 — INSERT professionals (PK = user_id ⇒ at most one
+        // row per Supabase user). RLS WITH CHECK on
+        // `professionals_insert_own` enforces `user_id =
+        // current_setting('app.current_doctor_user_id')`. Race on
+        // double-tap collapses via ON CONFLICT.
+        const inserted = await tx
+          .insert(Professionals)
+          .values({
+            userId: doctorUserId,
+            displayName: input.displayName,
+            category: input.category,
+          })
+          .onConflictDoNothing({ target: Professionals.userId })
+          .returning({
+            userId: Professionals.userId,
+            displayName: Professionals.displayName,
+            category: Professionals.category,
+          });
+
+        let displayName: string;
+        let category: typeof input.category;
+        let alreadyActivated: boolean;
+        if (inserted.length > 0 && inserted[0]) {
+          displayName = inserted[0].displayName;
+          category = inserted[0].category;
+          alreadyActivated = false;
+        } else {
+          // Row pre-existed (ON CONFLICT DO NOTHING returned nothing).
+          // Idempotent re-tap — SELECT the existing row to surface the
+          // canonical displayName + category back to the modal.
+          const existing = await tx
+            .select({
+              displayName: Professionals.displayName,
+              category: Professionals.category,
+            })
+            .from(Professionals)
+            .where(eq(Professionals.userId, doctorUserId))
+            .limit(1);
+          const row = existing[0];
+          if (!row) {
+            // Defense-in-depth: ON CONFLICT DO NOTHING returned empty
+            // AND SELECT returned empty would mean the row was deleted
+            // between the two statements (impossible under the tx
+            // isolation level, but a 500 is safer than a silent lie).
+            throw new TRPCError({
+              code: "INTERNAL_SERVER_ERROR",
+              message: "activateProfessionalAccount: row vanished mid-tx",
+            });
+          }
+          displayName = row.displayName;
+          category = row.category;
+          alreadyActivated = true;
+        }
+
+        // Step 6 — emit audit ONLY on the freshly-inserted branch.
+        // Re-tap is silent (mirrors Story 6.2 R1-H1 audit-amplification
+        // lesson — one row per activation, ever).
+        if (!alreadyActivated) {
+          await writeAuditLog(tx, {
+            actorId: doctorUserId,
+            actorType: "doctor",
+            event: PROFESSIONAL_ACCOUNT_ACTIVATED_AUDIT,
+            // Resource = the doctor themselves; activation is a
+            // self-targeted identity-binding event. Forensic linkage
+            // to the share-token / invite lives in `metadata`.
+            resourceId: doctorUserId,
+            resourceType: "professional",
+            metadata: {
+              shareTokenId: input.shareTokenId,
+              inviteId: tokenRow.inviteId,
+              category: input.category,
+            },
+          });
+        }
+
+        return {
+          activated: true as const,
+          displayName,
+          category,
+          alreadyActivated,
+        };
+      });
     }),
 } satisfies TRPCRouterRecord;
 
