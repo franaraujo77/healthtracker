@@ -21,7 +21,8 @@
     "fastify": "^5.2.0",
     "pg-boss": "12.18.2",
     "postgres": "catalog:",
-    "react": "catalog:react19"
+    "react": "catalog:react19",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@healthtracker/eslint-config": "workspace:*",

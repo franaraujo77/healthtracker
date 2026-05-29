@@ -844,3 +844,125 @@ export const SHARE_TOKEN_READ_PHASE_POST_AUTH = "post-auth" as const;
 export type ShareTokenReadPhase =
   | typeof SHARE_TOKEN_READ_PHASE_PRE_AUTH
   | typeof SHARE_TOKEN_READ_PHASE_POST_AUTH;
+
+// ---------------------------------------------------------------------------
+// Story 6.2 — Doctor magic-link auth + Conversation Starter view (T1)
+// ---------------------------------------------------------------------------
+
+// ---- pt-BR copy for the magic-link request form (AC1) ----
+
+export const AUTH_REQUEST_HEADING_PT_BR = "Receber link por e-mail";
+export function AUTH_REQUEST_SUBHEADING_FN(patientFirstName: string): string {
+  return `Você receberá um link para abrir o histórico de ${patientFirstName}.`;
+}
+export const AUTH_REQUEST_EMAIL_LABEL_PT_BR = "E-mail";
+export const AUTH_REQUEST_CTA_PT_BR = "Enviar link";
+export function AUTH_REQUEST_SENT_FN(email: string): string {
+  return `Enviamos um link para ${email}. Abra-o nesse navegador para continuar.`;
+}
+export const AUTH_REQUEST_RESEND_HINT_PT_BR =
+  "Não recebeu? Verifique a caixa de spam ou peça outro em 60 segundos.";
+// AC1 — single generic error. NEVER branch on Supabase's response —
+// that would be an enumeration oracle on registered users.
+export const AUTH_REQUEST_GENERIC_ERROR_PT_BR =
+  "Não foi possível enviar agora. Tente novamente.";
+
+// ---- pt-BR copy for the report view (AC5, AC8) ----
+
+export const CONVERSATION_STARTER_PREPARING_PT_BR = "Preparando o sumário…";
+export const CONVERSATION_STARTER_FAILED_PT_BR =
+  "Não foi possível pré-gerar o sumário desta vez. Você ainda pode ver os biomarcadores enviados.";
+export const CONVERSATION_STARTER_RETRY_CTA_PT_BR = "Tentar de novo";
+
+// AC6 — fallback when `resolvePatientFirstName` returns null on the
+// doctor (post-auth) surface. Distinct from the pre-auth fallback
+// `"Alguém"` — the doctor has cleared the trust gate.
+export const CONVERSATION_STARTER_PATIENT_FIRSTNAME_FALLBACK_PT_BR = "Paciente";
+
+// View banner — `Histórico de {patientFirstName}` (AC5).
+export function CONVERSATION_STARTER_VIEW_BANNER_FN(
+  patientFirstName: string,
+): string {
+  return `Histórico de ${patientFirstName}`;
+}
+
+// 60s client-side resend lockout (AC1 / T5.2).
+export const AUTH_REQUEST_RESEND_LOCKOUT_MS = 60_000;
+
+// AC8 — polling cadence + ceiling for the queued state.
+export const CONVERSATION_STARTER_POLL_INTERVAL_MS = 2_000;
+export const CONVERSATION_STARTER_POLL_TIMEOUT_MS = 30_000;
+
+// ---- Zod schemas (T1.3, T1.4) ----
+
+/**
+ * AC6 — input to `sharingRouter.getConversationStarter`. The
+ * `shareTokenId` is also threaded as the `x-share-token` header per
+ * AC4 so `doctorProcedure` can bind `app.current_share_token_id`.
+ * The resolver re-checks `tokenHmac` via `constantTimeEqualHmac` as
+ * defense-in-depth above the middleware.
+ */
+export const getConversationStarterInputSchema = z.object({
+  shareTokenId: z.uuid(),
+  tokenHmac: z.string().min(1).max(128),
+});
+export type GetConversationStarterInput = z.infer<
+  typeof getConversationStarterInputSchema
+>;
+
+/**
+ * AC6 — `cacheStatus` discriminator. `ready` is the only branch with
+ * a non-null `payload`. `failed` carries a pt-BR `failureReason` that
+ * the boundary maps to a SHORT client string (NEVER the operator-grade
+ * `LLM_API_ERROR | LLM_NETWORK_ERROR` strings).
+ */
+export const conversationStarterCacheStatusSchema = z.enum([
+  "queued",
+  "ready",
+  "failed",
+]);
+export type ConversationStarterCacheStatus = z.infer<
+  typeof conversationStarterCacheStatusSchema
+>;
+
+/**
+ * T1.4 — Zod mirror of `ConversationStarterPayload`. The TS interface
+ * in `services/llm/src/adapters/anthropic.ts` is kept as the canonical
+ * shape; this schema is the boundary validator (Anthropic response →
+ * typed payload) and the resolver's output shape.
+ */
+export const conversationStarterPromptSchema = z.object({
+  text: z.string().min(1),
+});
+export const conversationStarterTrendDirectionSchema = z.enum([
+  "up",
+  "down",
+  "flat",
+]);
+export const conversationStarterBiomarkerCardSchema = z.object({
+  category: z.string().min(1),
+  currentValue: z.number().nullable(),
+  previousValue: z.number().nullable(),
+  trendDirection: conversationStarterTrendDirectionSchema.nullable(),
+  patientBaseline: z.number().nullable(),
+});
+export const conversationStarterPayloadSchema = z.object({
+  prompts: z.array(conversationStarterPromptSchema).min(1).max(6),
+  biomarkerCards: z.array(conversationStarterBiomarkerCardSchema).max(64),
+});
+export type ConversationStarterPayloadValidated = z.infer<
+  typeof conversationStarterPayloadSchema
+>;
+
+/** AC6 — resolver output shape. */
+export const getConversationStarterOutputSchema = z.object({
+  cacheStatus: conversationStarterCacheStatusSchema,
+  payload: conversationStarterPayloadSchema.nullable(),
+  patientFirstName: z.string(),
+  sharedAt: z.date(),
+  expiresAt: z.date().nullable(),
+  failureReason: z.string().nullable(),
+});
+export type GetConversationStarterOutput = z.infer<
+  typeof getConversationStarterOutputSchema
+>;

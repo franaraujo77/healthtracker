@@ -19,10 +19,15 @@ import {
 import {
   ACCESS_LOG_EVENT_KINDS,
   configureBiomarkersInputSchema,
+  CONVERSATION_STARTER_FAILED_PT_BR,
+  CONVERSATION_STARTER_PATIENT_FIRSTNAME_FALLBACK_PT_BR,
+  conversationStarterPayloadSchema,
   createPendingInviteInputSchema,
   createShareTokenInputSchema,
   EXPORT_DOWNLOAD_TTL_SECONDS,
   exportFilename,
+  getConversationStarterInputSchema,
+  getConversationStarterOutputSchema,
   getDraftConfigInputSchema,
   getExportInputSchema,
   getExportOutputSchema,
@@ -34,6 +39,7 @@ import {
   requestExportOutputSchema,
   revokeShareTokenInputSchema,
   revokeShareTokenOutputSchema,
+  SHARE_TOKEN_READ_PHASE_POST_AUTH,
   SHARE_TOKEN_READ_PHASE_PRE_AUTH,
   SHARE_TOKEN_UNKNOWN_SENTINEL,
   SHARING_AUDIT_CONFIGURED,
@@ -62,7 +68,7 @@ import {
   createExportDownloadSignedUrl,
   getSupabaseAdminClient,
 } from "../storage";
-import { protectedProcedure, publicProcedure } from "../trpc";
+import { doctorProcedure, protectedProcedure, publicProcedure } from "../trpc";
 
 /**
  * Story 5.1 — `sharingRouter`. Patient-side sharing ceremony
@@ -1249,6 +1255,217 @@ export const sharingRouter = {
         patientFirstName,
         sharedAt: status === "active" ? row.createdAt : null,
         expiresAt: status === "active" ? row.expiresAt : null,
+      };
+    }),
+
+  /**
+   * Story 6.2 AC4 / AC6 — `getConversationStarter`.
+   *
+   * **First production consumer of `doctorProcedure`.** The middleware
+   * binds `app.current_share_token_id` from the `x-share-token` header
+   * AND requires `ctx.session.user` (Story 6.2 T4 added the session
+   * gate). Defense-in-depth: this resolver ALSO re-checks
+   * `tokenHmac` via `constantTimeEqualHmac` — the GUC proves "client
+   * claims share-token X", the HMAC proves "client holds the URL the
+   * patient signed for X".
+   *
+   * The doctor-side RLS predicate on `share_tokens` filters non-active
+   * rows automatically; a `NOT_FOUND` here is the union of {revoked,
+   * expired, cross-token, unknown}. The calling RSC redirects the
+   * doctor back to `/m/[token]` where Story 6.1's pre-auth resolver
+   * (publicProcedure, no GUC) discriminates the dead-link state.
+   *
+   * **AC6 service-role bypass for the cache status lookup:** the
+   * `conversation_starter_cache` RLS policy only surfaces `ready` rows
+   * to the doctor principal. To render the `queued` / `failed` UI
+   * states we need to read those rows too. We mint a service-role
+   * client via `getSupabaseAdminClient()` (mirrors Story 5.5
+   * `getExport`) AFTER the share-token check has already proven the
+   * doctor is authorized. Operator-grade `failure_reason` strings
+   * (`LLM_API_ERROR`, `LLM_NETWORK_ERROR`) are mapped to the SHORT
+   * pt-BR `CONVERSATION_STARTER_FAILED_PT_BR` at this boundary — the
+   * client NEVER sees the raw operator strings.
+   *
+   * **Audit:** `share_token.read` with `metadata.phase = "post-auth"`,
+   * `actorId = ctx.session.user.id` (the doctor's verified auth.uid —
+   * NOT the shareTokenId sentinel used in Story 6.1's pre-auth path).
+   * Audit fires on EVERY view of the report (not just first view) —
+   * the patient's surveillance surface wants the full timeline.
+   */
+  getConversationStarter: doctorProcedure
+    .input(getConversationStarterInputSchema)
+    .output(getConversationStarterOutputSchema)
+    .query(async ({ ctx, input }) => {
+      // AC4 — Defense-in-depth: middleware bound the GUC to the
+      // header value; assert the resolver was called with the same
+      // shareTokenId the client headers claimed.
+      if (ctx.shareTokenId !== input.shareTokenId) {
+        // Header / input mismatch — surface as NOT_FOUND (same shape
+        // as RLS-hidden); never leak which one diverged.
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+
+      // RLS-scoped lookup (doctor principal). On the doctor side the
+      // predicate filters revoked / expired rows out automatically, so
+      // a 0-row result is the union of {revoked, expired, cross-token,
+      // unknown}. We do NOT discriminate here — the calling RSC
+      // redirects to `/m/[token]` for the publicProcedure-shaped
+      // dead-link discriminator.
+      const tokenRows = await ctx.db
+        .select({
+          id: ShareTokens.id,
+          tokenHmac: ShareTokens.tokenHmac,
+          patientId: ShareTokens.patientId,
+          expiresAt: ShareTokens.expiresAt,
+          createdAt: ShareTokens.createdAt,
+        })
+        .from(ShareTokens)
+        .where(eq(ShareTokens.id, input.shareTokenId))
+        .limit(1);
+      const tokenRow = tokenRows[0];
+      if (!tokenRow) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+
+      // AC4 — constant-time HMAC re-check above the middleware.
+      const hmacOk = constantTimeEqualHmac(tokenRow.tokenHmac, input.tokenHmac);
+      if (!hmacOk) {
+        // Same NOT_FOUND shape as missing row — no enumeration oracle.
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+
+      // AC6 — service-role cache lookup. Resolver fired AFTER the
+      // doctor-RLS share-token check, so authorization is already
+      // proven. The service-role bypass lets us surface the
+      // `queued` / `failed` UI branches whose rows the doctor-RLS
+      // predicate would hide. Map operator-grade failure_reason
+      // strings to a SHORT pt-BR client string at this boundary.
+      const admin = getSupabaseAdminClient();
+      const { data: cacheRows, error: cacheErr } = await admin
+        .from("conversation_starter_cache")
+        .select("status, payload, failure_reason")
+        .eq("share_token_id", input.shareTokenId)
+        .limit(1);
+      if (cacheErr) {
+        // Treat infra failure on the status read as a transient
+        // `queued` so the client polls instead of dead-ending. This
+        // is a UI-degrade, not a security-degrade.
+        console.warn(
+          "[sharing.getConversationStarter] cache lookup failed — degrading to queued",
+          cacheErr,
+        );
+      }
+
+      let cacheStatus: "queued" | "ready" | "failed" = "queued";
+      let payload: ReturnType<
+        typeof conversationStarterPayloadSchema.parse
+      > | null = null;
+      let failureReason: string | null = null;
+      const cacheRow = cacheRows?.[0] as
+        | {
+            status: string;
+            payload: unknown;
+            failure_reason: string | null;
+          }
+        | undefined;
+      if (cacheRow) {
+        if (cacheRow.status === "ready") {
+          // Zod-validate the JSONB payload — a worker bug that wrote a
+          // bad shape into the row degrades to `queued` (so the doctor
+          // sees the polling state) rather than throwing 500. Narrow
+          // catch: programmer errors still propagate.
+          try {
+            payload = conversationStarterPayloadSchema.parse(cacheRow.payload);
+            cacheStatus = "ready";
+          } catch (err) {
+            if (
+              err instanceof TypeError ||
+              err instanceof ReferenceError ||
+              err instanceof SyntaxError
+            ) {
+              throw err;
+            }
+            console.warn(
+              "[sharing.getConversationStarter] cache payload failed Zod — degrading to queued",
+              err,
+            );
+            cacheStatus = "queued";
+          }
+        } else if (cacheRow.status === "failed") {
+          cacheStatus = "failed";
+          // Map operator-grade reason → SHORT pt-BR client string.
+          failureReason = CONVERSATION_STARTER_FAILED_PT_BR;
+        } else {
+          cacheStatus = "queued";
+        }
+      }
+
+      // Resolve patient first-name via Supabase Auth admin. Never
+      // throws (Story 6.1 N1 contract); fall back to `"Paciente"` on
+      // the doctor surface (NOT `"Alguém"` — past the trust gate).
+      let patientFirstName: string =
+        CONVERSATION_STARTER_PATIENT_FIRSTNAME_FALLBACK_PT_BR;
+      try {
+        const resolved = await resolvePatientFirstName(
+          admin,
+          tokenRow.patientId,
+        );
+        if (resolved && resolved.length > 0) {
+          patientFirstName = resolved;
+        }
+      } catch (err) {
+        // Narrow: programmer errors propagate, network/admin failures
+        // degrade to the fallback string.
+        if (
+          err instanceof TypeError ||
+          err instanceof ReferenceError ||
+          err instanceof SyntaxError
+        ) {
+          throw err;
+        }
+      }
+
+      // Audit: every view, not just first view. `actorId =
+      // session.user.id` (doctor's verified auth.uid).
+      const rawUserAgent = ctx.headers.get("user-agent") ?? "";
+      const truncatedUa =
+        rawUserAgent.length > 0 ? rawUserAgent.slice(0, 200) : null;
+      try {
+        await writeAuditLog(ctx.db, {
+          actorId: ctx.session.user.id,
+          actorType: "doctor",
+          event: "share_token.read",
+          resourceId: input.shareTokenId,
+          resourceType: "share_token",
+          metadata: {
+            phase: SHARE_TOKEN_READ_PHASE_POST_AUTH,
+            ...(truncatedUa !== null ? { userAgent: truncatedUa } : {}),
+          },
+        });
+      } catch (err) {
+        // Audit-write failure must not 500 the doctor's report; the
+        // patient's surveillance surface degrades by one row. Narrow:
+        // programmer errors propagate.
+        if (
+          err instanceof TypeError ||
+          err instanceof ReferenceError ||
+          err instanceof SyntaxError
+        ) {
+          throw err;
+        }
+        console.warn(
+          "[sharing.getConversationStarter] audit write failed — continuing",
+          err,
+        );
+      }
+
+      return {
+        cacheStatus,
+        payload,
+        patientFirstName,
+        sharedAt: tokenRow.createdAt,
+        expiresAt: tokenRow.expiresAt,
+        failureReason,
       };
     }),
 } satisfies TRPCRouterRecord;

@@ -1,5 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 
+import { buildConversationStarterPrompt } from "../prompts/conversation-starter.js";
+
 /**
  * Story 4.1 — LLM adapter for streamed Letter generation.
  *
@@ -73,9 +75,45 @@ export interface ConversationStarterInput {
   shareTokenId: string;
   patientId: string;
   visibleBiomarkers: { category: string }[];
+  /**
+   * Story 6.2 T7.3 — per-category top-3 observations snapshot, fetched
+   * by the consumer via a service-role window-function query. The
+   * adapter forwards these into the user prompt block. Stub adapter
+   * ignores them (canned payload).
+   */
+  observationsSnapshot?: ConversationStarterObservation[];
 }
 
+/**
+ * Story 6.2 — single observation row used in the user-prompt block.
+ * Pre-computed by the consumer (top-3 per visible category via window
+ * function); the adapter does NOT re-query.
+ */
+export interface ConversationStarterObservation {
+  category: string;
+  value: number;
+  /** ISO `yyyy-mm-dd` collection date. */
+  collectedAt: string;
+}
+
+/**
+ * Story 6.2 Q5 — discriminated adapter kind so the consumer can
+ * hard-gate the "DPA-signed" cache state on a typed property instead
+ * of a runtime string sniff. The boot-time selection in `index.ts`
+ * picks `"real"` (when `ANTHROPIC_API_KEY` is set) or `"stub"`
+ * (otherwise) and stamps the resulting adapter; the consumer reads
+ * `adapter.kind` BEFORE setting `cache.status = 'ready'` when
+ * `NODE_ENV === 'production'`.
+ */
+export type LLMAdapterKind = "real" | "stub";
+
 export interface LLMAdapter {
+  /**
+   * Q5 hard-gate marker. The consumer's "set ready" arm refuses to
+   * persist `ready` when this is `"stub"` and `NODE_ENV ===
+   * 'production'`. See `consumers/generate-conversation-starter.ts`.
+   */
+  readonly kind: LLMAdapterKind;
   streamLetter(args: {
     system: string;
     userPrompt: string;
@@ -107,10 +145,17 @@ export interface LLMAdapter {
   ): Promise<ConversationStarterPayload>;
 }
 
+/**
+ * Story 6.2 AC9 — Anthropic model used for the Conversation Starter.
+ * Centralised here so the adapter + test stub agree.
+ */
+const CONVERSATION_STARTER_MODEL = "claude-sonnet-4-5";
+
 export function createAnthropicAdapter(opts: { apiKey: string }): LLMAdapter {
   const client = new Anthropic({ apiKey: opts.apiKey });
 
   return {
+    kind: "real" as const,
     async streamLetter(args) {
       const startedAt = Date.now();
       let firstTokenMs: number | null = null;
@@ -155,11 +200,55 @@ export function createAnthropicAdapter(opts: { apiKey: string }): LLMAdapter {
         throw err;
       }
     },
-    // eslint-disable-next-line @typescript-eslint/require-await -- thin stub until Story 6.2
-    async generateConversationStarter(): Promise<ConversationStarterPayload> {
-      // TODO Story 6.2: implement real Conversation Starter generation
-      // (prompt + system message + ANVISA framing land with the DPA).
-      throw new Error("Not implemented — Story 6.2");
+    async generateConversationStarter(
+      input: ConversationStarterInput,
+    ): Promise<ConversationStarterPayload> {
+      // Story 6.2 AC9 — non-streaming `messages.create`. The
+      // Conversation Starter is one JSON payload, not a token stream.
+      // Prompt + system message live in
+      // `services/llm/src/prompts/conversation-starter.ts` so reviewers
+      // can sign off on the framing in isolation. Response is JSON-only
+      // (system message constrains); Zod validates at the consumer.
+      const { system, userPrompt } = buildConversationStarterPrompt({
+        visibleBiomarkers: input.visibleBiomarkers,
+        observationsSnapshot: input.observationsSnapshot ?? [],
+      });
+      const response = await client.messages.create({
+        model: CONVERSATION_STARTER_MODEL,
+        max_tokens: 1024,
+        system,
+        messages: [{ role: "user", content: userPrompt }],
+      });
+      const text = response.content
+        .map((c) => (c.type === "text" ? c.text : ""))
+        .join("");
+      let raw: unknown;
+      try {
+        raw = JSON.parse(text);
+      } catch (parseErr) {
+        // Anthropic returned non-JSON despite the system message —
+        // surface as an Anthropic.APIError shape so the consumer's
+        // narrow-catch arm marks the cache `failed` after retries.
+        // Wrap the original message for operator forensics.
+        throw new Anthropic.APIError(
+          500,
+          {
+            error: {
+              type: "invalid_response",
+              message: `non-JSON response: ${
+                parseErr instanceof Error ? parseErr.message : "unknown"
+              }`,
+            },
+          },
+          "non-JSON response",
+          {},
+        );
+      }
+      // The adapter trusts the consumer to Zod-validate via
+      // `conversationStarterPayloadSchema.parse(raw)`. Returning the
+      // unvalidated shape here would silently widen the contract; the
+      // consumer's wrapper handles validation + the `failed` mark.
+      return raw as ConversationStarterPayload;
     },
     async generateBiomarkerSuggestion(args) {
       const response = await client.messages.create({
@@ -192,6 +281,7 @@ export function createStubLLMAdapter(): LLMAdapter {
     "Sua história de saúde está sendo registrada — pode valer a pena " +
     "discutir os próximos passos com seu médico de confiança.";
   return {
+    kind: "stub" as const,
     async streamLetter(args) {
       const startedAt = Date.now();
       let firstTokenMs: number | null = null;

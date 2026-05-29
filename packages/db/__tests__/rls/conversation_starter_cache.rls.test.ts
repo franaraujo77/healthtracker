@@ -166,6 +166,24 @@ describe("conversation_starter_cache RLS", () => {
     expect(rows).toHaveLength(0);
   });
 
+  it("doctorWithActiveToken + status=failed sees ZERO rows (gate works)", async () => {
+    const patientId = crypto.randomUUID();
+    const { tokenId, cacheId } = await seedTokenWithCache({
+      patientId,
+      status: "failed",
+    });
+    const run = asIdentity("doctorWithActiveToken", {
+      patientId,
+      shareTokenId: tokenId,
+    });
+    const rows = await run(
+      (tx) => tx<{ id: string }[]>`
+      SELECT id FROM conversation_starter_cache WHERE id = ${cacheId}::uuid
+    `,
+    );
+    expect(rows).toHaveLength(0);
+  });
+
   it("doctorWithRevokedToken sees zero rows even when status=ready", async () => {
     const patientId = crypto.randomUUID();
     const { tokenId, cacheId } = await seedTokenWithCache({

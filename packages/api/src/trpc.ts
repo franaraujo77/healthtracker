@@ -101,8 +101,31 @@ export const protectedProcedure = t.procedure
     });
   });
 
-// Doctor procedure: authenticated via x-share-token header (no Supabase session).
-// Sets app.current_share_token_id instead of app.current_patient_id.
+// Doctor procedure: authenticated via x-share-token header AND a
+// verified Supabase auth session (Story 6.2 AC4 / T4).
+//
+// **Defense in depth, two gates:**
+//   1. `x-share-token` header — binds the RLS principal via
+//      `set_config('app.current_share_token_id', …)`.
+//   2. `ctx.session.user` — proves the request rides on a verified
+//      Supabase auth.users row (the doctor verified their magic-link).
+//
+// Without the session gate a malicious browser extension could mint
+// an `x-share-token` header on an UNAUTHENTICATED tab and read the
+// Conversation Starter payload — the GUC alone would still pass the
+// doctor-side RLS predicate. The session gate ensures every consumer
+// of `doctorProcedure` carries a doctor-attributable `auth.uid()` for
+// the `share_token.read` audit row's `actorId` (NOT the shareTokenId
+// sentinel that Story 6.1's pre-auth path used).
+//
+// Story 5.1 deliberately landed without the session gate (the only
+// consumer was a future story); Story 6.2 is the first production
+// consumer (`sharingRouter.getConversationStarter`) and adds it.
+//
+// Reviewers: confirm the resolver ALSO does a
+// `constantTimeEqualHmac` re-check against the persisted
+// `share_tokens.token_hmac` — the GUC proves "client claims X", the
+// HMAC compare proves "client holds the URL the patient signed for X".
 export const doctorProcedure = t.procedure
   .use(timingMiddleware)
   .use(async ({ ctx, next }) => {
@@ -113,6 +136,16 @@ export const doctorProcedure = t.procedure
         message: "SHARE_TOKEN_REQUIRED",
       });
     }
+    // Story 6.2 T4.1 — session gate. Without this, a missing or
+    // forged session pairs with a fabricated `x-share-token` header
+    // to read the doctor surface anonymously.
+    if (!ctx.session?.user) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: "DOCTOR_SESSION_REQUIRED",
+      });
+    }
+    const session = ctx.session;
     return ctx.db.transaction(async (tx) => {
       // See protectedProcedure above for why `set_config` is used here
       // instead of `SET LOCAL = ${value}`.
@@ -124,7 +157,7 @@ export const doctorProcedure = t.procedure
       );
       return next({
         ctx: {
-          session: ctx.session,
+          session: { ...session, user: session.user },
           db: tx,
           headers: ctx.headers,
           shareTokenId,
