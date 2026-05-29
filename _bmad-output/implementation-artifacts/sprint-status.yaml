@@ -1,5 +1,5 @@
 # generated: 2026-05-15
-# last_updated: 2026-05-28
+# last_updated: 2026-05-29
 # project: healthtracker
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-05-15
-last_updated: 2026-05-28
+last_updated: 2026-05-29
 # Stale-status cleanup: Story 3.5 (baseline migration) merged via PR #18
 # weeks ago (commit 56bedef); flipping `3-5-...: review → done` and
 # `epic-3: in-progress → done`. All 5 Epic 3 stories now done +
@@ -525,18 +525,18 @@ development_status:
   epic-4-retrospective: done
 
   # Epic 5: Patient Controls Who Sees Their Health Data
-  epic-5: in-progress
-  5-1-patient-configures-per-biomarker-sharing-with-a-named-doctor: review
-  5-2-patient-generates-a-time-limited-sharing-link-with-duration-selection: review
-  5-3-patient-views-the-access-log: review
-  5-4-patient-revokes-a-doctors-access-to-their-record: review
-  5-5-patient-exports-their-complete-health-record-as-json-or-pdf: review
-  5-6-patient-permanently-deletes-their-account-and-all-data: review
+  epic-5: done
+  5-1-patient-configures-per-biomarker-sharing-with-a-named-doctor: done
+  5-2-patient-generates-a-time-limited-sharing-link-with-duration-selection: done
+  5-3-patient-views-the-access-log: done
+  5-4-patient-revokes-a-doctors-access-to-their-record: done
+  5-5-patient-exports-their-complete-health-record-as-json-or-pdf: done
+  5-6-patient-permanently-deletes-their-account-and-all-data: done
   epic-5-retrospective: done
 
   # Epic 6: Doctor Can View a Patient's Conversation Starter
   epic-6: in-progress
-  6-1-doctor-views-pre-auth-landing-page-showing-patient-name-and-share-context: review
+  6-1-doctor-views-pre-auth-landing-page-showing-patient-name-and-share-context: done
   6-2-doctor-authenticates-via-magic-link-and-views-the-conversation-starter-report: backlog
   6-3-doctor-activates-a-professional-account-from-the-conversation-starter-view: backlog
   6-4-doctor-invites-a-patient-to-create-a-health-tracker-account: backlog
