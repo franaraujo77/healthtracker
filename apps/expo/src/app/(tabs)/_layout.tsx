@@ -1,6 +1,10 @@
 import { Tabs } from "expo-router";
 
-import { HISTORICO_TAB_LABEL_PT_BR } from "@healthtracker/validators";
+import {
+  ACCESS_LOG_TAB_LABEL_PT_BR,
+  COMPARTILHAR_TAB_LABEL_PT_BR,
+  HISTORICO_TAB_LABEL_PT_BR,
+} from "@healthtracker/validators";
 
 // SafeAreaView/Tabs native props can't read Tamagui tokens. These mirror
 // colorTokens.primaryTeal.light and colorTokens.backgroundPrimary.light.
@@ -27,6 +31,15 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="historico"
         options={{ title: HISTORICO_TAB_LABEL_PT_BR }}
+      />
+      <Tabs.Screen
+        name="compartilhar"
+        options={{ title: COMPARTILHAR_TAB_LABEL_PT_BR }}
+      />
+      {/* Story 5.3 — Acessos as 4th tab per UX-DR11. */}
+      <Tabs.Screen
+        name="acessos"
+        options={{ title: ACCESS_LOG_TAB_LABEL_PT_BR }}
       />
       <Tabs.Screen name="configuracoes" options={{ title: "Configurações" }} />
     </Tabs>

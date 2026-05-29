@@ -14,8 +14,21 @@ import { createClient } from "@healthtracker/auth";
  */
 
 export const LAB_UPLOADS_BUCKET = "lab-uploads";
+/** Story 5.5 — bucket for patient-initiated record exports. Private. */
+export const EXPORTS_BUCKET = "exports";
 
 let cachedClient: ReturnType<typeof createClient> | null = null;
+
+/**
+ * Story 6.1 — exported for the pre-auth resolver (`resolvePatientFirstName`).
+ * Same env reads + same caching as the storage client; reuses the
+ * single connection rather than spinning up a second admin client.
+ * The Supabase JS SDK's admin namespace is on every service-role
+ * client — storage + auth.admin share the underlying HTTP client.
+ */
+export function getSupabaseAdminClient(): ReturnType<typeof createClient> {
+  return getStorageClient();
+}
 
 function getStorageClient(): ReturnType<typeof createClient> {
   if (cachedClient) return cachedClient;
@@ -135,4 +148,40 @@ export async function statLabUploadObject(
   const rawMime = match.metadata?.mimetype;
   const contentType = typeof rawMime === "string" ? rawMime : null;
   return { sizeBytes: rawSize, contentType };
+}
+
+/**
+ * Story 5.5 — issues a short-lived signed download URL for a record-
+ * export artifact in the private `exports` bucket. TTL is `ttlSeconds`
+ * (validators ship `EXPORT_DOWNLOAD_TTL_SECONDS = 3600`).
+ *
+ * The path convention is `<patient_id>/<export_id>.<format>`; the
+ * `objectPath` column on `exports` carries this verbatim. Anti-pattern
+ * note (CLAUDE.md): clients MUST NOT cache the URL — every "Baixar"
+ * tap re-runs `getExport` to mint a fresh URL.
+ */
+export async function createExportDownloadSignedUrl(
+  objectPath: string,
+  ttlSeconds: number,
+  filename?: string,
+): Promise<string> {
+  const supabase = getStorageClient();
+  // Story 5.5 review-fix Patch #5 — `{ download: filename }` makes
+  // Supabase return `Content-Disposition: attachment; filename=...`
+  // on the GET. Cross-origin browsers honor the header even though
+  // they ignore the `<a download>` attribute.
+  const { data, error } = await supabase.storage
+    .from(EXPORTS_BUCKET)
+    .createSignedUrl(
+      objectPath,
+      ttlSeconds,
+      filename ? { download: filename } : undefined,
+    );
+  if (error) {
+    throw new Error(`createSignedUrl(exports) failed: ${error.message}`);
+  }
+  if (!data.signedUrl) {
+    throw new Error("createSignedUrl(exports) returned no signedUrl");
+  }
+  return data.signedUrl;
 }

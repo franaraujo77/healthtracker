@@ -13,9 +13,10 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { asIdentity } from "./helpers";
-import { serviceClient } from "./setup";
+import { cleanupSeededUsers, seedUser, serviceClient } from "./setup";
 
 const seededIds: string[] = [];
+const seededUserIds: string[] = [];
 
 async function seedObservation(args: {
   patientId: string;
@@ -23,6 +24,8 @@ async function seedObservation(args: {
   biomarkerName?: string;
   collectedAt?: string;
 }): Promise<string> {
+  await seedUser(args.patientId);
+  seededUserIds.push(args.patientId);
   const id = crypto.randomUUID();
   const { error } = await serviceClient.from("observations").insert({
     id,
@@ -43,9 +46,14 @@ async function seedObservation(args: {
 }
 
 afterEach(async () => {
-  if (seededIds.length === 0) return;
-  await serviceClient.from("observations").delete().in("id", seededIds);
-  seededIds.length = 0;
+  if (seededIds.length > 0) {
+    await serviceClient.from("observations").delete().in("id", seededIds);
+    seededIds.length = 0;
+  }
+  if (seededUserIds.length > 0) {
+    await cleanupSeededUsers(seededUserIds);
+    seededUserIds.length = 0;
+  }
 });
 
 describe("observations table RLS — Story 3.1 read surface", () => {

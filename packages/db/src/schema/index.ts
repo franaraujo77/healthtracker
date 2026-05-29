@@ -1,3 +1,4 @@
+export * from "./account";
 export * from "./audit";
 export * from "./consent";
 export * from "./extraction_review_queue";
@@ -6,5 +7,6 @@ export * from "./loinc_ref";
 export * from "./notification_preferences";
 export * from "./observations";
 export * from "./push_tokens";
+export * from "./sharing";
 export * from "./uploads";
 export * from "./users";

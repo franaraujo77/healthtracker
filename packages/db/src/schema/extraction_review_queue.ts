@@ -1,5 +1,7 @@
 import { pgEnum, pgTable, uniqueIndex } from "drizzle-orm/pg-core";
 
+import { Users } from "./users";
+
 /**
  * Story 2.3 — operator-only review queue for extracted fields that
  * fail the confidence gate (`< 0.85`) or fail LOINC resolution.
@@ -23,7 +25,11 @@ export const ExtractionReviewQueue = pgTable(
   "extraction_review_queue",
   (t) => ({
     id: t.uuid().notNull().primaryKey().defaultRandom(),
-    patientId: t.uuid().notNull(),
+    // Story 5.6 FK cascade audit.
+    patientId: t
+      .uuid()
+      .notNull()
+      .references(() => Users.id, { onDelete: "cascade" }),
     uploadId: t.uuid().notNull(),
     biomarkerName: t.text().notNull(),
     /** Original textual value from the source, NOT parsed. */

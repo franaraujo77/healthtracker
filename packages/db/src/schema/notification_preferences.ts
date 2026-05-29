@@ -1,5 +1,7 @@
 import { pgTable } from "drizzle-orm/pg-core";
 
+import { Users } from "./users";
+
 /**
  * Story 2.8 — per-patient push-notification preferences.
  *
@@ -18,7 +20,12 @@ import { pgTable } from "drizzle-orm/pg-core";
 export const NotificationPreferences = pgTable(
   "notification_preferences",
   (t) => ({
-    patientId: t.uuid().notNull().primaryKey(),
+    // Story 5.6 FK cascade audit — also the primary key (one row per patient).
+    patientId: t
+      .uuid()
+      .notNull()
+      .primaryKey()
+      .references(() => Users.id, { onDelete: "cascade" }),
     /** AC1 — Resultados prontos (extraction complete + extraction failed). */
     resultsReady: t.boolean().notNull().default(true),
     /** AC1 — Cartas prontas (Epic 4's narrative letters). */

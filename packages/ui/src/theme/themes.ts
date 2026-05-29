@@ -26,6 +26,13 @@ export const lightTheme = {
   errorBg: pick("errorBg", "light"),
   success: pick("success", "light"),
   backgroundDark: pick("backgroundDark", "light"),
+  shareToggleOn: pick("shareToggleOn", "light"),
+  shareToggleOff: pick("shareToggleOff", "light"),
+  shareToggleDisabledText: pick("shareToggleDisabledText", "light"),
+  accessLogActive: pick("accessLogActive", "light"),
+  accessLogExpired: pick("accessLogExpired", "light"),
+  accessLogRevoked: pick("accessLogRevoked", "light"),
+  accessLogNeutral: pick("accessLogNeutral", "light"),
 } as const;
 
 export const darkTheme = {
@@ -51,4 +58,11 @@ export const darkTheme = {
   errorBg: pick("errorBg", "dark"),
   success: pick("success", "dark"),
   backgroundDark: pick("backgroundDark", "dark"),
+  shareToggleOn: pick("shareToggleOn", "dark"),
+  shareToggleOff: pick("shareToggleOff", "dark"),
+  shareToggleDisabledText: pick("shareToggleDisabledText", "dark"),
+  accessLogActive: pick("accessLogActive", "dark"),
+  accessLogExpired: pick("accessLogExpired", "dark"),
+  accessLogRevoked: pick("accessLogRevoked", "dark"),
+  accessLogNeutral: pick("accessLogNeutral", "dark"),
 } as const;

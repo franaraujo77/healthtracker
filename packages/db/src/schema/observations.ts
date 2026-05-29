@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm";
 import { index, pgEnum, pgTable, uniqueIndex } from "drizzle-orm/pg-core";
 
+import { Users } from "./users";
+
 /**
  * Story 2.3 — `observations` schema (replaces the Story 1.5-era stub).
  *
@@ -29,7 +31,12 @@ export const Observations = pgTable(
   "observations",
   (t) => ({
     id: t.uuid().notNull().primaryKey().defaultRandom(),
-    patientId: t.uuid().notNull(),
+    // Story 5.6 FK cascade audit — `users(id)` cascades through
+    // `patient_id` (LGPD Art. 18 right-to-erasure).
+    patientId: t
+      .uuid()
+      .notNull()
+      .references(() => Users.id, { onDelete: "cascade" }),
     /**
      * Epic 2 retro F162 — NULLABLE. Manual BIA submissions (Story 2.7)
      * have no source upload; previously these rows used

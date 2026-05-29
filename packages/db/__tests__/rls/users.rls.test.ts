@@ -9,21 +9,24 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { asIdentity } from "./helpers";
-import { anonClient, serviceClient } from "./setup";
+import {
+  anonClient,
+  seedUser as baseSeedUser,
+  cleanupSeededUsers,
+} from "./setup";
 
 const seededIds: string[] = [];
 
 async function seedUser(id?: string): Promise<string> {
   const rowId = id ?? crypto.randomUUID();
-  const { error } = await serviceClient.from("users").insert({ id: rowId });
-  if (error) throw new Error(`seed failed: ${error.message}`);
+  await baseSeedUser(rowId);
   seededIds.push(rowId);
   return rowId;
 }
 
 afterEach(async () => {
   if (seededIds.length === 0) return;
-  await serviceClient.from("users").delete().in("id", seededIds);
+  await cleanupSeededUsers(seededIds);
   seededIds.length = 0;
 });
 

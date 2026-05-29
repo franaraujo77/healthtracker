@@ -1,5 +1,7 @@
 import { pgTable, uniqueIndex } from "drizzle-orm/pg-core";
 
+import { Users } from "./users";
+
 /**
  * Story 2.5 — `push_tokens` table.
  *
@@ -18,7 +20,11 @@ export const PushTokens = pgTable(
   "push_tokens",
   (t) => ({
     id: t.uuid().notNull().primaryKey().defaultRandom(),
-    patientId: t.uuid().notNull(),
+    // Story 5.6 FK cascade audit.
+    patientId: t
+      .uuid()
+      .notNull()
+      .references(() => Users.id, { onDelete: "cascade" }),
     /** Client-generated stable UUID per install (kept in expo-secure-store). */
     deviceId: t.uuid().notNull(),
     /** The `ExponentPushToken[...]` string from Expo. */

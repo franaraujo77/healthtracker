@@ -13,7 +13,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { asIdentity } from "./helpers";
-import { serviceClient } from "./setup";
+import {
+  seedUser as baseSeedUser,
+  cleanupSeededUsers,
+  serviceClient,
+} from "./setup";
 
 interface AuditRow {
   id: string;
@@ -21,6 +25,13 @@ interface AuditRow {
 }
 
 const seededAuditIds: string[] = [];
+const seededUserIds: string[] = [];
+
+async function seedUser(userId: string): Promise<string> {
+  await baseSeedUser(userId);
+  seededUserIds.push(userId);
+  return userId;
+}
 
 async function seedAudit(actorId: string): Promise<string> {
   const id = crypto.randomUUID();
@@ -39,9 +50,14 @@ async function seedAudit(actorId: string): Promise<string> {
 }
 
 afterEach(async () => {
-  if (seededAuditIds.length === 0) return;
-  await serviceClient.from("audit_log").delete().in("id", seededAuditIds);
-  seededAuditIds.length = 0;
+  if (seededAuditIds.length > 0) {
+    await serviceClient.from("audit_log").delete().in("id", seededAuditIds);
+    seededAuditIds.length = 0;
+  }
+  if (seededUserIds.length > 0) {
+    await cleanupSeededUsers(seededUserIds);
+    seededUserIds.length = 0;
+  }
 });
 
 describe("audit_log RLS isolation (append-only)", () => {
@@ -118,6 +134,184 @@ describe("audit_log RLS isolation (append-only)", () => {
       .select("event")
       .eq("actor_id", patientId);
     expect(data?.every((r) => r.event === "patient.created")).toBe(true);
+  });
+
+  // ---------------------------------------------------------------------
+  // Story 5.3 — share-token-scoped doctor-actor visibility (AC6, AC7).
+  // ---------------------------------------------------------------------
+
+  it("correctPatient sees share-token-scoped doctor-actor audit rows (Story 5.3)", async () => {
+    // Patient A owns a share_token; a doctor's actor_id writes an
+    // audit row scoped to that token. Under the extended
+    // `audit_log_select_own` policy, patient A's `app.current_patient_id`
+    // context MUST surface that row.
+    const patientId = crypto.randomUUID();
+    const doctorId = crypto.randomUUID();
+    const inviteId = crypto.randomUUID();
+    const tokenId = crypto.randomUUID();
+    const auditId = crypto.randomUUID();
+
+    await seedUser(patientId);
+
+    const { error: e1 } = await serviceClient.from("pending_invites").insert({
+      id: inviteId,
+      patient_id: patientId,
+      display_name: "Dra. T",
+      identifier_hash: "t".repeat(64),
+    });
+    if (e1) throw new Error(`invite seed failed: ${e1.message}`);
+
+    const { error: e2 } = await serviceClient.from("share_tokens").insert({
+      id: tokenId,
+      token_hash: `hash-${tokenId}`,
+      token_hmac: `hmac-${tokenId}`,
+      patient_id: patientId,
+      invite_id: inviteId,
+      expires_at: new Date(Date.now() + 7 * 86_400_000).toISOString(),
+      revoked_at: null,
+      duration: "7d",
+    });
+    if (e2) throw new Error(`share_tokens seed failed: ${e2.message}`);
+
+    const { error: e3 } = await serviceClient.from("audit_log").insert({
+      id: auditId,
+      actor_id: doctorId,
+      actor_type: "doctor",
+      event: "share_token.read",
+      resource_id: tokenId,
+      resource_type: "share_token",
+      metadata: {},
+    });
+    if (e3) throw new Error(`audit seed failed: ${e3.message}`);
+    seededAuditIds.push(auditId);
+
+    try {
+      const run = asIdentity("correctPatient", { patientId });
+      const rows = await run(
+        (tx) =>
+          tx<
+            { id: string }[]
+          >`SELECT id FROM audit_log WHERE id = ${auditId}::uuid`,
+      );
+      expect(rows.map((r) => r.id)).toContain(auditId);
+    } finally {
+      await serviceClient.from("share_tokens").delete().eq("id", tokenId);
+      await serviceClient.from("pending_invites").delete().eq("id", inviteId);
+    }
+  });
+
+  it("wrongPatient does NOT see another patient's share-token-scoped rows", async () => {
+    const patientId = crypto.randomUUID();
+    const otherPatientId = crypto.randomUUID();
+    const doctorId = crypto.randomUUID();
+    const inviteId = crypto.randomUUID();
+    const tokenId = crypto.randomUUID();
+    const auditId = crypto.randomUUID();
+
+    await seedUser(patientId);
+    await seedUser(otherPatientId);
+
+    await serviceClient.from("pending_invites").insert({
+      id: inviteId,
+      patient_id: patientId,
+      display_name: "Dra. T",
+      identifier_hash: "t".repeat(64),
+    });
+    await serviceClient.from("share_tokens").insert({
+      id: tokenId,
+      token_hash: `hash-${tokenId}`,
+      token_hmac: `hmac-${tokenId}`,
+      patient_id: patientId,
+      invite_id: inviteId,
+      expires_at: new Date(Date.now() + 7 * 86_400_000).toISOString(),
+      revoked_at: null,
+      duration: "7d",
+    });
+    await serviceClient.from("audit_log").insert({
+      id: auditId,
+      actor_id: doctorId,
+      actor_type: "doctor",
+      event: "share_token.read",
+      resource_id: tokenId,
+      resource_type: "share_token",
+      metadata: {},
+    });
+    seededAuditIds.push(auditId);
+
+    try {
+      const run = asIdentity("wrongPatient", {
+        patientId: otherPatientId,
+        otherPatientId,
+      });
+      const rows = await run(
+        (tx) =>
+          tx<
+            { id: string }[]
+          >`SELECT id FROM audit_log WHERE id = ${auditId}::uuid`,
+      );
+      expect(rows).toHaveLength(0);
+    } finally {
+      await serviceClient.from("share_tokens").delete().eq("id", tokenId);
+      await serviceClient.from("pending_invites").delete().eq("id", inviteId);
+    }
+  });
+
+  it("doctor connection (no app.current_patient_id) sees zero audit rows", async () => {
+    // The audit_log policy is keyed off `app.current_patient_id`; a
+    // doctor connection (`app.current_share_token_id` only) MUST NOT
+    // see any audit_log row even when that doctor was the actor.
+    // Doctors don't browse the audit_log surface.
+    const patientId = crypto.randomUUID();
+    const doctorId = crypto.randomUUID();
+    const inviteId = crypto.randomUUID();
+    const tokenId = crypto.randomUUID();
+    const auditId = crypto.randomUUID();
+
+    await seedUser(patientId);
+
+    await serviceClient.from("pending_invites").insert({
+      id: inviteId,
+      patient_id: patientId,
+      display_name: "Dra. T",
+      identifier_hash: "t".repeat(64),
+    });
+    await serviceClient.from("share_tokens").insert({
+      id: tokenId,
+      token_hash: `hash-${tokenId}`,
+      token_hmac: `hmac-${tokenId}`,
+      patient_id: patientId,
+      invite_id: inviteId,
+      expires_at: new Date(Date.now() + 7 * 86_400_000).toISOString(),
+      revoked_at: null,
+      duration: "7d",
+    });
+    await serviceClient.from("audit_log").insert({
+      id: auditId,
+      actor_id: doctorId,
+      actor_type: "doctor",
+      event: "share_token.read",
+      resource_id: tokenId,
+      resource_type: "share_token",
+      metadata: {},
+    });
+    seededAuditIds.push(auditId);
+
+    try {
+      const run = asIdentity("doctorWithActiveToken", {
+        patientId,
+        shareTokenId: tokenId,
+      });
+      const rows = await run(
+        (tx) =>
+          tx<
+            { id: string }[]
+          >`SELECT id FROM audit_log WHERE id = ${auditId}::uuid`,
+      );
+      expect(rows).toHaveLength(0);
+    } finally {
+      await serviceClient.from("share_tokens").delete().eq("id", tokenId);
+      await serviceClient.from("pending_invites").delete().eq("id", inviteId);
+    }
   });
 
   it("DELETE on own rows is denied (no DELETE policy → append-only)", async () => {

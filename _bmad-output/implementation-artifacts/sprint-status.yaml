@@ -1,5 +1,5 @@
 # generated: 2026-05-15
-# last_updated: 2026-05-17
+# last_updated: 2026-05-28
 # project: healthtracker
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,225 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-05-15
-last_updated: 2026-05-25
+last_updated: 2026-05-28
+# Stale-status cleanup: Story 3.5 (baseline migration) merged via PR #18
+# weeks ago (commit 56bedef); flipping `3-5-...: review → done` and
+# `epic-3: in-progress → done`. All 5 Epic 3 stories now done +
+# epic-3-retrospective already done (2026-05-23 with 3.5 addendum
+# 2026-05-27). Epic 3 fully closed.
+# Story 5.6 implementation + R1 review complete → review. PR #56 (stacked).
+# Two convergent CRITICAL findings caught: (1) account.deletion_failed
+# audit used raw patientId after step-2 pseudonymized everything else
+# (re-leak of re-identification key); (2) Storage list() not paginated
+# — long-time patients with >100 files would silently orphan all but
+# the first page (LGPD Art. 18 violation). Both fixed via pseudonym-
+# uuid usage in failed-audit + paginated list/remove loop (limit 1000;
+# offset stride). Plus 7 more patches: 23505 catch now includes
+# 'complete' status (idempotent on race-to-complete); new
+# account.deletion_retry audit kind covers retries 1-2 (was silent);
+# auth.admin 401/403 → UnrecoverableAuthError sentinel skips retry
+# budget; web router.push → replace (Back-button regression);
+# batchSize:1 redundancy removed; CLAUDE.md "Account deletion
+# discipline" appendix added; AC3 prose updated to match
+# implementation. 2 decisions: pg-boss job cleanup at step 4
+# (DELETE FROM pgboss.job + pgboss.archive WHERE data->>'patientId';
+# best-effort; logs rowCount); final-attempt failed-audit pre-emitted
+# BEFORE auth.admin.deleteUser (forensics survives partial auth
+# failure). Subagent API overload required manual patch application.
+# typecheck 17/17; lint 15/15; api test:unit 220/220; llm-service
+# test:unit 33/33.
+# Story 5.6 spec created → ready-for-dev. Stacks on 5.1-5.5 / PR #56.
+# LGPD Art. 18 right-to-erasure. ADRs: async pg-boss + immediate
+# client signout (no waiting on worker); SHA-256 pseudonymization
+# of audit_log via ACCOUNT_DELETION_SALT env (deterministic; salt
+# rotation invalidates linkability across boundary — documented);
+# EXCLUIR magic-word + 30s visible cooldown (Story 5.4 deferred-
+# server-write pattern, longer window because irreversible).
+# NEW account_deletion_requests table (patient_id deliberately NO
+# FK — ledger row outlives the user). NEW accountRouter
+# .requestDeletion + getDeletionStatus. NEW services/llm consumer
+# generate-account-deletion (pseudonymize → Storage cleanup →
+# cascade-delete public → auth.admin.deleteUser → status='complete';
+# audit emit BEFORE auth admin call so partial failure is traced).
+# 3 new audit kinds (account.deletion_requested/completed/failed);
+# ACCESS_LOG_EVENT_KINDS extended with .deletion_requested. FK
+# cascade audit prerequisite (T2): inventory all FKs to users(id)
+# and add onDelete: cascade where missing. NEW env
+# ACCOUNT_DELETION_SALT (64-byte base64, prod-required). Spec
+# AC7 deviates from spec text — "Conta não encontrada" specific
+# error is account-enumeration risk; keep Supabase default
+# Invalid login credentials.
+# Story 5.5 implementation + R1 review complete → review. PR #56 (stacked).
+# Headline R1 fixes: partial unique index exports_active_uq +
+# narrow 23505 catch in requestExport (concurrent double-tap dedup
+# server-side; no duplicate audit/Storage); LEFT JOIN loinc_ref +
+# coalesce on biomarker_name_pt in worker SELECT (spec-faithful
+# pt-BR labels in JSON/PDF); 5-min client-side polling timeout +
+# stuck-state UX (Tier-2 "Tentar novamente" when worker silent);
+# new `expired` flag on getExport output → screen renders
+# EXPORT_EXPIRED_PT_BR + retry CTA; programmer-error final-attempt
+# now persists status=failed + export.failed audit; Storage object
+# cleanup on tx/upload failure (orphan prevention); record.exported
+# .metadata.requestedAt sourced from exports.requested_at (resolver
+# time, not worker time); cross-origin <a download> filename
+# preserved via createSignedUrl({download: filename}) Content-
+# Disposition; filename uses pollQuery.data.format (server
+# authoritative); parseNumericOrNull preserves precision for
+# value_numeric; eager getSupabaseClient() at worker boot. CLAUDE
+# .md "Export discipline" appendix added. typecheck 17/17;
+# lint 15/15; api test:unit 220/220; llm-service test:unit 26/26
+# (+1 programmer-error final-attempt test).
+# Story 5.5 spec created → ready-for-dev. Stacks on 5.1+5.2+5.3+5.4 / PR #56.
+# LGPD Art. 18 data-portability surface. ADRs: async pg-boss + Supabase
+# Storage signed URL (NO bytes in tRPC); @react-pdf/renderer in
+# services/llm (reuses persistent Railway worker; no headless browser);
+# life_events deferred to Epic 7 (JSON empty-array slot; PDF empty-
+# state section). NEW exports table (id, patient_id, format ENUM
+# json/pdf, status ENUM queued/generating/ready/failed, object_path,
+# expires_at default now()+24h). NEW sharingRouter.requestExport
+# (NO premium gate — LGPD exception) + getExport (returns short-
+# lived signed URL with 1h TTL; refetches every 2s for polling).
+# NEW services/llm consumer generate-export + RecordExportPdf.tsx
+# (Lora + DM Sans). NEW record.exported / export.queued / generated
+# / failed audit constants. ACCESS_LOG_EVENT_KINDS extended with
+# record.exported. NEW Configurações > Dados > Exportar registro
+# screen Expo + web, with ExportProgressCard polling UX.
+# Story 5.4 implementation + R1 review complete → review. PR #56 (stacked).
+# Both Blind Hunter and Edge Case Hunter converged on missing onError
+# handler as the LGPD-relevant headline. Patched: revokeMutation onError
+# silently treats 404 as "already revoked elsewhere"; surfaces
+# REVOKE_FAILED_PT_BR toast on network/5xx. UPDATE gained
+# `WHERE id=? AND revoked_at IS NULL RETURNING revoked_at` defense-in-
+# depth (single Postgres clock for DB column + audit metadata +
+# mutation output — eliminates clock drift). UndoToast `undoLabel:
+# string | null` added; cancel-confirmation surface passes null →
+# fixes the :undone:undone infinite loop. Cleanup-on-unmount snapshots
+# keys before iterating (Map-mutation-during-iteration future-proof).
+# revokingTokenIds cleared BEFORE invalidateQueries (no more
+# Revogando→Revogado→Revogando flicker). AccessLogTokenStatus enum
+# split into Server (Zod output schema) + Client (extends with
+# revoked-pending) — closes the leak vector. Revoke button drops
+# `expanded` gate (visible in compact view; more discoverable).
+# progressPct NaN guard; .output() wired on mutation; CLAUDE.md
+# "Revoke discipline" appendix added documenting deferred-server-
+# write + web beforeunload trade-off accepted (decision A: row stays
+# active on unload, patient simply re-revokes).
+# Story 5.4 spec created → ready-for-dev. Stacks on 5.1+5.2+5.3 / PR #56.
+# Patient-side revoke flow. ADRs: deferred-server-write 5s undo
+# (cancelled revokes never hit DB — no audit noise); doctor-side
+# 403 + share_token.rejected deferred to Epic 6 (Story 5.1's
+# verifyShareToken is already revoked-aware); revoked-pending UI
+# state owned client-side only. NEW protectedProcedure.mutation
+# sharingRouter.revokeShareToken (tx + SELECT FOR UPDATE +
+# share_token.revoked audit). NEW UndoToast + RevokeConfirmDialog
+# Tamagui components. AccessLogItem gains "revoked-pending"
+# tokenStatus + onRevokePress prop. Cleanup on unmount fires
+# pending revokes (don't lose user-confirmed actions). No new
+# schema, no new RLS files, no new env vars. Audit constant
+# SHARING_AUDIT_TOKEN_REVOKED added.
+# Story 5.3 implementation + R1 review complete → review. PR #56 (stacked).
+# R1 verified F18 RLS-bypass concern was safe (protectedProcedure
+# wraps tx + set_config(app.current_patient_id, ...)). Headline fixes:
+# throttled tab-focus refetch (30s; no more pagination wipe on quick
+# tab switches; named ACCESS_LOG_REFETCH_THROTTLE_MS); redundant
+# query.refetch() replaced with queryClient.invalidateQueries;
+# dead 'conversation_starter_cache' resource_type branch removed from
+# RLS + resolver (verified no production emitter writes it; all use
+# 'share_token'); hasJoinedToken derived from st.id IS NOT NULL
+# (fixes false-positive "sem prazo" badge when share_token deleted);
+# upgradeRequired flip gates accumulated:=[] (no stranded rows under
+# the prompt); displayName?.trim() || "Você" everywhere (empty-string
+# header guard); metadata.biomarkerCategories filter before map
+# (defensive against historical malformed rows); suppressed-kind
+# docblock realigned with code (no expand path; spec AC2 updated);
+# (0 alterações) copy edge case handled; RLS test fixtures seed
+# users rows before share_tokens. typecheck 17/17; lint 15/15;
+# api test:unit 212/212 (+2 copy cases).
+# Story 5.3 spec created → ready-for-dev. Stacks on 5.1 + 5.2 / PR #56.
+# Read-only Access Log surface. ADR: displayName-only (no raw email);
+# all share-related event kinds in scope; access_log is a logical view
+# onto audit_log (no new table). RLS extension on custom_rls_audit_log
+# .sql: patient sees rows where they are actor OR where resource_id
+# points at one of their share_tokens (closes the doctor-actor-row
+# blind spot). NEW protectedProcedure sharingRouter.listAccessLog
+# (cursor pagination with (created_at, id) tuple compare for same-ms
+# stability; event-kind allowlist filter; inline premium check returns
+# upgradeRequired:true rather than throwing). NEW AccessLogItem +
+# AccessLogList components in @healthtracker/ui (compact/expanded
+# variants, 4 token-status badges incl. sem prazo, no red tokens).
+# NEW formatRelativeTimePtBr + formatAbsolutePtBr helpers in
+# @healthtracker/validators. Acessos tab wired Expo + web (4th tab
+# per UX-DR11). 4 new RLS test cases on audit_log.
+# Story 5.2 implementation + R1 review complete → review. PR #56 (stacked).
+# Headline R1 fixes: (a) CRITICAL configureBiomarkers SELECT FOR UPDATE
+# now handles nullable expires_at — previously silently rejected every
+# no_expiry token; (b) CRITICAL getShareUrl now 404s on expired tokens —
+# no more usable-after-expiry HMAC leak; (c) CRITICAL createShareToken
+# TOCTOU shielded via partial unique index share_tokens_patient_invite
+# _active_uq + narrow 23505 catch with re-SELECT; (d) duration persisted
+# as pgEnum column on share_tokens (deriveDurationFromExpiresAt deleted —
+# resumo reads authoritative value); (e) consumer retry-budget-aware
+# failure (rethrow until budget exhausted, persist failed only on last
+# attempt); (f) isEconnReset matches Node undici TypeError fetch-failed;
+# (g) getDraftConfig demoted protected (matches getShareUrl); (h) pg-boss
+# singleton_key includes retry generation; (i) WEB_APP_URL eager validate
+# at module load. Cache.expires_at dead column removed. RLS test
+# matrix extended (share_token_biomarkers noExpiry case). 4 new
+# tests; 7 patches landed in same fix-up commit. typecheck 17/17;
+# lint 15/15; api test:unit 181 PASS (+4); llm-service test:unit 20.
+# Story 5.2 spec created → ready-for-dev. Stacks on Story 5.1 / PR #56
+# per user's stacked-PR convention. Lands the real duration picker
+# (replacing Story 5.1's auto-fire placeholder), "Sem prazo" extra-
+# confirmation modal, and the load-bearing Conversation Starter
+# pre-gen pipeline. ADR resolutions locked: share_tokens.expires_at
+# becomes nullable (NULL = no expiry; RLS predicate updated to
+# `IS NULL OR > now()`); NEW conversation_starter_cache table
+# (patient_id, share_token_id, status, payload jsonb, expires_at)
+# with patient + doctor RLS principals; NEW pg-boss queue
+# conversation_starter.generate hosted in services/llm; stub LLMAdapter
+# method returns canned payload until Epic 6 prompt + DPA land.
+# Three NEW audit kinds: conversation_starter.queued / generated /
+# failed. createShareToken extended to require duration: '24h'|'7d'|'30d'
+# |'no_expiry' (no server default — screen owns "7d" pre-select).
+# NEW sharingRouter.getShareUrl procedure (HMAC URL composition kept
+# server-side). NEW components: DurationOption + NoExpiryConfirmDialog.
+# Story 5.1 R1 fix-up complete → review. PR #56 open.
+# Story 5.1 implementation + R1 review complete → review. PR #56 open.
+# Round-1 adversarial review (Blind Hunter + Edge Case Hunter +
+# Acceptance Auditor) found and patched 20 issues. Headline fixes:
+# (a) createShareToken + configureBiomarkers now wrapped in
+# ctx.db.transaction with SELECT FOR UPDATE on share_tokens to close
+# TOCTOU; (b) createShareToken idempotent on (patient_id, invite_id)
+# via partial unique index share_tokens_invite_active_uq; (c) Concluir
+# handler awaits flushAsync() before navigation (no fire-and-forget);
+# (d) HMAC dev fallback deny-by-default outside development/test
+# (closes staging/preview leak); (e) email identifiers lowercased
+# before hashing (preserves AC7 idempotency); (f) configureBiomarkers
+# rejects unknown categories + duplicate-in-batch via Zod refine;
+# (g) neutral copy "compartilhada com {displayName}" replaces gendered
+# "oculta do Dr." (fixes masculine-biomarker grammar + double-Dr bugs);
+# (h) raw LOINC no longer surfaced as patient label — resolver returns
+# {category, label}; (i) RLS test matrices filled (serviceRole everywhere
+# + expired/revoked/cross-token doctor on biomarkers junction). Deferred
+# 8 items to deferred-work.md (N+1 in listShares, clock skew, migration
+# guard, premium-downgrade revoke, pre-existing hex literals, RLS
+# role-bypass risk, variant prop unused, lock emoji). typecheck 17/17;
+# lint 15/15; api test:unit 170/170 PASS.
+# Story 5.1 spec created → ready-for-dev. Epic 5 kickoff (epic-5: backlog → in-progress).
+# Lands the load-bearing data model for the whole Epic-5 surface: pending_invites,
+# share_tokens, share_token_biomarkers (junction table — ADR locked, NOT JSONB).
+# NEW tRPC router: sharingRouter (createPendingInvite, createShareToken,
+# configureBiomarkers, getDraftConfig, listShares). NEW audit kinds:
+# pending_invite.created, share_token.created, sharing.configured. NEW UI:
+# ShareBiomarkerToggle (packages/ui), compartilhar/* expo + web routes.
+# RLS principal model for doctor access: SET LOCAL app.current_share_token_id
+# (mirrors current app.current_patient_id). pending_invites.resolved_user_id
+# nullable to unblock Epic 6 doctor magic-link flow before doctor signup.
+# NEW env: SHARE_TOKEN_HMAC_SECRET (dev fallback; prod-gated).
+# Migration deferred to last story of Epic 5 (per user direction, mirrors
+# Story 3.5 / 4.4 batched-migration pattern). Dev path: pnpm db:push +
+# psql -f packages/db/policies/custom_rls_share_*.sql. Sharing is
+# premium-tier-gated (NFR-S3) — reuses premiumProcedure from Story 4.1.
 # Story 4.1 spec created → ready-for-dev. Epic 4 kickoff (epic-4: backlog → in-progress).
 # Story 3.4 spec created → ready-for-dev. Final story of Epic 3.
 # Adds offline-cached Fingerprint via `@tanstack/react-query-persist-client`
@@ -161,7 +379,7 @@ development_status:
   epic-2-retrospective: done
 
   # Epic 3: Patient Can See Their Health Fingerprint Over Time
-  epic-3: in-progress
+  epic-3: done
   # round-1 patches applied: R1-P231 wire `historicoDrawDetailRoute`
   # producer (query-param coupling), R1-P234 degrade bad
   # confidenceScore to 0 instead of dropping the row, R1-P236 RN
@@ -245,7 +463,7 @@ development_status:
   # notification_preferences + Epic 3 read-side objects). Validated against
   # dev DB (jhklzsdxlrvyprysfeku); production project (wkjwnwwzsulkfzpaihkp)
   # is empty and will receive baseline on first `supabase-deploy` workflow run.
-  3-5-generate-baseline-supabase-migration-covering-epics-0-to-3-schema: review
+  3-5-generate-baseline-supabase-migration-covering-epics-0-to-3-schema: done
   epic-3-retrospective: done
 
   # Epic 4: Patient Receives a Personal Health Narrative
@@ -307,18 +525,18 @@ development_status:
   epic-4-retrospective: done
 
   # Epic 5: Patient Controls Who Sees Their Health Data
-  epic-5: backlog
-  5-1-patient-configures-per-biomarker-sharing-with-a-named-doctor: backlog
-  5-2-patient-generates-a-time-limited-sharing-link-with-duration-selection: backlog
-  5-3-patient-views-the-access-log: backlog
-  5-4-patient-revokes-a-doctors-access-to-their-record: backlog
-  5-5-patient-exports-their-complete-health-record-as-json-or-pdf: backlog
-  5-6-patient-permanently-deletes-their-account-and-all-data: backlog
-  epic-5-retrospective: optional
+  epic-5: in-progress
+  5-1-patient-configures-per-biomarker-sharing-with-a-named-doctor: review
+  5-2-patient-generates-a-time-limited-sharing-link-with-duration-selection: review
+  5-3-patient-views-the-access-log: review
+  5-4-patient-revokes-a-doctors-access-to-their-record: review
+  5-5-patient-exports-their-complete-health-record-as-json-or-pdf: review
+  5-6-patient-permanently-deletes-their-account-and-all-data: review
+  epic-5-retrospective: done
 
   # Epic 6: Doctor Can View a Patient's Conversation Starter
-  epic-6: backlog
-  6-1-doctor-views-pre-auth-landing-page-showing-patient-name-and-share-context: backlog
+  epic-6: in-progress
+  6-1-doctor-views-pre-auth-landing-page-showing-patient-name-and-share-context: review
   6-2-doctor-authenticates-via-magic-link-and-views-the-conversation-starter-report: backlog
   6-3-doctor-activates-a-professional-account-from-the-conversation-starter-view: backlog
   6-4-doctor-invites-a-patient-to-create-a-health-tracker-account: backlog

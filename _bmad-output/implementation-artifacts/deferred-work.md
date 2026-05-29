@@ -339,3 +339,61 @@
 ## Story 2.8 — round-3 review deferral (F177)
 
 - **F177** Auto-render AC4 OS-denied banner via `expo-notifications` permission check. Spec text mandates an alarmist banner when permission is denied; current code always renders a neutral CTA. F135 wires the permission status; F177 tracks the conditional banner copy on top of that.
+
+## Deferred from: code review of story-5.1 (2026-05-26)
+
+- N+1 `biomarkerCount` correlated subquery in `listShares` — acceptable for Story 5.1 cardinality; revisit in Story 5.4 once revocation listing grows.
+- Clock-skew tolerance on `expires_at > now()` — DB-clock vs worker-clock; infra concern beyond Story 5.1.
+- `pnpm db:push` without `psql -f` leaves dev RLS unpatched — Story 5.7 (last Epic 5) lands the prod migration; add a `db:push` post-hook then.
+- Premium downgrade doesn't auto-revoke active shares — Story 5.4 (revoke) / Epic 5 retro territory.
+- Tab layout hex literals in `apps/expo/src/app/(tabs)/_layout.tsx:10-12` — pre-existing; not introduced by this story.
+- `DATABASE_URL` role-bypass risk if `postgres` superuser used — Epic 0 connection-string discipline; broader than Story 5.1.
+- `ShareBiomarkerToggle` `variant` prop accepted but unused — Story 5.2 will branch on `setup` vs `edit`.
+- Lock-icon uses emoji `🔒` rather than a vector icon — cosmetic; Story 5.2 polish.
+
+## Deferred from: code review of story-5.2 (2026-05-26)
+
+- Web `navigator.share` omits `text` vs Expo includes `message` — cosmetic platform asymmetry.
+- Empty visible-biomarkers cache payload — Story 6.2 (doctor-side render) territory.
+- Premium downgrade between create and worker run — LGPD consent at create-time stands.
+- Web/Expo `trpcClient` pattern asymmetry — cosmetic.
+- `DurationOption.value` prop only used in testID — pre-existing convention.
+- `DURATION_LABEL_PT_BR_FN("no_expiry")` lowercase vs sentence-case in DURATION_OPTIONS — intentional for in-sentence flow.
+
+## Deferred from: code review of story-5.3 (2026-05-26)
+
+- Cursor decoder accepts loose ISO strings — server-issued; worst case is empty page.
+- Intl.DateTimeFormat pt-BR Hermes feature-test — Expo SDK 54 has full-ICU; precedent confirmed.
+- AccessLogItem accessibilityRole="button" vs spec "listitem" — dev's choice defensible (tappable).
+- AccessLogList "Atualizar" only renders on error — acceptable for v1.
+- AC3 biomarker-config click-through — needs Story 5.4's read-only mode.
+- T5.2 integration / T5.4 snapshots / T5.5 behavior tests — UI runner not wired; Docker unavailable.
+- docs/rls-review-checklist.md doesn't exist in repo — comment block in policy file documents instead.
+
+## Deferred from: code review of story-5.4 (2026-05-27)
+
+- AC7 cosmetic: linear progress bar + setInterval vs spec's circular CSS-keyframe ring — Story 5.x polish.
+- Expo Router tab-suspension: timer runs offscreen during 5s window — server-write correct; visual bar may not be visible.
+- Multi-revoke older toasts silently replaced — toast-queue is Story 5.x polish.
+- `onCancel` double-fire on RevokeConfirmDialog — idempotent; harmless today.
+- UndoToast durationMs effect-dep re-run — constant from validators in practice.
+- Integration test it.todo() coverage of FOR UPDATE / concurrent / cross-patient — matches Story 5.x precedent.
+- VoiceOver `alert` role focus-stealing UX — Story 5.x polish.
+- Android hardware back on RevokeConfirmDialog — Tamagui Dialog default; verify in manual QA.
+
+## Deferred from: code review of story-5.5 (2026-05-27)
+
+- PDF Lora/DM Sans font bundle — no font files in repo today; uses Helvetica. Story 5.x polish.
+- Multi-device export discovery — no listMyExports query; patient can't see other-device in-flight exports.
+- PDF wrap={false} overflow on date groups with hundreds of biomarkers — typical scale OK.
+- exportFilename UTC date drift on midnight-boundary downloads — cosmetic.
+- JSON BOM design — consumers must strip before JSON.parse (jq/python accept BOM; some tools don't).
+- Reference range columns SELECTed but discarded from JSON — minor waste.
+- Storage object cleanup post-expires_at — Supabase Storage lifecycle rule OR scheduled record.export.cleanup job.
+- Test non-null assertion fragility in generate-export.test.ts — defensive guard would harden.
+- Drive-by lint fix in biomarker-suggestion.test.ts (5 unnecessary casts) — type-safe, pre-existing debt.
+
+## Deferred from: code review of story-6.1 (2026-05-28)
+
+- Pre-auth landing DoS surface (`/m/<random>.<random>` audit-row spam) — mitigation lands at the Next.js edge / Vercel WAF, NOT in the resolver. Keeping the resolver dumb keeps the audit promise honest. Future infra story (Epic 6.x).
+- Malformed-segment audit rows are service-role-visible only (no patient owns the sentinel `resource_id`). Surfacing per-patient probes would require a per-patient short-code in the URL — not in scope for Epic 6. R1-H1 trade-off documented in `writePreAuthAudit` + CLAUDE.md "Pre-auth landing discipline".

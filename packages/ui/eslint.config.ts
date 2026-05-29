@@ -5,7 +5,13 @@ import { reactConfig } from "@healthtracker/eslint-config/react";
 
 export default defineConfig(
   {
-    ignores: ["dist/**"],
+    ignores: [
+      "dist/**",
+      // Test files authored for the day a runner is wired into this
+      // package (Story 5.1 T7.6). Excluded from lint until then.
+      "**/*.test.ts",
+      "**/*.test.tsx",
+    ],
   },
   baseConfig,
   reactConfig,

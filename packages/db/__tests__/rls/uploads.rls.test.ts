@@ -16,7 +16,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { asIdentity } from "./helpers";
-import { anonClient, serviceClient } from "./setup";
+import {
+  anonClient,
+  cleanupSeededUsers,
+  seedUser,
+  serviceClient,
+} from "./setup";
 
 interface UploadRow {
   id: string;
@@ -25,11 +30,14 @@ interface UploadRow {
 }
 
 const seededIds: string[] = [];
+const seededUserIds: string[] = [];
 
 async function seedUpload(
   patientId: string,
   idempotencyKey = crypto.randomUUID(),
 ): Promise<string> {
+  await seedUser(patientId);
+  seededUserIds.push(patientId);
   const id = crypto.randomUUID();
   const { error } = await serviceClient.from("uploads").insert({
     id,
@@ -48,14 +56,21 @@ async function seedUpload(
 }
 
 afterEach(async () => {
-  if (seededIds.length === 0) return;
-  await serviceClient.from("uploads").delete().in("id", seededIds);
-  seededIds.length = 0;
+  if (seededIds.length > 0) {
+    await serviceClient.from("uploads").delete().in("id", seededIds);
+    seededIds.length = 0;
+  }
+  if (seededUserIds.length > 0) {
+    await cleanupSeededUsers(seededUserIds);
+    seededUserIds.length = 0;
+  }
 });
 
 describe("uploads RLS isolation (append-only at patient layer)", () => {
   it("correctPatient can INSERT an upload row for themselves", async () => {
     const patientId = crypto.randomUUID();
+    await seedUser(patientId);
+    seededUserIds.push(patientId);
     const idempotencyKey = crypto.randomUUID();
     const run = asIdentity("correctPatient", { patientId });
 

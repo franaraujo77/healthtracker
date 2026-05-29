@@ -32,6 +32,29 @@ export const colorTokens = {
   errorBg: { light: "#FEF2F2", dark: "#450A0A" },
   success: { light: "#16A34A", dark: "#4ADE80" },
   backgroundDark: { light: "#1C1917", dark: "#1C1917" },
+
+  // Story 5.1 — ShareBiomarkerToggle row backgrounds (UX spec lines
+  // 948–965). `shareToggleOn` mirrors `primaryTealLight` for the
+  // muted-teal "shared" surface; `shareToggleOff` is a warm neutral
+  // for the "hidden" state (NEVER red — UX-DR13);
+  // `shareToggleDisabledText` is a low-contrast grey for the
+  // disabled "Sem dados ainda" row.
+  // shared value with `accessLogActive` — keep in sync or split intentionally.
+  shareToggleOn: { light: "#E0F2F1", dark: "#134E4A" },
+  shareToggleOff: { light: "#F3EFE7", dark: "#3C3836" },
+  shareToggleDisabledText: { light: "#9E9E9E", dark: "#78716C" },
+
+  // Story 5.3 — Access Log token-status badge surfaces (T4.3 / AC2).
+  // `accessLogActive` mirrors the muted-teal "shared" surface;
+  // `accessLogExpired` is a low-contrast neutral; `accessLogRevoked`
+  // is INTENTIONALLY a muted warm-neutral (NEVER red — UX-DR13 line
+  // 1079 reserves red for system errors only); `accessLogNeutral`
+  // backs the "sem prazo" / no-token-context state.
+  // shared value with `shareToggleOn` — keep in sync or split intentionally.
+  accessLogActive: { light: "#E0F2F1", dark: "#134E4A" },
+  accessLogExpired: { light: "#F3EFE7", dark: "#3C3836" },
+  accessLogRevoked: { light: "#EDE4DA", dark: "#4A4036" },
+  accessLogNeutral: { light: "#F0EFEC", dark: "#2E2A26" },
 } as const;
 
 export const fontSizeTokens = {
