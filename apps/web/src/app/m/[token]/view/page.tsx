@@ -115,32 +115,42 @@ export default async function DoctorReportView({
   });
   const doctorCaller = appRouter.createCaller(doctorCtx);
 
-  // Story 6.3 T5.1 — parallel fetch alongside the conversation starter.
-  // Both resolvers run concurrently; the page waits on the slower one
-  // (NFR-P4 <3s budget intact — neither adds a serial RTT). The
-  // activation status is `auth.uid()`-scoped (NOT share-token-scoped),
-  // so a doctor activated via patient A's link surfaces as activated
-  // when viewing patient B's report.
+  // Story 6.3 T5.1 — `getConversationStarter` and
+  // `getActivationStatus` run concurrently (NFR-P4 <3s budget intact;
+  // neither adds a serial RTT).
+  //
+  // R1-L3 fix-up: only `getConversationStarter` can throw NOT_FOUND
+  // (revoked / expired / cross-token / unknown / bad-HMAC).
+  // `getActivationStatus` is read-only against `professionals` and
+  // returns `activated:false` for the unbound case — it does NOT
+  // throw NOT_FOUND. The previous `Promise.all` wrapped a single
+  // try/catch around both, which would silently redirect to the
+  // dead-link page if a future change made the activation resolver
+  // throw on, say, a missing RLS policy. Split the awaits so each
+  // resolver's error surface is narrow.
+  //
+  // The activation status is `auth.uid()`-scoped (NOT share-token-
+  // scoped), so a doctor activated via patient A's link surfaces as
+  // activated when viewing patient B's report.
+  const reportPromise = doctorCaller.sharing.getConversationStarter({
+    shareTokenId,
+    tokenHmac,
+  });
+  const activationPromise = doctorCaller.sharing.getActivationStatus({});
   let report: RouterOutputs["sharing"]["getConversationStarter"];
-  let activationStatus: RouterOutputs["sharing"]["getActivationStatus"];
   try {
-    [report, activationStatus] = await Promise.all([
-      doctorCaller.sharing.getConversationStarter({
-        shareTokenId,
-        tokenHmac,
-      }),
-      doctorCaller.sharing.getActivationStatus({}),
-    ]);
+    report = await reportPromise;
   } catch (err) {
-    // R1-L3: narrow on `NOT_FOUND` (revoked / expired / cross-token /
-    // unknown / bad-HMAC) → redirect to pre-auth landing for the
-    // dead-link discriminator. Anything else propagates — programmer
-    // errors must not silently degrade to a dead-link.
     if (err instanceof TRPCError && err.code === "NOT_FOUND") {
+      // Wait for the activation promise so an unhandled-rejection
+      // warning doesn't fire when we redirect away.
+      await activationPromise.catch(() => undefined);
       redirect(`/m/${token}`);
     }
     throw err;
   }
+  const activationStatus: RouterOutputs["sharing"]["getActivationStatus"] =
+    await activationPromise;
 
   const patientFirstName = report.patientFirstName;
 
@@ -231,6 +241,11 @@ export default async function DoctorReportView({
           tokenHmac={tokenHmac}
           email={user.email ?? ""}
           defaultDisplayName={user.email?.split("@")[0] ?? ""}
+          // R1-H1: pass the RSC-fetched status as `initialData` for
+          // the client subscriber. The banner refetches on the
+          // modal's `invalidateQueries` and unmounts itself when
+          // `activated` flips to true.
+          initialActivationStatus={activationStatus}
         />
       )}
     </ReportLayout>

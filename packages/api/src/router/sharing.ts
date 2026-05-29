@@ -1656,14 +1656,30 @@ export const sharingRouter = {
       // Atomic tx — role escalation, FOR UPDATE lock, branch decision,
       // INSERT, audit all commit-or-rollback together.
       return ctx.db.transaction(async (tx) => {
-        // Step 3 — escalate ROLE briefly so we can SELECT FOR UPDATE
-        // pending_invites (the doctor principal has no patient-side
-        // RLS). The SET LOCAL is scoped to this tx; the explicit
-        // NONE-reset immediately after the lock acquisition restores
-        // RLS for the rest of the resolver's writes. SECURITY: a
-        // future patch that drops the NONE reset would leave RLS
-        // bypassed for the INSERT below — round-1 reviewers MUST
-        // verify the pair-bookend.
+        // Step 3 + 4 — escalate ROLE briefly for BOTH the SELECT FOR
+        // UPDATE lock acquisition AND the canonical UPDATE on
+        // `pending_invites` (the doctor principal has no patient-side
+        // RLS over this table). One escalated section bookended by a
+        // single `finally { SET LOCAL ROLE NONE }` keeps the contract
+        // minimal and audit-friendly: nothing else inside the block
+        // touches the DB; the branch decision is pure JS on the
+        // already-fetched row.
+        //
+        // R1-M2 clarification: `SET LOCAL ROLE NONE` is a
+        // CODE-HYGIENE guardrail, NOT a security boundary. Postgres
+        // auto-reverts the role at tx commit/rollback regardless
+        // (`SET LOCAL` is tx-scoped); the explicit reset defends
+        // against accidental later reads under the elevated role
+        // that a future patch might add inside the same tx. The real
+        // security boundary is the tx itself.
+        //
+        // R1-M1 consolidation: previously TWO separate escalation
+        // blocks bracketed the SELECT and the UPDATE independently;
+        // the structure was correct (row-lock holds across blocks)
+        // but noisy and inviting future regressions. Reviewers MUST
+        // keep this section MINIMAL — only `pending_invites`
+        // operations, never grow it to cover the INSERT or audit
+        // below.
         await tx.execute(sql`SET LOCAL ROLE postgres`);
         let inviteRow: { id: string; resolved_user_id: string | null };
         try {
@@ -1681,32 +1697,36 @@ export const sharingRouter = {
             throw new TRPCError({ code: "NOT_FOUND" });
           }
           inviteRow = found;
-        } finally {
-          // De-escalate before ANY subsequent statement runs — keeps
-          // RLS enforcement on the INSERT + audit writes below. The
-          // `finally` guarantees the role is restored even if the
-          // SELECT throws.
-          await tx.execute(sql`SET LOCAL ROLE NONE`);
-        }
 
-        // Step 4 — branch on resolved_user_id.
-        if (inviteRow.resolved_user_id === null) {
-          // Canonical flip — service-role-equivalent UPDATE.
-          // Re-escalate briefly so RLS doesn't block the UPDATE
-          // (pending_invites has no patient-side UPDATE policy and
-          // no doctor-side policy at all).
-          await tx.execute(sql`SET LOCAL ROLE postgres`);
-          try {
+          // Step 4 — branch on resolved_user_id (pure-JS decision on
+          // the already-fetched row; no DB touch until the UPDATE).
+          if (inviteRow.resolved_user_id === null) {
+            // Canonical flip. The `resolved_user_id IS NULL` predicate
+            // is belt-and-braces — the FOR UPDATE lock above already
+            // serializes, but a future maintainer reading the UPDATE
+            // in isolation should see the guard explicitly.
             await tx.execute(sql`
               UPDATE ${PendingInvites}
               SET resolved_user_id = ${doctorUserId}::uuid
               WHERE ${PendingInvites.id} = ${tokenRow.inviteId}
                 AND resolved_user_id IS NULL
             `);
-          } finally {
-            await tx.execute(sql`SET LOCAL ROLE NONE`);
           }
-        } else if (inviteRow.resolved_user_id !== doctorUserId) {
+          // else: same-uid re-tap OR different-uid CONFLICT — the
+          // CONFLICT throw happens AFTER de-escalation below so the
+          // error surface runs under the normal RLS-bound role.
+        } finally {
+          // De-escalate before ANY subsequent statement runs — the
+          // INSERT + audit writes below MUST run under the RLS-bound
+          // role. `finally` guarantees the reset even if the SELECT
+          // or UPDATE throws.
+          await tx.execute(sql`SET LOCAL ROLE NONE`);
+        }
+
+        if (
+          inviteRow.resolved_user_id !== null &&
+          inviteRow.resolved_user_id !== doctorUserId
+        ) {
           // Cross-doctor race — patient invited Dr. A by email, Dr. A
           // forwarded the link to a colleague Dr. B who also clicked.
           // First-to-activate wins; the loser sees the pt-BR conflict
@@ -1786,6 +1806,16 @@ export const sharingRouter = {
             // to the share-token / invite lives in `metadata`.
             resourceId: doctorUserId,
             resourceType: "professional",
+            // R1-N3 forensic-intent note: `category` is duplicated
+            // here from the `professionals` table on purpose. If a
+            // future story lets the doctor change their category
+            // (e.g. category-edit flow on `/inicio/configuracoes`),
+            // the audit row MUST pin the activation-time category
+            // — the audit_log is an append-only forensic ledger and
+            // the value of "what they activated as" is exactly what
+            // we want to preserve across later edits to the live
+            // row. Resist the temptation to drop this field on the
+            // grounds that it lives on the `professionals` table.
             metadata: {
               shareTokenId: input.shareTokenId,
               inviteId: tokenRow.inviteId,

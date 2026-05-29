@@ -35,6 +35,8 @@
     "@healthtracker/eslint-config": "workspace:*",
     "@healthtracker/prettier-config": "workspace:*",
     "@healthtracker/tsconfig": "workspace:*",
+    "@tanstack/react-query": "catalog:",
+    "@trpc/tanstack-react-query": "catalog:",
     "@vitest/coverage-v8": "catalog:",
     "eslint": "catalog:",
     "pdf-lib": "^1.17.1",

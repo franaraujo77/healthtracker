@@ -17,22 +17,21 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 
+import type { ProfessionalCategory } from "@healthtracker/validators";
+
 import { asIdentity } from "./helpers";
 import { cleanupSeededUsers, seedUser, serviceClient } from "./setup";
 
 const seededUserIds: string[] = [];
 
+// R1-N1 fix-up: derive `category` from the canonical
+// `ProfessionalCategory` type instead of duplicating the enum
+// literal union here. The seed helper now drifts with the validator
+// schema, not in spite of it.
 async function seedProfessional(args: {
   userId: string;
   displayName?: string;
-  category?:
-    | "endocrinologista"
-    | "cardiologista"
-    | "medicina_esportiva"
-    | "nutrologo"
-    | "nutricionista"
-    | "clinico_geral"
-    | "outro";
+  category?: ProfessionalCategory;
 }): Promise<string> {
   await seedUser(args.userId);
   seededUserIds.push(args.userId);
