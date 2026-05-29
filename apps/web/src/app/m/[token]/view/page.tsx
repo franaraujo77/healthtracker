@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { TRPCError } from "@trpc/server";
 
 import type { RouterOutputs } from "@healthtracker/api";
 import { appRouter, createTRPCContext } from "@healthtracker/api";
@@ -8,6 +9,7 @@ import { createSupabaseServerClient } from "@healthtracker/auth/server";
 import { BiomarkerCard, ConversationStarterPrompt } from "@healthtracker/ui";
 
 import { ConversationStarterPolling } from "./ConversationStarterPolling";
+import { MarkStarterViewed } from "./MarkStarterViewed";
 import { ReportLayout } from "./ReportLayout";
 
 /**
@@ -90,19 +92,25 @@ export default async function DoctorReportView({
   // (verified by `getUser()` above) satisfies the T4 session gate.
   const doctorHeaders = new Headers(reqHeaders);
   doctorHeaders.set("x-share-token", shareTokenId);
-  // Build a synthetic Session shape from the verified Supabase user;
-  // the doctorProcedure middleware reads only `session.user`. We avoid
-  // calling Supabase `getSession()` (which can return stale-cookie
-  // session) — `getUser()` revalidated the JWT above.
-  const doctorCtx = createTRPCContext({
-    headers: doctorHeaders,
-    session: {
+  // R1-M1 fix-up: prefer the real Supabase session (so future
+  // middleware that reads `session.access_token` works), fall back to
+  // a synthetic user-only shape if the cookie has no session row. The
+  // doctorProcedure middleware reads only `session.user` today; the
+  // real-session preference keeps Story 6.3+ honest when it grows new
+  // reads. `getUser()` above has already revalidated the JWT.
+  const { data: sessionData } = await supabase.auth.getSession();
+  const doctorSession =
+    sessionData.session ??
+    ({
       access_token: "",
       refresh_token: "",
       expires_in: 0,
       token_type: "bearer",
       user,
-    } as unknown as Parameters<typeof createTRPCContext>[0]["session"],
+    } as unknown as NonNullable<typeof sessionData.session>);
+  const doctorCtx = createTRPCContext({
+    headers: doctorHeaders,
+    session: doctorSession,
   });
   const doctorCaller = appRouter.createCaller(doctorCtx);
 
@@ -112,12 +120,15 @@ export default async function DoctorReportView({
       shareTokenId,
       tokenHmac,
     });
-  } catch {
-    // NOT_FOUND from the resolver (revoked / expired / cross-token /
+  } catch (err) {
+    // R1-L3: narrow on `NOT_FOUND` (revoked / expired / cross-token /
     // unknown / bad-HMAC) → redirect to pre-auth landing for the
-    // dead-link discriminator. Narrow: programmer errors throw at
-    // the caller layer, not here.
-    redirect(`/m/${token}`);
+    // dead-link discriminator. Anything else propagates — programmer
+    // errors must not silently degrade to a dead-link.
+    if (err instanceof TRPCError && err.code === "NOT_FOUND") {
+      redirect(`/m/${token}`);
+    }
+    throw err;
   }
 
   const patientFirstName = report.patientFirstName;
@@ -137,6 +148,8 @@ export default async function DoctorReportView({
 
   return (
     <ReportLayout patientFirstName={patientFirstName}>
+      {/* R1-H1: one-shot audit emission on view (replaces per-tick). */}
+      <MarkStarterViewed shareTokenId={shareTokenId} tokenHmac={tokenHmac} />
       <section
         aria-label="Prompts de conversa"
         style={{
@@ -161,17 +174,40 @@ export default async function DoctorReportView({
           gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
         }}
       >
-        {biomarkerCards.map((card, idx) => (
-          <BiomarkerCard
-            key={`card-${idx}`}
-            biomarkerName={card.category}
-            valueNumeric={card.currentValue ?? 0}
-            unitUcum=""
-            referenceRangeLow={null}
-            referenceRangeHigh={null}
-            state="cold-start"
-          />
-        ))}
+        {biomarkerCards.map((card, idx) => {
+          // R1-N1: when `currentValue` is null, the LLM had no draw to
+          // surface — collapsing `null` to `0` would render as a real
+          // observation of zero. Render the biomarker category as a
+          // bare label instead; the card requires a finite `number`.
+          if (card.currentValue === null) {
+            return (
+              <div
+                key={`card-${idx}`}
+                aria-label={`${card.category} — sem dados`}
+                style={{
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 8,
+                  padding: 12,
+                  color: "#6b7280",
+                }}
+              >
+                <strong>{card.category}</strong>
+                <div style={{ marginTop: 4 }}>—</div>
+              </div>
+            );
+          }
+          return (
+            <BiomarkerCard
+              key={`card-${idx}`}
+              biomarkerName={card.category}
+              valueNumeric={card.currentValue}
+              unitUcum=""
+              referenceRangeLow={null}
+              referenceRangeHigh={null}
+              state="cold-start"
+            />
+          );
+        })}
       </section>
     </ReportLayout>
   );

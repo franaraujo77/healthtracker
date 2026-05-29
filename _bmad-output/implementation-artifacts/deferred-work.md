@@ -397,3 +397,10 @@
 
 - Pre-auth landing DoS surface (`/m/<random>.<random>` audit-row spam) — mitigation lands at the Next.js edge / Vercel WAF, NOT in the resolver. Keeping the resolver dumb keeps the audit promise honest. Future infra story (Epic 6.x).
 - Malformed-segment audit rows are service-role-visible only (no patient owns the sentinel `resource_id`). Surfacing per-patient probes would require a per-patient short-code in the URL — not in scope for Epic 6. R1-H1 trade-off documented in `writePreAuthAudit` + CLAUDE.md "Pre-auth landing discipline".
+
+## Deferred from: code review of story-6.2 (2026-05-29)
+
+- R1-M3 — `shareTokenHolder` module-level singleton is a tab-wide race when two doctor-view tabs are open in one browser process. The second mount overwrites `current`; the first tab's next tRPC call sends the second tab's token. Defense-in-depth `constantTimeEqualHmac` re-check in the resolver catches as `NOT_FOUND` (degraded UX, not data leak). Acceptable for 6.2 (one-token-per-tab is the dominant flow). Fix lands when Story 6.3+ introduces multi-tab flows — likely via React-context-scoped tRPC client per shareTokenId.
+- R1-N3 — inline `style={{}}` throughout `view/page.tsx`, `auth/page.tsx`, `ReportLayout.tsx` rather than Tailwind 4 classes. Acceptable for MVP doctor surface; flag for follow-up refactor when the doctor surface gains a design pass.
+- T8.6 — Component snapshot tests for `<ConversationStarterPrompt>` + `<BiomarkerCard variant="report">`. Lower blast-radius — UI regressions are visually obvious. Track as polish.
+- T8.7 — E2E Playwright spec for `/m/[token]/auth → callback → /view` happy path. Skip-in-CI absent Supabase test project; harness deferred.

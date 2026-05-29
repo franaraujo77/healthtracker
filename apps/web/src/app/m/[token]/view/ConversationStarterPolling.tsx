@@ -69,6 +69,10 @@ function PollingBody(
     const remaining = CONVERSATION_STARTER_POLL_TIMEOUT_MS - elapsed;
     // Always schedule a setTimeout (even with `remaining <= 0`, fires
     // on next tick) — avoids synchronous setState-in-effect.
+    // R1-L4: cleanup runs on every `dataUpdatedAt` change. When polling
+    // flips to `ready`, refetchInterval stops polling AND this effect
+    // re-runs (dataUpdatedAt changed) — the cleanup clears the timer,
+    // so `setGivenUp(true)` never fires after the report rendered.
     const t = setTimeout(() => setGivenUp(true), remaining > 0 ? remaining : 0);
     return () => clearTimeout(t);
   }, [givenUp, query.dataUpdatedAt]);

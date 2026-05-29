@@ -35,3 +35,10 @@ export type { RouterInputs, RouterOutputs };
  * the audit-row shape end-to-end.
  */
 export { auditMalformedTokenProbe, writePreAuthAudit } from "./router/sharing";
+
+/**
+ * Story 6.2 R1-H3 fix-up — re-exported for the doctor magic-link
+ * callback route which cross-checks the URL `[token]` segment against
+ * the signed query-params via constant-time compare.
+ */
+export { constantTimeEqualHmac } from "./sharing";

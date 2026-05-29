@@ -1,7 +1,11 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
-import { appRouter, createTRPCContext } from "@healthtracker/api";
+import {
+  appRouter,
+  constantTimeEqualHmac,
+  createTRPCContext,
+} from "@healthtracker/api";
 import { createSupabaseServerClient } from "@healthtracker/auth/server";
 
 /**
@@ -30,7 +34,10 @@ const UUID_REGEX =
 const TOKEN_HMAC_REGEX = /^[A-Za-z0-9_-]{1,128}$/;
 const SENTINEL_SEGMENT = "00000000-0000-0000-0000-000000000000.invalid";
 
-export async function GET(request: NextRequest) {
+export async function GET(
+  request: NextRequest,
+  context: { params: Promise<{ token: string }> },
+) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
   const shareTokenId = searchParams.get("shareTokenId") ?? "";
@@ -43,6 +50,22 @@ export async function GET(request: NextRequest) {
   }
 
   const segment = `${shareTokenId}.${tokenHmac}`;
+
+  // R1-H3 — cross-check the URL `[token]` segment against the signed
+  // query-params. Without this, holding a magic-link for token A
+  // could authorize the doctor against token B (the GET handler would
+  // exchange the code from A's email and then redirect to B's /view).
+  // We compare the raw URL segment against the segment composed from
+  // the query params (uuid + dot + hmac). Both must match
+  // byte-for-byte; constant-time compare keeps timing flat.
+  const { token: urlToken } = await context.params;
+  const segmentsMatch = constantTimeEqualHmac(urlToken, segment);
+  if (!segmentsMatch) {
+    console.warn(
+      "[m/auth/callback] URL segment does not match signed query params — rejecting",
+    );
+    return NextResponse.redirect(`${origin}/m/${SENTINEL_SEGMENT}`);
+  }
 
   // Re-validate the share-token BEFORE exchanging the code. A token
   // that revoked / expired between the magic-link send and the user's
@@ -57,13 +80,18 @@ export async function GET(request: NextRequest) {
       tokenHmac,
     });
     preAuthStatus = result.status;
-  } catch {
-    // Resolver throws are silently treated as invalid — the calling
-    // page renders the same `invalid` copy. Narrow swallow here is
-    // intentional: any shape (network, Zod, RPC) collapses to the
-    // same redirect target (the user-visible Story 6.1 dead-link
-    // card). Programmer errors (TypeError / ReferenceError) would
-    // surface in the page's RSC anyway.
+  } catch (err) {
+    // Resolver throws are treated as invalid — the calling page
+    // renders the same `invalid` copy. Broad catch is intentional:
+    // any shape (network, Zod, RPC) collapses to the same redirect
+    // target (the user-visible Story 6.1 dead-link card). Programmer
+    // errors (TypeError / ReferenceError) would surface in the page's
+    // RSC anyway. R1-L2: log the swallowed shape so operators can
+    // spot RPC-level regressions in production.
+    console.error(
+      "[m/auth/callback] getPreAuthContext failed — treating as invalid:",
+      err,
+    );
     preAuthStatus = "invalid";
   }
 

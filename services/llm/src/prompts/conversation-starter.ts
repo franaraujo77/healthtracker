@@ -56,7 +56,9 @@ export function buildConversationStarterPrompt(
     "Últimas medições (até 3 por categoria, ordem decrescente por data):",
     obs.length > 0 ? obs : "(nenhuma)",
     "",
-    "Tarefa: gere 3 prompts breves para o médico iniciar a conversa com o paciente, e cards de biomarcador resumindo current/previous/tendência por categoria. JSON apenas.",
+    // R1-N2: aligned to the system message's "1 a 6 prompts" range.
+    // The Zod schema enforces 1..6; we prefer 3 as a soft default.
+    "Tarefa: gere entre 1 e 6 prompts breves (preferencialmente 3) para o médico iniciar a conversa com o paciente, e cards de biomarcador resumindo current/previous/tendência por categoria. JSON apenas.",
   ].join("\n");
   return { system: SYSTEM_MESSAGE, userPrompt };
 }

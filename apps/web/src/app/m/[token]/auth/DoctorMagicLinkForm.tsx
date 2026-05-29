@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@healthtracker/ui/button";
 import { Input } from "@healthtracker/ui/input";
@@ -45,6 +45,10 @@ export function DoctorMagicLinkForm(
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lockoutMs, setLockoutMs] = useState(0);
+  // R1-M2: ref to *this* form so onPress doesn't collide with a sibling
+  // form on the page (the global `document.querySelector('form')` query
+  // would pick the first form anywhere on the document).
+  const formRef = useRef<HTMLFormElement | null>(null);
 
   // Resend-lockout countdown (purely UX — server-side rate limit is
   // not in scope for this story; the WAF / Supabase Auth ship rate
@@ -125,6 +129,7 @@ export function DoctorMagicLinkForm(
 
   return (
     <form
+      ref={formRef}
       onSubmit={handleSubmit}
       style={{ display: "flex", flexDirection: "column", gap: 12 }}
     >
@@ -148,10 +153,11 @@ export function DoctorMagicLinkForm(
         disabled={submitting || email.trim().length === 0}
         onPress={() => {
           // The `onPress` synthesises a submit on the underlying form
-          // since Tamagui's Button doesn't natively submit. The
-          // <form>'s onSubmit handles the actual logic.
-          const form = document.querySelector("form");
-          form?.requestSubmit();
+          // since Tamagui's Button doesn't natively submit. R1-M2:
+          // target THIS form via ref — `document.querySelector('form')`
+          // would pick the first form on the page if a future surface
+          // composes multiple forms on `/m/[token]/auth`.
+          formRef.current?.requestSubmit();
         }}
       >
         {AUTH_REQUEST_CTA_PT_BR}

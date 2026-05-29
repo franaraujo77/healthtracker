@@ -1286,11 +1286,17 @@ export const sharingRouter = {
    * pt-BR `CONVERSATION_STARTER_FAILED_PT_BR` at this boundary — the
    * client NEVER sees the raw operator strings.
    *
-   * **Audit:** `share_token.read` with `metadata.phase = "post-auth"`,
-   * `actorId = ctx.session.user.id` (the doctor's verified auth.uid —
-   * NOT the shareTokenId sentinel used in Story 6.1's pre-auth path).
-   * Audit fires on EVERY view of the report (not just first view) —
-   * the patient's surveillance surface wants the full timeline.
+   * **Audit (R1-H1 fix-up):** the resolver does NOT write the
+   * `share_token.read post-auth` row anymore. The polling client
+   * called this query every 2s while the cache was `queued`, which
+   * spammed the patient's Access Log with up to 15 rows per cold-cache
+   * view. Audit is now emitted by the sibling `markStarterViewed`
+   * mutation, which the client fires ONCE on the rising edge of
+   * `cacheStatus === "ready"`. Status-transition events (queued /
+   * failed) are no longer audited per-tick; the patient's surveillance
+   * surface still records the "doctor saw the report" event via the
+   * one-shot mutation. The pre-auth `share_token.read` row from Story
+   * 6.1 already records the doctor's first arrival on the link.
    */
   getConversationStarter: doctorProcedure
     .input(getConversationStarterInputSchema)
@@ -1394,6 +1400,17 @@ export const sharingRouter = {
         } else if (cacheRow.status === "failed") {
           cacheStatus = "failed";
           // Map operator-grade reason → SHORT pt-BR client string.
+          // R1-M5: every `failed` row is collapsed to the same client
+          // string regardless of the underlying `failure_reason`
+          // (`LLM_API_ERROR` / `LLM_NETWORK_ERROR` /
+          // `STUB_ADAPTER_IN_PRODUCTION` written by the consumer's
+          // DPA-gate branch as `LLM_API_ERROR`). Operator distinction
+          // intentionally lives ONLY in the `audit_log` row the
+          // consumer emits (`conversation_starter.failed` with
+          // `metadata.reason`), so the doctor surface never sees an
+          // operator-shaped string. Forensics: `SELECT metadata
+          // FROM audit_log WHERE event = 'conversation_starter.failed'
+          // AND resource_id = $shareTokenId`.
           failureReason = CONVERSATION_STARTER_FAILED_PT_BR;
         } else {
           cacheStatus = "queued";
@@ -1425,8 +1442,59 @@ export const sharingRouter = {
         }
       }
 
-      // Audit: every view, not just first view. `actorId =
-      // session.user.id` (doctor's verified auth.uid).
+      // R1-H1: audit was emitted here per-tick (every 2s while polling
+      // `queued`). It now lives in the sibling `markStarterViewed`
+      // mutation, fired once on the client's rising-edge ready
+      // transition. This resolver is read-only.
+
+      return {
+        cacheStatus,
+        payload,
+        patientFirstName,
+        sharedAt: tokenRow.createdAt,
+        expiresAt: tokenRow.expiresAt,
+        failureReason,
+      };
+    }),
+
+  /**
+   * Story 6.2 R1-H1 fix-up — one-shot audit emission on first `ready`.
+   *
+   * The polling `getConversationStarter` resolver no longer writes
+   * audit. The client invokes this mutation exactly once per session
+   * on the rising edge of `cacheStatus === "ready"`. The mutation is
+   * bound by the same `doctorProcedure` two-gate (header + session) +
+   * defense-in-depth `constantTimeEqualHmac` re-check as the query.
+   *
+   * Idempotency: the client-side rising-edge guard prevents duplicate
+   * fires within one session; a re-mount (e.g. hard reload) will
+   * legitimately emit a fresh row — by design, the patient's Access
+   * Log wants to surface re-visits.
+   */
+  markStarterViewed: doctorProcedure
+    .input(getConversationStarterInputSchema)
+    .output(z.object({ ok: z.literal(true) }))
+    .mutation(async ({ ctx, input }) => {
+      if (ctx.shareTokenId !== input.shareTokenId) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+      const tokenRows = await ctx.db
+        .select({
+          id: ShareTokens.id,
+          tokenHmac: ShareTokens.tokenHmac,
+        })
+        .from(ShareTokens)
+        .where(eq(ShareTokens.id, input.shareTokenId))
+        .limit(1);
+      const tokenRow = tokenRows[0];
+      if (!tokenRow) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+      const hmacOk = constantTimeEqualHmac(tokenRow.tokenHmac, input.tokenHmac);
+      if (!hmacOk) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+
       const rawUserAgent = ctx.headers.get("user-agent") ?? "";
       const truncatedUa =
         rawUserAgent.length > 0 ? rawUserAgent.slice(0, 200) : null;
@@ -1454,19 +1522,11 @@ export const sharingRouter = {
           throw err;
         }
         console.warn(
-          "[sharing.getConversationStarter] audit write failed — continuing",
+          "[sharing.markStarterViewed] audit write failed — continuing",
           err,
         );
       }
-
-      return {
-        cacheStatus,
-        payload,
-        patientFirstName,
-        sharedAt: tokenRow.createdAt,
-        expiresAt: tokenRow.expiresAt,
-        failureReason,
-      };
+      return { ok: true as const };
     }),
 } satisfies TRPCRouterRecord;
 
