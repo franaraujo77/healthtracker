@@ -8,7 +8,7 @@ catalog:
   "@healthtracker/types": "workspace:*"
   postgres: ^3.4.5
   "@supabase/supabase-js": ^2.106.1
-  "@supabase/ssr": ^0.6.1
+  "@supabase/ssr": ^0.10.3
   "@eslint/js": ^9.38.0
   "@tamagui/animations-css": ^1.144.4
   "@tamagui/animations-react-native": ^1.144.4
