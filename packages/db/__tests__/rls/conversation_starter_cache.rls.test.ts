@@ -27,14 +27,19 @@ async function seedTokenWithCache(args: {
   const inviteId = crypto.randomUUID();
   const tokenId = crypto.randomUUID();
   const cacheId = crypto.randomUUID();
-  await serviceClient.from("pending_invites").insert({
+  // Fresh identifier_hash per call avoids the
+  // `pending_invites_patient_identifier_uq` collision when a single
+  // test seeds multiple tokens for the same patient.
+  const identifierHash = crypto.randomUUID().replace(/-/g, "").padEnd(64, "c");
+  const { error: e1 } = await serviceClient.from("pending_invites").insert({
     id: inviteId,
     patient_id: args.patientId,
     display_name: "Dra. CS",
-    identifier_hash: "c".repeat(64),
+    identifier_hash: identifierHash,
   });
+  if (e1) throw new Error(`invite seed failed: ${e1.message}`);
   seededInviteIds.push(inviteId);
-  await serviceClient.from("share_tokens").insert({
+  const { error: e2 } = await serviceClient.from("share_tokens").insert({
     id: tokenId,
     token_hash: `hash-${tokenId}`,
     token_hmac: `hmac-${tokenId}`,
@@ -47,18 +52,23 @@ async function seedTokenWithCache(args: {
             args.expiresAt ?? new Date(Date.now() + 7 * 86_400_000)
           ).toISOString(),
     revoked_at: args.revokedAt ? args.revokedAt.toISOString() : null,
+    duration: args.expiresAt === null ? "no_expiry" : "7d",
   });
+  if (e2) throw new Error(`share_tokens seed failed: ${e2.message}`);
   seededTokenIds.push(tokenId);
-  await serviceClient.from("conversation_starter_cache").insert({
-    id: cacheId,
-    share_token_id: tokenId,
-    patient_id: args.patientId,
-    status: args.status,
-    payload:
-      args.status === "ready"
-        ? { prompts: [{ text: "p" }], biomarkerCards: [] }
-        : null,
-  });
+  const { error: e3 } = await serviceClient
+    .from("conversation_starter_cache")
+    .insert({
+      id: cacheId,
+      share_token_id: tokenId,
+      patient_id: args.patientId,
+      status: args.status,
+      payload:
+        args.status === "ready"
+          ? { prompts: [{ text: "p" }], biomarkerCards: [] }
+          : null,
+    });
+  if (e3) throw new Error(`cache seed failed: ${e3.message}`);
   seededCacheIds.push(cacheId);
   return { tokenId, cacheId };
 }

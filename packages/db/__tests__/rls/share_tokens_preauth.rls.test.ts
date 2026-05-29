@@ -40,11 +40,16 @@ async function seedToken(args: {
   seededUserIds.push(args.patientId);
   const inviteId = crypto.randomUUID();
   const tokenId = crypto.randomUUID();
+  // Fresh identifier_hash per call. The serviceRole test (and any
+  // future test that reuses a single patient) seeds multiple tokens
+  // for the same `patient_id`; a hardcoded hash would collide with
+  // `pending_invites_patient_identifier_uq` (Story 5.1 AC7).
+  const identifierHash = crypto.randomUUID().replace(/-/g, "").padEnd(64, "p");
   const { error: e1 } = await serviceClient.from("pending_invites").insert({
     id: inviteId,
     patient_id: args.patientId,
     display_name: "Dra. P",
-    identifier_hash: "p".repeat(64),
+    identifier_hash: identifierHash,
   });
   if (e1) throw new Error(`invite seed failed: ${e1.message}`);
   seededInviteIds.push(inviteId);
