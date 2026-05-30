@@ -139,13 +139,29 @@ CONCURRENTLY ...` and apply via `psql` directly (Supabase CLI's
 > `supabase/migrations/0005_epic_6_doctor_accounts.sql` (tables, enums, FKs,
 > non-CONCURRENTLY indexes, RLS policies for `professionals` / `patient_invites`
 > / `staleness_thresholds` + the deferred `pending_invites.resolved_user_id` FK)
-> and `supabase/migrations/0006_epic_6_patient_invites_active_uq.sql` (the
-> partial unique index `patient_invites_professional_identifier_active_uq` —
+> and `supabase/migrations-postapply/0006_epic_6_patient_invites_active_uq.sql`
+> (the partial unique index `patient_invites_professional_identifier_active_uq` —
 > split out because it gates the doctor → patient invite write surface and
 > MUST apply with `CREATE … CONCURRENTLY` via `psql` directly per the
 > SQLSTATE 25001 rule above). The runtime doctor-data-isolation invariant is
 > locked in by `packages/db/__tests__/rls/{professionals,patient_invites,staleness_thresholds}.rls.test.ts`
 > — those suites are the source of truth for what the migration's RLS bodies must enforce.
+>
+> **Ops note (Story 6.6 R1 H1 — deploy contract for CONCURRENTLY-bearing
+> companion files):** The `supabase-deploy` GitHub Actions workflow runs
+> `supabase db push` first (canonical `supabase/migrations/` dir), then a
+> second step iterates every file under `supabase/migrations-postapply/*.sql`
+> in lex order and applies each via `psql "$SUPABASE_DB_URL" -v
+ON_ERROR_STOP=1 -f <file>` (autocommit; NO `-1` flag). Companion files
+> live in the sibling `migrations-postapply/` dir specifically so the
+> Supabase CLI does NOT pick them up inside its implicit per-file
+> transaction. Files MUST: ship as bare DDL (no `BEGIN`/`COMMIT`), use
+> `CREATE … CONCURRENTLY IF NOT EXISTS` (or other `IF NOT EXISTS` guard)
+> so partial-success re-runs are safe, and have their parent table
+> created by a sibling migration that runs in `db push` above. Naming:
+> use the same ordinal as the parent migration (e.g. `0006_*` depends on
+> `0005`'s `patient_invites`); psql lex-orders inside the post-apply dir.
+> Precedent file: `0006_epic_6_patient_invites_active_uq.sql`.
 
 **UI components**
 

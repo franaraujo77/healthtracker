@@ -571,6 +571,47 @@ development_status:
   6-4-doctor-invites-a-patient-to-create-a-health-tracker-account: review
   6-5-doctor-configures-biomarker-staleness-thresholds-for-their-professional-view: review
   6-6-author-incremental-supabase-migration-for-epic-6-schema: review
+  # Story 6.6 R1-followup (round-1 follow-up patches, 2026-05-30): H1 +
+  # M2 + L2 patched inline; M1 split out as a future story. (a) H1 —
+  # extended `.github/workflows/supabase-deploy.yml` with a `psql`
+  # autocommit step that applies every file under a new sibling
+  # `supabase/migrations-postapply/` directory after `supabase db
+  # push`. Moved `0006_epic_6_patient_invites_active_uq.sql` into the
+  # new dir so the Supabase CLI does NOT pick it up inside its
+  # implicit per-file tx (SQLSTATE 25001 root cause). Production
+  # deploy of Epic 6 is now unblocked. (b) M2 — named the
+  # `staleness_thresholds` FK explicitly via Drizzle's
+  # `foreignKey({ name: "staleness_thresholds_user_id_fk", ... })`
+  # table-builder (30 chars; previously auto-named at 67 chars and
+  # silently truncated to 63 by Postgres NAMEDATALEN, breaking
+  # idempotent `IF NOT EXISTS` guards on re-apply). Migration 0005
+  # gained an idempotent `ALTER TABLE … RENAME CONSTRAINT` DO-block
+  # at the top of the FK section (only fires on DBs that received the
+  # truncated name via prior `pnpm db:push`) so both fresh applies
+  # and re-applies converge on the new short name. (c) L2 — rewrote
+  # the misleading 0006 header that falsely claimed the deploy
+  # workflow already handled split-apply; new text accurately
+  # describes the post-apply dir contract + the R1 H1 patch. (d) M1
+  # — Epic 5 baseline migration (`pending_invites`, `share_tokens`,
+  # `share_token_biomarkers`, `conversation_starter_cache`,
+  # `exports`, `account_deletion_requests` + 4 enums + 5 indexes
+  # incl. 3 partial UNIQUE that need CONCURRENTLY post-apply files +
+  # 7 RLS policy files + Storage bucket setup) is genuinely too
+  # large for a single follow-up patch round. SPLIT INTO NEW
+  # FOLLOW-UP STORY (proposal: "Story 5.7 — Epic 5 baseline
+  # migration" or "Epic 5 retro addendum"). Inventory recorded in
+  # the R1 review addendum. Fresh-DB rehydration remains broken for
+  # 0005 (references `pending_invites`) until that story lands —
+  # production is unaffected (live DB was primed via `pnpm db:push`
+  # during Stories 5.x/6.x); deferred-work tracker updated. Quality
+  # gates: `pnpm -w typecheck` ✅ 17/17; `pnpm -w lint` ✅ 15/15;
+  # `pnpm --filter @healthtracker/api test:unit` ✅ 38 files / 334
+  # tests; integration still skipped (Rancher Desktop docker.sock
+  # bind-mount unsupported). Drift-check via `drizzle-kit push
+  # --verbose --strict` against dev DB shows only known pre-existing
+  # noise (RLS DROP/CREATE, `desc` index re-emission, interval
+  # defaults) PLUS the expected staleness FK rename — no Epic 6
+  # net-new drift.
   # Story 6.6 implementation complete → review. PR #57 (stacked).
   # Two migration files shipped (`0005_epic_6_doctor_accounts.sql` +
   # `0006_epic_6_patient_invites_active_uq.sql`) hand-authored from

@@ -1,5 +1,38 @@
 # Deferred Work
 
+## Deferred from: code review of story-6.6 round 1 (2026-05-30)
+
+- **Epic 5 baseline Supabase migration is missing** — Story 6.6 R1 M1.
+  `supabase/migrations/0005_epic_6_doctor_accounts.sql` references
+  `public.pending_invites` in its FK declaration, but no migration
+  file ever creates the `pending_invites` / `share_tokens` /
+  `share_token_biomarkers` / `conversation_starter_cache` /
+  `exports` / `account_deletion_requests` tables (Epic 5 shipped via
+  `pnpm db:push` only). Fresh-DB rehydration (CI shadow-DB, new
+  staging, prod recovery from baseline) will fail at 0005 with
+  `relation "pending_invites" does not exist`. Production deploy
+  is unaffected today because the live DB was primed via
+  `pnpm db:push` during Stories 5.x/6.x, but the migration chain is
+  broken for any clean re-apply. PROPOSED FOLLOW-UP STORY: "Story
+  5.7 — Epic 5 baseline migration" (or "Epic 5 retro addendum"). Scope:
+  4 enums (`share_duration_enum`, `export_format_enum`,
+  `export_status_enum`, `account_deletion_status_enum`); 6 tables;
+  5 indexes including 3 partial UNIQUE that require post-apply
+  CONCURRENTLY files under `supabase/migrations-postapply/`
+  (`share_tokens_invite_active_uq`,
+  `share_tokens_patient_invite_active_uq`, `exports_active_uq`,
+  `account_deletion_requests_active_uq`); 7 RLS policy files
+  (`pending_invites`, `share_tokens`, `share_token_biomarkers`,
+  `conversation_starter_cache`, `exports`,
+  `account_deletion_requests`, plus the `supabase_storage_exports.sql`
+  bucket policy). Notable design decisions to preserve verbatim per
+  CLAUDE.md: per-biomarker junction table (NFR-S3), nullable
+  `expires_at` (Story 5.2), HMAC + `tokenHash` separation, soft-delete
+  via `revoked_at`, tombstone `patient_id` on
+  `account_deletion_requests` (no FK to `users(id)`). Significant
+  lift (10+ objects + 7 policy files + Storage bucket); too large
+  for a single follow-up patch round on Story 6.6.
+
 ## Deferred from: code review of story-2-3 round 2 (2026-05-22)
 
 - **F115: `sql.begin` test mock makes `tx === sql`** — production `postgres.js` `TransactionSql` forbids nested `.begin` without `.savepoint`; current tests give false confidence. Add typing-only doc; integration test deferred.

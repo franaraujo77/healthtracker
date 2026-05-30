@@ -4,9 +4,10 @@ on:
   push:
     branches: [main]
     paths:
-      - 'supabase/migrations/**'
-      - 'supabase/config.toml'
-      - '.github/workflows/supabase-deploy.yml'
+      - "supabase/migrations/**"
+      - "supabase/migrations-postapply/**"
+      - "supabase/config.toml"
+      - ".github/workflows/supabase-deploy.yml"
   workflow_dispatch:
 
 concurrency:
@@ -36,3 +37,42 @@ jobs:
 
       - name: Push migrations
         run: supabase db push
+
+      # Apply CONCURRENTLY-bearing companion files via `psql` in
+      # autocommit mode (no `-1` flag; default is autocommit when
+      # the file does NOT contain its own `BEGIN`/`COMMIT`).
+      #
+      # Supabase CLI's `db push` wraps every migration file in an
+      # implicit per-file transaction, so `CREATE … CONCURRENTLY`
+      # fails inside it with SQLSTATE 25001 (CLAUDE.md ops note
+      # "Migration discipline"). Companion files live in a SIBLING
+      # directory `supabase/migrations-postapply/` so the Supabase
+      # CLI does not pick them up at `db push` time — only this psql
+      # step applies them.
+      #
+      # Files are required to ship as bare DDL (no `BEGIN`/`COMMIT`),
+      # carry `IF NOT EXISTS` / `CREATE … CONCURRENTLY IF NOT EXISTS`
+      # guards, and remain safe to re-run on partial earlier success.
+      #
+      # Sequence: every companion file's parent table MUST be created
+      # by a sibling migration that ran in the `db push` step above
+      # (e.g. `0006_*` depends on `0005`'s `patient_invites`). `psql`
+      # runs files in lexicographic order, mirroring the Supabase
+      # CLI's ordering.
+      - name: Apply CONCURRENTLY companion files via psql
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(supabase/migrations-postapply/*.sql)
+          if (( ${#files[@]} == 0 )); then
+            echo "No post-apply companion files to apply."
+            exit 0
+          fi
+          for f in "${files[@]}"; do
+            echo "::group::psql autocommit -f $f"
+            psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f "$f"
+            echo "::endgroup::"
+          done

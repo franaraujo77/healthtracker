@@ -131,3 +131,54 @@ On a fresh DB the ADD succeeds (the truncated name is what gets stored). On a re
 - Patch commit: see SHA below (CLAUDE.md formatting fix).
 - Branch: `worktree-story-6-2` (PR #57, stacked stories).
 - Sprint-status: left at `review` per workflow instructions; Francis flips.
+
+---
+
+## Addendum — Round-1 follow-up patches (2026-05-30)
+
+Francis approved the full set (H1 + M1 + M2 + L2). Three landed inline; M1 was split into a follow-up story (see deferred-work entry).
+
+### H1 (patched inline) — deploy workflow extended for CONCURRENTLY companion files
+
+**Decision.** Introduce a sibling `supabase/migrations-postapply/` directory. The Supabase CLI scans only `supabase/migrations/`; companion files go in the post-apply dir so `supabase db push` never tries to apply them inside its implicit per-file tx (the SQLSTATE 25001 root cause). The deploy workflow gained a second step that, after `supabase db push`, iterates every `supabase/migrations-postapply/*.sql` file in lex order and applies it via `psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f <file>` (autocommit; NO `-1` flag). Files ship as bare DDL with `IF NOT EXISTS` guards → safe re-runs.
+
+**Files touched.**
+
+- `.github/workflows/supabase-deploy.yml` — added `SUPABASE_DB_URL` env var consumption + new "Apply CONCURRENTLY companion files via psql" step + the `migrations-postapply/**` path trigger.
+- `supabase/migrations/0006_epic_6_patient_invites_active_uq.sql` → moved (`git mv`) to `supabase/migrations-postapply/0006_epic_6_patient_invites_active_uq.sql`.
+- `supabase/migrations-postapply/0006_*` header — rewrote the misleading "GHA already implements this" stanza (this is also the L2 fix; collapsed into the same edit).
+- `supabase/migrations/0005_epic_6_doctor_accounts.sql` — updated two cross-references to point at the new `migrations-postapply/` path.
+- `CLAUDE.md` — added a new "Ops note (Story 6.6 R1 H1)" stanza documenting the post-apply contract; updated the existing Story 6.6 stanza to reflect the new file location.
+
+**Required GitHub Secret.** `SUPABASE_DB_URL` (full `postgresql://postgres:<pw>@db.<ref>.supabase.co:5432/postgres` URI; URL-encoded password). The existing `SUPABASE_DB_PASSWORD` + `SUPABASE_PROJECT_REF` pair was kept for `supabase db push`; the new step needs the assembled URI for psql. **Action item for Francis:** add `SUPABASE_DB_URL` to the `production` environment secrets before the next merge to main.
+
+### M2 (patched inline) — staleness FK constraint name shortened
+
+**Decision.** Picked `staleness_thresholds_user_id_fk` (30 chars).
+
+**Files touched.**
+
+- `packages/db/src/schema/staleness_thresholds.ts` — dropped the inline `.references()` on the `professionalUserId` column and replaced it with a table-builder `foreignKey({ name: "staleness_thresholds_user_id_fk", columns: [...], foreignColumns: [...] }).onDelete("cascade")`. Added explanatory docstring on the column. Imported `foreignKey` from `drizzle-orm/pg-core`.
+- `supabase/migrations/0005_epic_6_doctor_accounts.sql` — split the existing FK section into TWO DO-blocks: (1) idempotent `ALTER TABLE … RENAME CONSTRAINT staleness_thresholds_professional_user_id_professionals_user_id TO staleness_thresholds_user_id_fk` guarded by `IF EXISTS` against the truncated 63-char name (only fires on DBs that received the pre-fix Drizzle name via `pnpm db:push`); (2) the existing `IF NOT EXISTS` + `ADD CONSTRAINT` block, now using the new short name. Fresh-DB applies skip the rename, then ADD under the new name. Re-applies converge.
+
+**Verified truncation length.** Postgres NAMEDATALEN=63 truncates the 67-char Drizzle auto-name to `staleness_thresholds_professional_user_id_professionals_user_id` (63 chars exactly — the trailing `_fk` is dropped). Confirmed by the drift-check output (drizzle-kit reported `DROP CONSTRAINT staleness_thresholds_professional_user_id_professionals_user_id` as the existing stored name).
+
+### L2 (patched inline) — 0006 header rewritten
+
+Folded into the H1 edit (same file). New header text accurately describes the post-apply dir contract + the R1 H1 deploy-workflow patch; no more false claim about 0004.
+
+### M1 (split into follow-up story) — Epic 5 baseline migration
+
+Per the task instructions' "STOP if too large" branch. Inventory recorded in `_bmad-output/implementation-artifacts/deferred-work.md` (top entry under "Deferred from: code review of story-6.6 round 1"). Scope spans 4 enums + 6 tables + 5 indexes (3 of which are partial unique → post-apply CONCURRENTLY files) + 7 RLS policy files + Storage bucket setup, with notable design decisions across Stories 5.1–5.6 to preserve verbatim. Proposed name: "Story 5.7 — Epic 5 baseline migration" (or "Epic 5 retro addendum"). Fresh-DB rehydration remains broken until that story lands; production is unaffected.
+
+### Quality gates (after all patches)
+
+- `pnpm -w typecheck` — ✅ 17/17 successful (10 cached, 7 fresh).
+- `pnpm -w lint` — ✅ 15/15 successful (8 cached, 7 fresh). 5 pre-existing warnings (unused eslint-disable directives in api package; not introduced by this patch).
+- `pnpm --filter @healthtracker/api test:unit` — ✅ 38 test files / 334 tests passed.
+- `pnpm test:integration` — ⏭️ SKIPPED (Rancher Desktop docker.sock bind-mount unsupported on this host; unchanged from R1).
+- Drift-check via `pnpm exec drizzle-kit push --verbose --strict` against dev DB — output confirms (a) the staleness FK rename is the ONLY net-new schema effect of this patch round and (b) all other drift lines are pre-existing Drizzle re-emission noise (RLS DROP/CREATE, `desc` index re-emission, `now() + interval '…'` default re-emission across `patient_invites.expires_at` + `exports.expires_at`). No surprise drift.
+
+### Commit / push
+
+See git log + PR #57 for SHA + HEAD after this addendum.

@@ -9,11 +9,15 @@
 --   * Story 6.4 — `patient_invites` table + `patient_invite_status_enum`
 --     + supporting indexes + CHECK constraint. The partial unique index
 --     `patient_invites_professional_identifier_active_uq` is split into
---     the companion file `0006_epic_6_patient_invites_active_uq.sql`
+--     the companion file
+--     `supabase/migrations-postapply/0006_epic_6_patient_invites_active_uq.sql`
 --     so it can be applied via `psql` with `CREATE … CONCURRENTLY`
---     outside Supabase's per-migration implicit transaction (mirrors
---     the Story 4.4 / 0004_*.sql precedent — `CREATE INDEX
---     CONCURRENTLY` inside the implicit tx fails with SQLSTATE 25001).
+--     outside Supabase's per-migration implicit transaction
+--     (`CREATE INDEX CONCURRENTLY` inside the implicit tx fails with
+--     SQLSTATE 25001). The `supabase-deploy` GitHub Actions workflow
+--     was extended (Story 6.6 R1 H1 patch) to iterate every file
+--     under `supabase/migrations-postapply/` via `psql` after
+--     `supabase db push` completes.
 --   * Story 6.5 — `staleness_thresholds` table with composite PRIMARY
 --     KEY (`professional_user_id`, `biomarker_category`), CHECK on
 --     range, listing index. NO synthetic id; composite PK is the
@@ -263,10 +267,13 @@ CREATE INDEX IF NOT EXISTS patient_invites_resolved_user_idx
 --
 -- NOTE: the partial unique index
 -- `patient_invites_professional_identifier_active_uq` ships in the
--- companion file `0006_epic_6_patient_invites_active_uq.sql` so it
--- can be applied with `CREATE … CONCURRENTLY` outside Supabase's
--- per-migration implicit transaction. See AC3 / AC8 in the story
--- spec and the CLAUDE.md ops note (Migration discipline / Epic 6).
+-- post-apply companion file
+-- `supabase/migrations-postapply/0006_epic_6_patient_invites_active_uq.sql`
+-- so it can be applied with `CREATE … CONCURRENTLY` outside
+-- Supabase's per-migration implicit transaction. The deploy
+-- workflow's `psql` post-apply step (R1 H1 patch) handles it. See
+-- AC3 / AC8 in the story spec and the CLAUDE.md ops note
+-- (Migration discipline / Epic 6).
 --
 
 --
@@ -318,18 +325,48 @@ BEGIN
 END $$;
 
 --
--- Name: staleness_thresholds staleness_thresholds_professional_user_id_professionals_user_id_fk;
+-- Name: staleness_thresholds staleness_thresholds_user_id_fk;
 -- Type: FK CONSTRAINT (ON DELETE CASCADE — doctor's preference rows
 -- do not outlive the doctor's account semantically).
 --
+-- Story 6.6 R1 M2 fix: the constraint was originally declared in
+-- Drizzle without an explicit name; Drizzle generated
+-- `staleness_thresholds_professional_user_id_professionals_user_id_fk`
+-- (67 chars). PostgreSQL's NAMEDATALEN=63 silently truncates it to
+-- `staleness_thresholds_professional_user_id_professionals_user_id`,
+-- which breaks idempotent `IF NOT EXISTS` guards that test the full
+-- name. The schema was patched to name the constraint
+-- `staleness_thresholds_user_id_fk` (30 chars) via the
+-- `foreignKey()` table-builder. This migration handles both fresh
+-- DBs (where it just CREATEs under the new name) and DBs that
+-- already received the constraint under the truncated 63-char name
+-- via `pnpm db:push` (where it RENAMEs first, then the IF NOT
+-- EXISTS guard sees the new name and skips the CREATE).
+--
+DO $$
+BEGIN
+    -- Idempotent rename: only fires on DBs that received the
+    -- pre-fix Drizzle auto-name (truncated to 63 chars).
+    IF EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'staleness_thresholds_professional_user_id_professionals_user_id'
+          AND conrelid = 'public.staleness_thresholds'::regclass
+    ) THEN
+        ALTER TABLE public.staleness_thresholds
+            RENAME CONSTRAINT staleness_thresholds_professional_user_id_professionals_user_id
+            TO staleness_thresholds_user_id_fk;
+    END IF;
+END $$;
+
 DO $$
 BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint
-        WHERE conname = 'staleness_thresholds_professional_user_id_professionals_user_id_fk'
+        WHERE conname = 'staleness_thresholds_user_id_fk'
+          AND conrelid = 'public.staleness_thresholds'::regclass
     ) THEN
         ALTER TABLE ONLY public.staleness_thresholds
-            ADD CONSTRAINT staleness_thresholds_professional_user_id_professionals_user_id_fk
+            ADD CONSTRAINT staleness_thresholds_user_id_fk
             FOREIGN KEY (professional_user_id) REFERENCES public.professionals(user_id) ON DELETE CASCADE;
     END IF;
 END $$;

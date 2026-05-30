@@ -1,5 +1,11 @@
 import { sql } from "drizzle-orm";
-import { check, index, pgTable, primaryKey } from "drizzle-orm/pg-core";
+import {
+  check,
+  foreignKey,
+  index,
+  pgTable,
+  primaryKey,
+} from "drizzle-orm/pg-core";
 
 import { Professionals } from "./professionals";
 
@@ -34,10 +40,19 @@ import { Professionals } from "./professionals";
 export const StalenessThresholds = pgTable(
   "staleness_thresholds",
   (t) => ({
-    professionalUserId: t
-      .uuid("professional_user_id")
-      .notNull()
-      .references(() => Professionals.userId, { onDelete: "cascade" }),
+    /**
+     * FK to `professionals(user_id)` ON DELETE CASCADE. The FK
+     * constraint is declared at the TABLE-BUILDER level (not via
+     * `.references()` inline) so we can give it an explicit short
+     * name. Drizzle's auto-generated name
+     * `staleness_thresholds_professional_user_id_professionals_user_id_fk`
+     * is 67 chars — PostgreSQL's `NAMEDATALEN=63` would truncate it
+     * silently, breaking idempotent `IF NOT EXISTS` guards in the
+     * Story 6.6 migration (Story 6.6 R1 M2 fix). The explicit name
+     * `staleness_thresholds_user_id_fk` (30 chars) is well under
+     * the limit.
+     */
+    professionalUserId: t.uuid("professional_user_id").notNull(),
     /**
      * The DISTINCT category string from `loinc_ref.category`. NOT
      * an FK to a categories table (no such table exists; category
@@ -74,6 +89,12 @@ export const StalenessThresholds = pgTable(
       name: "staleness_thresholds_pk",
       columns: [table.professionalUserId, table.biomarkerCategory],
     }),
+    // Explicit FK name (R1 M2 — avoid 63-char NAMEDATALEN truncation).
+    foreignKey({
+      name: "staleness_thresholds_user_id_fk",
+      columns: [table.professionalUserId],
+      foreignColumns: [Professionals.userId],
+    }).onDelete("cascade"),
     // Listing index for the settings page render.
     index("staleness_thresholds_professional_idx").on(table.professionalUserId),
     check(

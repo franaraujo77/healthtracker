@@ -34,17 +34,35 @@
 -- 0005 (it references the table + the partial WHERE on the
 -- `status` column whose enum type is created by 0005).
 --
--- Apply via `psql` against the live database (NOT via the bundled
--- Supabase migration runner). The supabase-deploy GitHub Actions
--- workflow already implements this split-apply path for
--- `0004_*.sql`; if it does not auto-pick `0006_*.sql` via a glob
--- pattern, the workflow needs a minor follow-up extension (out of
--- Story 6.6 scope — coordinate with Francis).
+-- ## Deploy contract (Story 6.6 R1 H1 patch)
+--
+-- This file lives under `supabase/migrations-postapply/`, NOT under
+-- `supabase/migrations/`. Supabase CLI's `db push` scans only the
+-- canonical `migrations/` dir and so does NOT attempt to apply this
+-- file inside its implicit per-file transaction (which would fail
+-- with SQLSTATE 25001 on the `CONCURRENTLY` keyword).
+--
+-- The R1 H1 patch extends `.github/workflows/supabase-deploy.yml`
+-- with a second step that, after `supabase db push`, iterates every
+-- file under `supabase/migrations-postapply/*.sql` in lexicographic
+-- order and applies it via `psql` in autocommit mode (no `-1` flag;
+-- the file ships as bare DDL with NO `BEGIN`/`COMMIT`, so psql runs
+-- it in autocommit and `CREATE … CONCURRENTLY` succeeds).
+--
+-- Naming contract: any future CONCURRENTLY-bearing companion
+-- migration on a patient-data table MUST land in
+-- `supabase/migrations-postapply/` (NOT in `supabase/migrations/`)
+-- and MUST ship as bare DDL with `IF NOT EXISTS` guards. Sequence
+-- across the two directories is the operator's responsibility —
+-- the parent table for every post-apply file MUST be created by a
+-- migration that ran in `db push` above. See CLAUDE.md "Migration
+-- discipline" stanza for the full operator runbook.
 --
 -- The `IF NOT EXISTS` guard keeps this file idempotent against a DB
 -- that has already received the index via `pnpm db:push` (Drizzle
 -- defaults to non-CONCURRENTLY for unique indexes; the production
--- apply path is what makes it CONCURRENTLY).
+-- apply path is what makes it CONCURRENTLY) AND against re-runs of
+-- the deploy job after a partial earlier success.
 
 CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS
     patient_invites_professional_identifier_active_uq
