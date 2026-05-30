@@ -280,13 +280,21 @@ export function BiomarkerCard({
         // tokens only (R1-M3 from Story 6.3): muted info, NOT amber.
         // Distinct from the deviation chip so the doctor sees both
         // signals when a value is BOTH deviant AND stale.
+        //
+        // Story 6.5 R1-H1 fix-up: previously used
+        // `backgroundColor="$textSecondary"` (a TEXT token mis-applied as
+        // a surface). In dark theme that produced light-text-on-light-bg
+        // (~2.3:1 contrast — FAILS WCAG AA). Use the existing neutral
+        // surface token `$accessLogNeutral` (Story 5.3 muted-warm
+        // neutral surface) paired with `$textPrimary` — passes AA in
+        // both themes, NOT amber per UX-DR13.
         <XStack
           alignSelf="flex-start"
           gap="$1"
           paddingHorizontal="$2"
           paddingVertical="$1"
           borderRadius="$chip"
-          backgroundColor="$textSecondary"
+          backgroundColor="$accessLogNeutral"
           borderWidth={1}
           borderColor="$border"
           alignItems="center"
