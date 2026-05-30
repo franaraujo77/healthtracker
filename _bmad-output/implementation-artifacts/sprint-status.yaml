@@ -571,6 +571,30 @@ development_status:
   6-4-doctor-invites-a-patient-to-create-a-health-tracker-account: review
   6-5-doctor-configures-biomarker-staleness-thresholds-for-their-professional-view: review
   6-6-author-incremental-supabase-migration-for-epic-6-schema: review
+  # Story 6.6 R1-followup-2 (2026-05-30): M1 patched inline — Epic 5
+  # baseline migration authored as
+  # `supabase/migrations/0005_epic_5_sharing_baseline.sql` (4 enums:
+  # `share_duration_enum`, `export_format_enum`, `export_status_enum`,
+  # `account_deletion_status_enum`; 6 tables: `pending_invites`,
+  # `share_tokens`, `share_token_biomarkers`,
+  # `conversation_starter_cache`, `exports`,
+  # `account_deletion_requests`; 6 RLS policy bodies copied verbatim
+  # from `packages/db/policies/custom_rls_*.sql`; Supabase Storage
+  # `exports` bucket; `pseudonymize_patient_id()` SQL helper).
+  # Companion file
+  # `supabase/migrations-postapply/0008_epic_5_partial_uniques.sql`
+  # creates 4 CONCURRENTLY partial unique indexes
+  # (`share_tokens_invite_active_uq`,
+  # `share_tokens_patient_invite_active_uq`, `exports_active_uq`,
+  # `account_deletion_requests_active_uq`). Epic 6 migrations
+  # renumbered: `0005_epic_6_doctor_accounts.sql` →
+  # `0006_epic_6_doctor_accounts.sql`;
+  # `migrations-postapply/0006_epic_6_patient_invites_active_uq.sql`
+  # → `migrations-postapply/0007_epic_6_patient_invites_active_uq.sql`.
+  # CLAUDE.md ops note + cross-references updated. Unblocks the
+  # `rls-adversarial` CI check on PR #57 (the fresh-DB apply chain
+  # now creates `pending_invites` BEFORE the Epic 6 FK ALTER touches
+  # it). deferred-work tracker M1 entry struck through.
   # Story 6.6 R1-followup (round-1 follow-up patches, 2026-05-30): H1 +
   # M2 + L2 patched inline; M1 split out as a future story. (a) H1 —
   # extended `.github/workflows/supabase-deploy.yml` with a `psql`

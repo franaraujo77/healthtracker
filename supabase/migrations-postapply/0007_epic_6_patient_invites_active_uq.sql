@@ -1,5 +1,5 @@
 -- =============================================================================
--- 0006_epic_6_patient_invites_active_uq.sql
+-- 0007_epic_6_patient_invites_active_uq.sql
 -- =============================================================================
 --
 -- Creates the partial unique index
@@ -29,10 +29,10 @@
 --
 -- ## Operator apply procedure
 --
--- The companion file `0005_epic_6_doctor_accounts.sql` lands the
+-- The companion file `0006_epic_6_doctor_accounts.sql` lands the
 -- `patient_invites` table itself; this file MUST be applied AFTER
--- 0005 (it references the table + the partial WHERE on the
--- `status` column whose enum type is created by 0005).
+-- 0006 (it references the table + the partial WHERE on the
+-- `status` column whose enum type is created by 0006).
 --
 -- ## Deploy contract (Story 6.6 R1 H1 patch)
 --

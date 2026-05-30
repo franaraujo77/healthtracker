@@ -135,11 +135,22 @@ CONCURRENTLY ...` and apply via `psql` directly (Supabase CLI's
 > for the canonical 3-step pattern (create `_v2` → drop original →
 > rename to preserve `ON CONFLICT ON CONSTRAINT <name>` symbols).
 >
+> **Ops note (Epic 5 baseline migration / Story 6.6 retro addendum):**
+> `supabase/migrations/0005_epic_5_sharing_baseline.sql` lands the
+> previously-undocumented Epic 5 schema (`pending_invites`, `share_tokens`,
+> `share_token_biomarkers`, `conversation_starter_cache`, `exports`,
+> `account_deletion_requests` + 4 enums + RLS + Storage `exports` bucket +
+> `pseudonymize_patient_id()` SQL helper) so that the Epic 6 ALTERs on
+> `pending_invites.resolved_user_id` no longer fail on a fresh-DB apply.
+> Four partial unique indexes ship in
+> `supabase/migrations-postapply/0008_epic_5_partial_uniques.sql` with
+> `CREATE … CONCURRENTLY` (same SQLSTATE 25001 rule as Epic 6's split).
+>
 > **Ops note (Epic 6 consolidated migration / Story 6.6):** Two files ship —
-> `supabase/migrations/0005_epic_6_doctor_accounts.sql` (tables, enums, FKs,
+> `supabase/migrations/0006_epic_6_doctor_accounts.sql` (tables, enums, FKs,
 > non-CONCURRENTLY indexes, RLS policies for `professionals` / `patient_invites`
 > / `staleness_thresholds` + the deferred `pending_invites.resolved_user_id` FK)
-> and `supabase/migrations-postapply/0006_epic_6_patient_invites_active_uq.sql`
+> and `supabase/migrations-postapply/0007_epic_6_patient_invites_active_uq.sql`
 > (the partial unique index `patient_invites_professional_identifier_active_uq` —
 > split out because it gates the doctor → patient invite write surface and
 > MUST apply with `CREATE … CONCURRENTLY` via `psql` directly per the
@@ -159,9 +170,12 @@ ON_ERROR_STOP=1 -f <file>` (autocommit; NO `-1` flag). Companion files
 > `CREATE … CONCURRENTLY IF NOT EXISTS` (or other `IF NOT EXISTS` guard)
 > so partial-success re-runs are safe, and have their parent table
 > created by a sibling migration that runs in `db push` above. Naming:
-> use the same ordinal as the parent migration (e.g. `0006_*` depends on
-> `0005`'s `patient_invites`); psql lex-orders inside the post-apply dir.
-> Precedent file: `0006_epic_6_patient_invites_active_uq.sql`.
+> use a post-apply ordinal that sorts AFTER its parent (e.g. `0007_*`
+> depends on `0006`'s `patient_invites`; `0008_*` depends on `0005`'s
+> `share_tokens` / `exports` / `account_deletion_requests`); psql
+> lex-orders inside the post-apply dir.
+> Precedent files: `0007_epic_6_patient_invites_active_uq.sql` and
+> `0008_epic_5_partial_uniques.sql`.
 
 **UI components**
 

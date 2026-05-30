@@ -10,7 +10,7 @@
 --     + supporting indexes + CHECK constraint. The partial unique index
 --     `patient_invites_professional_identifier_active_uq` is split into
 --     the companion file
---     `supabase/migrations-postapply/0006_epic_6_patient_invites_active_uq.sql`
+--     `supabase/migrations-postapply/0007_epic_6_patient_invites_active_uq.sql`
 --     so it can be applied via `psql` with `CREATE … CONCURRENTLY`
 --     outside Supabase's per-migration implicit transaction
 --     (`CREATE INDEX CONCURRENTLY` inside the implicit tx fails with

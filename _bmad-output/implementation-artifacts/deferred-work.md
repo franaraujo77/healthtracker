@@ -2,7 +2,17 @@
 
 ## Deferred from: code review of story-6.6 round 1 (2026-05-30)
 
-- **Epic 5 baseline Supabase migration is missing** — Story 6.6 R1 M1.
+- ~~**Epic 5 baseline Supabase migration is missing** — Story 6.6 R1 M1.~~
+  **RESOLVED (2026-05-30, Story 6.6 follow-up commit).** Authored
+  `supabase/migrations/0005_epic_5_sharing_baseline.sql` (Epic 5 schema:
+  4 enums, 6 tables, RLS policies for all 6 tables, Supabase Storage
+  `exports` bucket, `pseudonymize_patient_id()` helper) +
+  `supabase/migrations-postapply/0008_epic_5_partial_uniques.sql` (4
+  CONCURRENTLY partial unique indexes). Renumbered Epic 6 migrations
+  (`0005_epic_6_*` → `0006_epic_6_*`; `0006_epic_6_*_active_uq` →
+  `0007_epic_6_*_active_uq`). Unblocks the `rls-adversarial` CI check
+  on PR #57. The original M1 deferral note (kept below for traceability):
+- ~~**Epic 5 baseline Supabase migration is missing** — original Story 6.6 R1 M1.~~
   `supabase/migrations/0005_epic_6_doctor_accounts.sql` references
   `public.pending_invites` in its FK declaration, but no migration
   file ever creates the `pending_invites` / `share_tokens` /

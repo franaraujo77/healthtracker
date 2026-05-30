@@ -182,3 +182,47 @@ Per the task instructions' "STOP if too large" branch. Inventory recorded in `_b
 ### Commit / push
 
 See git log + PR #57 for SHA + HEAD after this addendum.
+
+---
+
+## R1-followup-2 addendum (2026-05-30) — M1 patched inline
+
+The M1 "Epic 5 baseline migration" deferral was reopened to unblock PR #57's failing `rls-adversarial` CI check (fresh-DB apply of `0005_epic_6_doctor_accounts.sql` failed at `ERROR: relation "public.pending_invites" does not exist (SQLSTATE 42P01)`). The deferred-work entry under "Deferred from: code review of story-6.6 round 1" is struck through; this addendum supersedes it.
+
+### Files added
+
+- `supabase/migrations/0005_epic_5_sharing_baseline.sql` (~485 lines). Header mirrors `0003_epic_4_letters_schema.sql` style. Contents:
+  - **Enums (4):** `share_duration_enum`, `export_format_enum`, `export_status_enum`, `account_deletion_status_enum` (all DO-block `IF NOT EXISTS` guarded).
+  - **Tables (6):** `pending_invites`, `share_tokens`, `share_token_biomarkers`, `conversation_starter_cache`, `exports`, `account_deletion_requests`. Every PK / UNIQUE / CHECK / FK guarded.
+  - **FK ON-DELETE rules:** all cascade except `pending_invites.resolved_user_id` (declared as a plain nullable uuid here — the FK itself ships in Epic 6's 0006, mirroring the original Story 5.1 boundary) and the tombstone `account_deletion_requests.patient_id` (intentionally no FK; row outlives owning user — see Story 5.6 ledger semantics).
+  - **Non-partial indexes (in-tx safe):** `pending_invites_patient_identifier_uq`, `share_tokens_patient_created_idx`, `share_tokens_invite_idx`, `conversation_starter_cache_share_token_uq`, `exports_patient_requested_idx`.
+  - **Storage:** `INSERT INTO storage.buckets ('exports', false) ON CONFLICT DO NOTHING` (private bucket, signed-URL-only).
+  - **SQL helper:** `pseudonymize_patient_id(uuid, text) RETURNS text` (Story 5.6 worker contract), `CREATE OR REPLACE` for idempotency. `CREATE EXTENSION IF NOT EXISTS pgcrypto`.
+  - **RLS bodies:** copied verbatim from `packages/db/policies/custom_rls_{pending_invites,share_tokens,share_token_biomarkers,conversation_starter_cache,exports,account_deletion_requests}.sql`. `DROP POLICY IF EXISTS` + `CREATE POLICY` pattern.
+
+- `supabase/migrations-postapply/0008_epic_5_partial_uniques.sql` (~70 lines). Four `CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS`:
+  - `share_tokens_invite_active_uq` WHERE `revoked_at IS NULL`
+  - `share_tokens_patient_invite_active_uq` WHERE `revoked_at IS NULL`
+  - `exports_active_uq` WHERE `status IN ('queued','generating')`
+  - `account_deletion_requests_active_uq` WHERE `status IN ('queued','processing')`
+    Numbered `0008` (AFTER Epic 6's `0007`) so the Epic 6 ordinal does not shift; post-apply files are applied in lex order by the GHA `psql` loop.
+
+### Files renumbered
+
+- `supabase/migrations/0005_epic_6_doctor_accounts.sql` → `supabase/migrations/0006_epic_6_doctor_accounts.sql` (via `git mv`).
+- `supabase/migrations-postapply/0006_epic_6_patient_invites_active_uq.sql` → `supabase/migrations-postapply/0007_epic_6_patient_invites_active_uq.sql` (via `git mv`).
+- Internal cross-references inside both renamed files updated (header comments, sister-file paths).
+
+### Documentation updates
+
+- `CLAUDE.md` — added a new "Ops note (Epic 5 baseline migration / Story 6.6 retro addendum)" stanza; updated the existing "Epic 6 consolidated migration" stanza to reflect the `0006` / `0007` ordinals; updated the post-apply naming-contract bullet to cover both `0007` and `0008` precedents.
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` — appended "Story 6.6 R1-followup-2" comment block above the existing R1-followup notes; story remains at `review`.
+- `_bmad-output/implementation-artifacts/deferred-work.md` — struck through the M1 entry with a "RESOLVED" annotation pointing at this addendum.
+
+### Verification
+
+- `pnpm -w typecheck` — ✅ all packages green (no application code touched).
+- `pnpm -w lint` — ✅ green.
+- `pnpm --filter @healthtracker/api test:unit` — ✅ green.
+- Drift-check against dev DB — see commit message for the `drizzle-kit push --strict` summary.
+- CI confirmation — `gh pr checks 57 --watch` after push; `rls-adversarial` expected to flip to green now that the fresh-DB apply chain creates `pending_invites` BEFORE the Epic 6 FK ALTER touches it.
