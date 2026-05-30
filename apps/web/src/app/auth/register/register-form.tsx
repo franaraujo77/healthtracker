@@ -21,7 +21,18 @@ import {
 import { createSupabaseClient } from "~/auth/client";
 import { useTRPC } from "~/trpc/react";
 
-export function RegisterForm() {
+/**
+ * Story 6.4 AC7 — `inviteId` + `tokenHmac` props thread into the
+ * `initializeProfile` mutation when the patient signed up via a
+ * `/convite/<id>.<hmac>` link. Both are OPTIONAL — the default
+ * unattributed registration path is unchanged.
+ */
+export interface RegisterFormProps {
+  inviteId?: string;
+  tokenHmac?: string;
+}
+
+export function RegisterForm(props: RegisterFormProps = {}) {
   const router = useRouter();
   const trpc = useTRPC();
   const [serverError, setServerError] = useState<string | null>(null);
@@ -70,7 +81,13 @@ export function RegisterForm() {
         return;
       }
       try {
-        await initializeProfile.mutateAsync();
+        // Story 6.4 — thread the optional invite context. When absent,
+        // `initializeProfile` runs unchanged (legacy unattributed path).
+        await initializeProfile.mutateAsync(
+          props.inviteId && props.tokenHmac
+            ? { inviteId: props.inviteId, tokenHmac: props.tokenHmac }
+            : undefined,
+        );
         router.push("/onboarding/consent");
       } catch {
         setServerError(GENERIC_REGISTRATION_ERROR_MESSAGE_PT_BR);

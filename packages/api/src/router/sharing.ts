@@ -12,6 +12,7 @@ import { and, desc, eq, gt, inArray, isNull, or, sql } from "@healthtracker/db";
 import {
   ConversationStarterCache,
   Exports,
+  PatientInvites,
   PendingInvites,
   Professionals,
   ShareTokenBiomarkers,
@@ -25,6 +26,8 @@ import {
   CONVERSATION_STARTER_FAILED_PT_BR,
   CONVERSATION_STARTER_PATIENT_FIRSTNAME_FALLBACK_PT_BR,
   conversationStarterPayloadSchema,
+  createPatientInviteInputSchema,
+  createPatientInviteOutputSchema,
   createPendingInviteInputSchema,
   createShareTokenInputSchema,
   EXPORT_DOWNLOAD_TTL_SECONDS,
@@ -41,6 +44,9 @@ import {
   INVITE_ALREADY_CLAIMED_BY_DIFFERENT_DOCTOR,
   isAccessLogEventKind,
   listAccessLogInputSchema,
+  normalizePatientIdentifier,
+  PATIENT_INVITE_SENT_AUDIT,
+  PatientIdentifierInvalidError,
   PROFESSIONAL_ACCOUNT_ACTIVATED_AUDIT,
   requestExportInputSchema,
   requestExportOutputSchema,
@@ -61,11 +67,13 @@ import type { AuditDb } from "../audit";
 import { writeAuditLog } from "../audit";
 import { isPremium, premiumProcedure } from "../middleware/entitlements";
 import {
+  buildPatientInviteUrl,
   buildShareUrl,
   computeAccessLogTokenStatus,
   constantTimeEqualHmac,
   decodeAccessLogCursor,
   encodeAccessLogCursor,
+  generatePatientInviteToken,
   generateShareToken,
   getDistinctCategoriesForPatient,
   hashIdentifier,
@@ -1829,6 +1837,233 @@ export const sharingRouter = {
           displayName,
           category,
           alreadyActivated,
+        };
+      });
+    }),
+
+  /**
+   * Story 6.4 AC5 — `createPatientInvite`. Activated doctor invites a
+   * patient (email or BR phone) to create a Health Tracker account.
+   *
+   * **Critical ordering (no audit on already-registered short-circuit):**
+   *   1. Activation gate — SELECT professionals; missing → PRECONDITION_FAILED.
+   *   2. Normalise identifier (email or BR phone). Throws → BAD_REQUEST.
+   *   3. Hash the normalised value (PII hygiene — never store raw).
+   *   4. AC11 — auth.users existence check via service-role admin
+   *      client. Match → return `alreadyRegistered:true` with NO row
+   *      written and NO audit emitted. Bounded enumeration oracle is
+   *      accepted (doctors are authenticated, accountable, low-volume).
+   *   5. Idempotent SELECT (active pending row for same doctor +
+   *      identifier hash) — found → return its inviteId + URL.
+   *   6. Generate raw token + HMAC (`signPatientInviteToken` applies
+   *      the `"patient_invite:"` domain prefix per AC8).
+   *   7. INSERT patient_invites + writeAuditLog in one tx.
+   *   8. Narrow 23505 catch — partial-unique-index race folds into the
+   *      idempotent return path (re-SELECT existing row).
+   *
+   * **`patient_invite.sent` is NOT in `ACCESS_LOG_EVENT_KINDS`** —
+   * doctor-side acquisition surface; patient cannot access-log an
+   * event from before they existed.
+   *
+   * **No new env vars** — SHARE_TOKEN_HMAC_SECRET + WEB_APP_URL reused
+   * via the existing NFR-S6 boot-gates (`validateSharingEnv`).
+   */
+  createPatientInvite: doctorProcedure
+    .input(createPatientInviteInputSchema)
+    .output(createPatientInviteOutputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const doctorUserId = ctx.session.user.id;
+
+      // Step 1 — activation gate. Defense-in-depth: the InvitePatientButton
+      // only renders when `activationStatus.activated`, but a malicious
+      // client bypassing the UI must be rejected here too.
+      const activatedRows = await ctx.db
+        .select({ userId: Professionals.userId })
+        .from(Professionals)
+        .where(eq(Professionals.userId, doctorUserId))
+        .limit(1);
+      if (activatedRows.length === 0) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "DOCTOR_NOT_ACTIVATED",
+        });
+      }
+
+      // Step 2 — normalize. The Zod schema accepted any non-empty
+      // string; this is where we discriminate email vs phone.
+      let kind: "email" | "phone";
+      let normalized: string;
+      try {
+        ({ kind, normalized } = normalizePatientIdentifier(input.identifier));
+      } catch (err) {
+        if (err instanceof PatientIdentifierInvalidError) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "PATIENT_IDENTIFIER_INVALID",
+          });
+        }
+        throw err;
+      }
+
+      // Step 3 — hash. PII hygiene parity with Story 5.1.
+      const identifierHash = hashIdentifier(normalized);
+
+      // Step 4 — AC11 already-registered. The doctorProcedure tx runs
+      // as the `authenticated` role and cannot SELECT auth.users; use
+      // the bare service-role-bound `db` connection. Match → return
+      // alreadyRegistered without writing any row or audit. The check
+      // is auth.users-existence-only; no JOIN to sharing tables (no
+      // cross-doctor existence leak). The bounded enumeration oracle
+      // (doctors can probe whether ANY email is a HT user) is accepted
+      // — doctors are authenticated, accountable, low-volume.
+      let alreadyRegistered = false;
+      try {
+        // Use the bare `db` connection (not `ctx.db` — that's the
+        // tx-scoped Drizzle handle inside the doctorProcedure tx and
+        // querying `auth.users` from inside the doctor's GUC-bound tx
+        // is brittle if a future change drops privileges). The bare
+        // connection rides on the service-role postgres user so the
+        // SELECT on `auth.users` succeeds.
+        const { db: rawDb } = await import("@healthtracker/db/client");
+        // Supabase stores `auth.users.phone` WITHOUT the leading `+`
+        // (E.164-trimmed); strip it for the probe.
+        const phoneProbe =
+          kind === "phone" ? normalized.replace(/^\+/, "") : null;
+        const probeRows = await rawDb.execute<{ one: number }>(sql`
+          SELECT 1 AS one
+          FROM auth.users
+          WHERE ${kind === "email" ? sql`email = ${normalized}` : sql`phone = ${phoneProbe}`}
+          LIMIT 1
+        `);
+        alreadyRegistered = probeRows.length > 0;
+      } catch (err) {
+        // Narrow catch — programmer errors propagate; infra failures
+        // degrade to "treat as not-registered" so the doctor can still
+        // attempt the invite (the partial-unique-index + 23505 narrow
+        // catch downstream still prevents duplicate writes).
+        if (
+          err instanceof TypeError ||
+          err instanceof ReferenceError ||
+          err instanceof SyntaxError
+        ) {
+          throw err;
+        }
+        console.warn(
+          "[createPatientInvite] auth.users existence probe failed — continuing",
+          err,
+        );
+      }
+
+      if (alreadyRegistered) {
+        return {
+          inviteId: null,
+          inviteUrl: null,
+          alreadyRegistered: true,
+        };
+      }
+
+      // Step 5 + 7 + 8 — idempotent SELECT-then-INSERT + audit in one tx.
+      return ctx.db.transaction(async (tx) => {
+        // Story 6.4 — bind app.current_doctor_user_id is already set by
+        // the doctorProcedure middleware on this tx; the
+        // patient_invites_select_own policy filters to this doctor's rows.
+        const existing = await tx
+          .select({
+            id: PatientInvites.id,
+            tokenHmac: PatientInvites.tokenHmac,
+          })
+          .from(PatientInvites)
+          .where(
+            and(
+              eq(PatientInvites.professionalUserId, doctorUserId),
+              eq(PatientInvites.identifierHash, identifierHash),
+              eq(PatientInvites.status, "pending"),
+            ),
+          )
+          .limit(1);
+        const existingRow = existing[0];
+        if (existingRow) {
+          return {
+            inviteId: existingRow.id,
+            inviteUrl: buildPatientInviteUrl(
+              existingRow.id,
+              existingRow.tokenHmac,
+            ),
+            alreadyRegistered: false,
+          };
+        }
+
+        const { tokenHmac } = generatePatientInviteToken();
+        let inviteId: string;
+        try {
+          const inserted = await tx
+            .insert(PatientInvites)
+            .values({
+              professionalUserId: doctorUserId,
+              identifierHash,
+              identifierKind: kind,
+              displayName: input.displayName,
+              tokenHmac,
+            })
+            .returning({ id: PatientInvites.id });
+          const row = inserted[0];
+          if (!row) {
+            throw new TRPCError({
+              code: "INTERNAL_SERVER_ERROR",
+              message: "createPatientInvite: insert returned no row",
+            });
+          }
+          inviteId = row.id;
+        } catch (err) {
+          if (isUniqueViolation(err)) {
+            // The partial unique index pinned a concurrent INSERT for
+            // the same (doctor, identifierHash). Re-SELECT and fold.
+            const raced = await tx
+              .select({
+                id: PatientInvites.id,
+                tokenHmac: PatientInvites.tokenHmac,
+              })
+              .from(PatientInvites)
+              .where(
+                and(
+                  eq(PatientInvites.professionalUserId, doctorUserId),
+                  eq(PatientInvites.identifierHash, identifierHash),
+                  eq(PatientInvites.status, "pending"),
+                ),
+              )
+              .limit(1);
+            const racedRow = raced[0];
+            if (racedRow) {
+              return {
+                inviteId: racedRow.id,
+                inviteUrl: buildPatientInviteUrl(
+                  racedRow.id,
+                  racedRow.tokenHmac,
+                ),
+                alreadyRegistered: false,
+              };
+            }
+          }
+          throw err;
+        }
+
+        await writeAuditLog(tx, {
+          actorId: doctorUserId,
+          actorType: "doctor",
+          event: PATIENT_INVITE_SENT_AUDIT,
+          resourceId: inviteId,
+          resourceType: "patient_invite",
+          // Hash only — never log raw identifier (LGPD Art. 46).
+          metadata: {
+            identifierKind: kind,
+            identifierHash,
+          },
+        });
+
+        return {
+          inviteId,
+          inviteUrl: buildPatientInviteUrl(inviteId, tokenHmac),
+          alreadyRegistered: false,
         };
       });
     }),

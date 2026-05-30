@@ -9,6 +9,7 @@ import { createSupabaseServerClient } from "@healthtracker/auth/server";
 import { BiomarkerCard, ConversationStarterPrompt } from "@healthtracker/ui";
 
 import { ConversationStarterPolling } from "./ConversationStarterPolling";
+import { InvitePatientButton } from "./InvitePatientButton";
 import { MarkStarterViewed } from "./MarkStarterViewed";
 import { ProfessionalAccountBanner } from "./ProfessionalAccountBanner";
 import { ReportLayout } from "./ReportLayout";
@@ -235,7 +236,7 @@ export default async function DoctorReportView({
         the doctor is not yet activated. Per-session dismiss; deliberately
         not persisted (see spec T5.2 deferred-work entry).
       */}
-      {!activationStatus.activated && (
+      {!activationStatus.activated ? (
         <ProfessionalAccountBanner
           shareTokenId={shareTokenId}
           tokenHmac={tokenHmac}
@@ -247,6 +248,15 @@ export default async function DoctorReportView({
           // `activated` flips to true.
           initialActivationStatus={activationStatus}
         />
+      ) : (
+        /*
+         * Story 6.4 AC1 — Tier-1 "Convidar paciente" slot. Mutually
+         * exclusive with the activation banner per UX-DR20 (single
+         * Tier-1 action at report close). The button mounts its own
+         * `<ShareTokenProvider>` so the doctorProcedure mutation
+         * carries the `x-share-token` header.
+         */
+        <InvitePatientButton shareTokenId={shareTokenId} />
       )}
     </ReportLayout>
   );

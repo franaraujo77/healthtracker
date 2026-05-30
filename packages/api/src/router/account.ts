@@ -1,18 +1,28 @@
 import type { TRPCRouterRecord } from "@trpc/server";
 import { TRPCError } from "@trpc/server";
+import { z } from "zod/v4";
 
 import { and, eq, inArray, sql } from "@healthtracker/db";
-import { AccountDeletionRequests, Users } from "@healthtracker/db/schema";
+import {
+  AccountDeletionRequests,
+  PatientInvites,
+  Users,
+} from "@healthtracker/db/schema";
 import {
   ACCOUNT_AUDIT_DELETION_REQUESTED,
   getDeletionStatusInputSchema,
   getDeletionStatusOutputSchema,
+  getPatientInviteContextInputSchema,
+  getPatientInviteContextOutputSchema,
+  PATIENT_INVITE_RESOLVED_AUDIT,
   requestDeletionInputSchema,
   requestDeletionOutputSchema,
 } from "@healthtracker/validators";
 
+import type { AuditDb } from "../audit";
 import { writeAuditLog } from "../audit";
-import { protectedProcedure } from "../trpc";
+import { constantTimeEqualHmac } from "../sharing";
+import { protectedProcedure, publicProcedure } from "../trpc";
 
 /**
  * Postgres unique-constraint violation. Drizzle surfaces these via the
@@ -39,31 +49,136 @@ export const accountRouter = {
    *
    * Idempotent: a repeated call (e.g. after a client retry) inserts nothing
    * and writes no audit event.
+   *
+   * Story 6.4 — extended with an OPTIONAL `inviteId` parameter. When
+   * present + valid + pending, atomically flips the `patient_invites`
+   * row to `status='resolved'` and emits the `patient_invite.resolved`
+   * audit row (NOT in `ACCESS_LOG_EVENT_KINDS` — doctor-side acquisition
+   * surface). The original non-invite registration path is unchanged
+   * (no `inviteId` → identical legacy behavior).
+   *
+   * **R1 reviewer guardrail:** the `inviteId` parameter MUST remain
+   * optional. Promoting it to required is a breaking change to the
+   * Story 1.1 register flow — CLAUDE.md "Patient invite discipline".
    */
-  initializeProfile: protectedProcedure.mutation(async ({ ctx }) => {
-    const userId = ctx.session.user.id;
+  initializeProfile: protectedProcedure
+    .input(
+      z
+        .object({
+          inviteId: z.uuid().optional(),
+          tokenHmac: z.string().min(1).max(256).optional(),
+        })
+        .optional(),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const userId = ctx.session.user.id;
+      // `ctx.db` is already the protectedProcedure-opened transaction;
+      // no need for an inner wrap (postgres-js doesn't support nested
+      // tx and the existing mocked test harness doesn't expose one).
 
-    const inserted = await ctx.db
-      .insert(Users)
-      .values({ id: userId })
-      .onConflictDoNothing()
-      .returning({ id: Users.id });
+      const inserted = await ctx.db
+        .insert(Users)
+        .values({ id: userId })
+        .onConflictDoNothing()
+        .returning({ id: Users.id });
 
-    const created = inserted.length > 0;
+      const created = inserted.length > 0;
 
-    if (created) {
-      await writeAuditLog(ctx.db, {
-        actorId: userId,
-        actorType: "patient",
-        event: "patient.created",
-        resourceId: userId,
-        resourceType: "user",
-        metadata: { actor: "self" },
-      });
-    }
+      if (created) {
+        await writeAuditLog(ctx.db, {
+          actorId: userId,
+          actorType: "patient",
+          event: "patient.created",
+          resourceId: userId,
+          resourceType: "user",
+          metadata: { actor: "self" },
+        });
+      }
 
-    return { userId, created };
-  }),
+      // Story 6.4 — invite-resolution branch. Skipped when no
+      // inviteId. The legacy non-invite path is structurally
+      // unchanged (no SELECT, no UPDATE, no audit). Any failure
+      // here is SILENT — registration must not fail because the
+      // referrer-attribution glue had an issue (the patient is
+      // already an HT user at this point, the referral telemetry
+      // is operationally important but not gating).
+      if (input?.inviteId && input.tokenHmac) {
+        await resolvePatientInviteWithinTx(ctx.db, {
+          inviteId: input.inviteId,
+          tokenHmac: input.tokenHmac,
+          patientUserId: userId,
+        });
+      }
+
+      return { userId, created };
+    }),
+
+  /**
+   * Story 6.4 AC7 — `getPatientInviteContext`. Public resolver invoked
+   * by the `/convite/[inviteSegment]` RSC to render the landing card.
+   * No session required; HMAC verify (with the `"patient_invite:"`
+   * domain prefix) is the authorization boundary.
+   *
+   * Returns `valid:false` for missing / expired / revoked / bad-HMAC
+   * cases — the calling RSC renders the generic expired-message card.
+   * **No audit row written** — the patient identity doesn't exist yet
+   * to actor.
+   */
+  getPatientInviteContext: publicProcedure
+    .input(getPatientInviteContextInputSchema)
+    .output(getPatientInviteContextOutputSchema)
+    .query(async ({ ctx, input }) => {
+      // Use bare service-role connection — public resolver, no RLS
+      // bound on `ctx.db` (no protectedProcedure tx). The
+      // patient_invites RLS forbids patient SELECT; we need a
+      // non-gated read here. The `db` client is service-role.
+      const rows = await ctx.db.execute<{
+        token_hmac: string;
+        status: string;
+        expires_at: Date;
+        revoked_at: Date | null;
+        doctor_display_name: string;
+      }>(sql`
+        SELECT
+          pi.token_hmac           AS token_hmac,
+          pi.status::text         AS status,
+          pi.expires_at           AS expires_at,
+          pi.revoked_at           AS revoked_at,
+          prof.display_name       AS doctor_display_name
+        FROM patient_invites pi
+        JOIN professionals prof ON prof.user_id = pi.professional_user_id
+        WHERE pi.id = ${input.inviteId}::uuid
+        LIMIT 1
+      `);
+      const row = rows[0];
+      if (!row) {
+        return { valid: false, doctorDisplayName: null };
+      }
+      // Constant-time HMAC re-verify (sign with `"patient_invite:"`
+      // domain-prefix; defense-in-depth above the URL-supplied half).
+      // We persisted the HMAC of the raw token, and the URL carries
+      // that same HMAC — compare directly via
+      // `constantTimeEqualHmac` semantics: both halves are signatures.
+      // We don't have the raw, so we delegate to length-checked
+      // timingSafeEqual via the helper:
+      const hmacOk = constantTimeEqualHmac(row.token_hmac, input.tokenHmac);
+      if (!hmacOk) {
+        return { valid: false, doctorDisplayName: null };
+      }
+      if (row.status !== "pending") {
+        return { valid: false, doctorDisplayName: null };
+      }
+      if (row.revoked_at !== null) {
+        return { valid: false, doctorDisplayName: null };
+      }
+      if (row.expires_at.getTime() <= Date.now()) {
+        return { valid: false, doctorDisplayName: null };
+      }
+      return {
+        valid: true,
+        doctorDisplayName: row.doctor_display_name,
+      };
+    }),
 
   /**
    * Story 5.6 AC2 — `requestDeletion`. Enqueues an async account-
@@ -216,3 +331,95 @@ export const accountRouter = {
       };
     }),
 } satisfies TRPCRouterRecord;
+
+/**
+ * Story 6.4 AC7 — atomic invite-resolution helper invoked inside the
+ * `initializeProfile` tx when the patient signed up through a
+ * `/convite/<id>.<hmac>` link.
+ *
+ * Sequence (single tx, no separate RTTs vs the user-row INSERT):
+ *   1. SELECT the invite row (status + hmac + expires + revoked).
+ *   2. Constant-time HMAC re-verify above the URL-supplied half.
+ *   3. UPDATE WHERE status='pending' AND id=$id — the racing-revoke
+ *      safe predicate. If UPDATE returns zero rows (revoke / expiry /
+ *      already-claimed race), registration STILL completes silently;
+ *      no audit emission, no referrer attribution.
+ *   4. Emit `patient_invite.resolved` audit (actorType='patient',
+ *      metadata carries doctorUserId). NOT in `ACCESS_LOG_EVENT_KINDS`.
+ *
+ * **MUST NOT THROW** — registration must complete even if every
+ * invite-resolution step fails. The patient is already a Health Tracker
+ * user at this point; the referrer attribution is doctor-side
+ * telemetry, not a registration prerequisite. Narrow catch: programmer
+ * errors propagate.
+ */
+async function resolvePatientInviteWithinTx(
+  tx: AuditDb,
+  args: { inviteId: string; tokenHmac: string; patientUserId: string },
+): Promise<void> {
+  try {
+    const rows = await tx
+      .select({
+        id: PatientInvites.id,
+        tokenHmac: PatientInvites.tokenHmac,
+        status: PatientInvites.status,
+        expiresAt: PatientInvites.expiresAt,
+        revokedAt: PatientInvites.revokedAt,
+        professionalUserId: PatientInvites.professionalUserId,
+      })
+      .from(PatientInvites)
+      .where(eq(PatientInvites.id, args.inviteId))
+      .limit(1);
+    const row = rows[0];
+    if (!row) return;
+    if (!constantTimeEqualHmac(row.tokenHmac, args.tokenHmac)) return;
+    if (row.status !== "pending") return;
+    if (row.revokedAt !== null) return;
+    if (row.expiresAt.getTime() <= Date.now()) return;
+
+    // UPDATE-WHERE-status='pending' is the racing-revoke safe gate
+    // (Story 6.4 AC7). A concurrent revoke wins; the patient still
+    // completes registration but goes unattributed.
+    const updated = await tx
+      .update(PatientInvites)
+      .set({
+        resolvedUserId: args.patientUserId,
+        resolvedAt: sql`now()`,
+        status: "resolved",
+      })
+      .where(
+        and(
+          eq(PatientInvites.id, args.inviteId),
+          eq(PatientInvites.status, "pending"),
+        ),
+      )
+      .returning({ id: PatientInvites.id });
+
+    if (updated.length === 0) {
+      // Race with revoke / concurrent claim. No audit, no error —
+      // the patient's registration completes unattributed.
+      return;
+    }
+
+    await writeAuditLog(tx, {
+      actorId: args.patientUserId,
+      actorType: "patient",
+      event: PATIENT_INVITE_RESOLVED_AUDIT,
+      resourceId: args.inviteId,
+      resourceType: "patient_invite",
+      metadata: { doctorUserId: row.professionalUserId },
+    });
+  } catch (err) {
+    if (
+      err instanceof TypeError ||
+      err instanceof ReferenceError ||
+      err instanceof SyntaxError
+    ) {
+      throw err;
+    }
+    console.warn(
+      "[initializeProfile] patient_invite resolution failed — continuing",
+      err,
+    );
+  }
+}
