@@ -14,21 +14,60 @@ so that I can quickly identify which patient values need to be refreshed before 
 
 ## Acceptance Criteria
 
-(Full AC text preserved in git history of the original spec; abbreviated here after a sed regression. See referenced spec sources at the bottom of this file and the implementation files below for the load-bearing contracts.)
+The four canonical Given/When/Then blocks come from the epic
+(`_bmad-output/planning-artifacts/epics.md` lines 1521–1545) and are
+restored verbatim below (R1-followup MEDIUM-2 — replaces the
+one-line stubs that landed after a sed regression). ACs 5–13 are
+implementation-contract refinements layered on top of the canonical
+AC1–AC4; they are NOT in the epic but are load-bearing for the
+review/audit cycle and the Story 6.6 migration.
 
-1. **AC1** — Settings page at `/profissional/configuracoes/limiares` (NEW), with `requireDoctorSession()` semantics; not-activated placeholder card.
-2. **AC2** — Categories come from `loinc_ref.category` DISTINCT; pt-BR labels via open map with raw-string fallback.
-3. **AC3** — NEW `staleness_thresholds` table with composite PK (`professional_user_id`, `biomarker_category`); no synthetic id; CHECK constraint on day range.
-4. **AC4** — `accountRouter.updateStalenessThresholds` mutation with activation gate + unknown-category cross-check + transactional UPSERT batch + audit row inside same tx; empty-array no-op.
-5. **AC5** — Staleness computed server-side at `getConversationStarter` resolver boundary; emitted via OPTIONAL `biomarkerStaleness` parallel array; cache payload JSONB UNCHANGED.
-6. **AC6** — `BiomarkerCard` gains OPTIONAL `isStale` + `stalenessThresholdDays` props; orthogonal to `state`; chip uses muted Tamagui tokens (NOT amber); patient-surface invariant — `isStale === undefined` → no chip / no a11y change.
-7. **AC7** — `accountRouter.listStalenessThresholds` query: LEFT JOIN distinct `loinc_ref.category` with the doctor's rows; emits `isDefault` hint.
-8. **AC8** — `staleness_threshold.updated` audit kind; NOT in `ACCESS_LOG_EVENT_KINDS`.
-9. **AC9** — RLS in NEW `custom_rls_staleness_thresholds.sql` (select/insert/update OWN + service-role bypass); NO patient policy; NO DELETE policy.
-10. **AC10** — 7-identity RLS matrix on the new table.
-11. **AC11** — Settings page form: per-row numeric input with inline amber-not-red validation; global save CTA; success toast.
+### Canonical ACs (from epic — Story 6.5)
+
+**AC1 — Settings page renders categories with thresholds**
+
+**Given** I am in my professional dashboard under Configurações > Limiares de atualização,
+**When** I view the threshold settings,
+**Then** I see a list of biomarker categories (lipídios, tireoide, ferro, metabolismo, etc.) each with a configurable threshold in days.
+
+**AC2 — Configured threshold drives the stale chip**
+
+**Given** I set the ferritin staleness threshold to 90 days,
+**When** a patient's ferritin value was collected more than 90 days ago,
+**Then** the corresponding `BiomarkerCard` in my Conversation Starter view shows a "Resultado antigo" chip.
+
+**AC3 — Default 180 days when unconfigured**
+
+**Given** I have not configured a threshold for a biomarker,
+**When** the staleness check runs,
+**Then** the system default of 180 days is applied.
+
+**AC4 — Audit row on save**
+
+**Given** staleness thresholds are saved,
+**When** the tRPC resolver writes the configuration,
+**Then** `writeAuditLog()` records `staleness_threshold.updated` with `professional_id` and the updated categories.
+
+### Implementation-contract ACs (Story 6.5 scope)
+
+5. **AC5** — Staleness computed server-side at `getConversationStarter` resolver boundary; emitted via OPTIONAL `biomarkerStaleness` parallel array (index-aligned to `payload.biomarkerCards`); cache payload JSONB UNCHANGED. `currentValue === null` ⇒ `isStale: false`. Failures silently degrade to `biomarkerStaleness: undefined`.
+6. **AC6** — `BiomarkerCard` gains OPTIONAL `isStale` + `stalenessThresholdDays` props; orthogonal to `state`; chip uses muted Tamagui tokens (`$accessLogNeutral` + `$border` post-R1, NOT amber per UX-DR13); patient-surface invariant — `isStale === undefined` → no chip / no a11y change.
+7. **AC7** — `accountRouter.listStalenessThresholds` query: LEFT JOIN distinct `loinc_ref.category` with the doctor's rows; emits `isDefault` hint when the row is absent.
+8. **AC8** — `staleness_threshold.updated` audit kind; NOT in `ACCESS_LOG_EVENT_KINDS` (doctor-side telemetry, not a patient access event).
+9. **AC9** — RLS in NEW `custom_rls_staleness_thresholds.sql`: select/insert/update OWN rows only (keyed off `app.current_doctor_user_id` GUC) + service-role bypass; NO patient policy; NO DELETE policy (UI has no delete path — deferred to a future "reset to default" story).
+10. **AC10** — 7-identity RLS matrix on the new table (anonymous, patient, owner-doctor, other-doctor, unrelated-doctor, service-role, no-GUC).
+11. **AC11** — Settings page form: per-row numeric input with inline amber-not-red validation (1..3650); global save CTA disabled while invalid or pending; success toast (auto-clears after 4s post-R1-followup LOW-1).
 12. **AC12** — View page wiring — thread `biomarkerStaleness` into `<BiomarkerCard>` + render Tier-3 link to settings when activated.
 13. **AC13** — CLAUDE.md doc section + Story 6.6 migration checklist + deferred-work entries.
+
+### Activation/authorization contract
+
+Both staleness procedures sit under `professionalSessionProcedure`,
+which (post-R1-followup MEDIUM-1) verifies the Supabase session AND
+the `professionals` row in its middleware — so a signed-in patient
+or a deactivated doctor hits `PRECONDITION_FAILED` BEFORE the
+resolver body runs. The settings page catches `PRECONDITION_FAILED`
+to render the "ative sua conta" placeholder card.
 
 **Requirements:** FR31, AR10, UX-DR20, NFR-S1
 

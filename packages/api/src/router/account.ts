@@ -6,7 +6,6 @@ import { and, eq, inArray, sql } from "@healthtracker/db";
 import {
   AccountDeletionRequests,
   PatientInvites,
-  Professionals,
   StalenessThresholds,
   Users,
 } from "@healthtracker/db/schema";
@@ -348,9 +347,9 @@ export const accountRouter = {
    * sets per-biomarker-category staleness thresholds.
    *
    * **Critical ordering (each step is load-bearing):**
-   *   1. Activation gate (SELECT professionals). Missing →
-   *      PRECONDITION_FAILED. Defense-in-depth above the RSC's
-   *      placeholder card.
+   *   1. Activation gate — handled by `professionalSessionProcedure`
+   *      itself (R1-followup MEDIUM-1). Missing professionals row →
+   *      PRECONDITION_FAILED before this resolver body runs.
    *   2. Zod refine already rejected duplicate-by-category at the
    *      boundary; AC4 step 2 is satisfied by the input schema.
    *   3. Unknown-category cross-check vs `loinc_ref` distinct
@@ -372,19 +371,6 @@ export const accountRouter = {
     .output(updateStalenessThresholdsOutputSchema)
     .mutation(async ({ ctx, input }) => {
       const doctorUserId = ctx.session.user.id;
-
-      // Step 1 — activation gate.
-      const activatedRows = await ctx.db
-        .select({ userId: Professionals.userId })
-        .from(Professionals)
-        .where(eq(Professionals.userId, doctorUserId))
-        .limit(1);
-      if (activatedRows.length === 0) {
-        throw new TRPCError({
-          code: "PRECONDITION_FAILED",
-          message: "DOCTOR_NOT_ACTIVATED",
-        });
-      }
 
       // Step 3 — unknown-category cross-check. Only runs when there
       // are entries to validate (empty array = no-op short-circuit).
@@ -461,25 +447,14 @@ export const accountRouter = {
    * with the doctor's rows; absent rows surface as
    * `(thresholdDays = STALENESS_DEFAULT_DAYS, isDefault = true)`.
    *
-   * Activation gate same as the update mutation.
+   * Activation gate handled by `professionalSessionProcedure`
+   * (R1-followup MEDIUM-1) — not-activated → PRECONDITION_FAILED.
    */
   listStalenessThresholds: professionalSessionProcedure
     .input(listStalenessThresholdsInputSchema)
     .output(listStalenessThresholdsOutputSchema)
     .query(async ({ ctx }) => {
       const doctorUserId = ctx.session.user.id;
-
-      const activatedRows = await ctx.db
-        .select({ userId: Professionals.userId })
-        .from(Professionals)
-        .where(eq(Professionals.userId, doctorUserId))
-        .limit(1);
-      if (activatedRows.length === 0) {
-        throw new TRPCError({
-          code: "PRECONDITION_FAILED",
-          message: "DOCTOR_NOT_ACTIVATED",
-        });
-      }
 
       // LEFT JOIN — keep the server-side merge so the form's local
       // state is a simple array. The doctor-scoped SELECT on

@@ -129,18 +129,28 @@ export const protectedProcedure = t.procedure
 /**
  * Story 6.5 — `professionalSessionProcedure`.
  *
- * Session-only doctor procedure for `/profissional/*` surfaces that
- * have NO share-token in context (settings pages, dashboards). Binds
- * `app.current_doctor_user_id` from the verified Supabase session uid
- * so the `professionals`-family RLS policies (which key off this GUC,
- * NOT `auth.uid()` — see `custom_rls_professionals.sql` rationale) can
- * exercise.
+ * Session-only ACTIVATED-doctor procedure for `/profissional/*`
+ * surfaces that have NO share-token in context (settings pages,
+ * dashboards). Binds `app.current_doctor_user_id` from the verified
+ * Supabase session uid so the `professionals`-family RLS policies
+ * (which key off this GUC, NOT `auth.uid()` — see
+ * `custom_rls_professionals.sql` rationale) can exercise.
  *
  * Distinct from `doctorProcedure`: NO `x-share-token` header required,
- * NO `app.current_share_token_id` GUC bound, NO HMAC re-check in the
- * resolver. The activation gate is the application layer's
- * responsibility (the resolver must SELECT `professionals` and reject
- * inactive doctors with `PRECONDITION_FAILED`).
+ * NO `app.current_share_token_id` GUC bound, NO HMAC re-check.
+ *
+ * **R1-followup MEDIUM-1 (Story 6.5):** the activation gate (SELECT
+ * `professionals`) is folded INTO this middleware so the procedure
+ * name is truthful — any consumer is guaranteed a session AND an
+ * activated `professionals` row before the resolver runs. Without
+ * this fold, a signed-in patient would only be rejected by an
+ * application-layer recheck inside each resolver; the name implied
+ * "doctor-verified" but only the session was verified.
+ *
+ * The SELECT runs INSIDE the transaction so the GUC binding and the
+ * activation check share a single RTT cluster (savepoint-cheap) and
+ * so future RLS predicates that rely on `app.current_doctor_user_id`
+ * can be exercised by the SELECT itself if desired.
  *
  * The `app.current_user_role` GUC is set to `"doctor"` so any future
  * shared RLS predicate that disambiguates patient-vs-doctor sees the
@@ -163,6 +173,21 @@ export const professionalSessionProcedure = t.procedure
       await tx.execute(
         sql`SELECT set_config('app.current_user_role', ${"doctor"}, true)`,
       );
+      // R1-followup MEDIUM-1 — activation gate inlined. PRECONDITION_FAILED
+      // (NOT UNAUTHORIZED) preserves the existing application-layer
+      // contract that resolvers / RSCs catch to render the
+      // "ative sua conta" placeholder card (see
+      // `/profissional/configuracoes/limiares/page.tsx`).
+      const activated = await tx.execute<{ user_id: string }>(
+        sql`SELECT user_id FROM professionals WHERE user_id = ${session.user.id} LIMIT 1`,
+      );
+      const activatedRows = activated as unknown as { user_id: string }[];
+      if (activatedRows.length === 0) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "DOCTOR_NOT_ACTIVATED",
+        });
+      }
       return next({
         ctx: {
           session: { ...session, user: session.user },

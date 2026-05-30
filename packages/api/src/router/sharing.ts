@@ -1493,6 +1493,36 @@ export const sharingRouter = {
         | undefined;
       if (cacheStatus === "ready" && payload !== null) {
         try {
+          // R1-followup LOW-3 (Story 6.5) — dedup → fan-out contract.
+          //
+          // **Order guarantee:** the OUTPUT `biomarkerStaleness` array
+          // is parallel to `payload.biomarkerCards` (index-aligned).
+          // The dedup below is ONLY a SQL `IN (...)` optimization —
+          // we collect the distinct category set so the threshold +
+          // latest-collected-at SELECTs scan one row per category,
+          // not per card. Per-card mapping happens at the end of
+          // this try-block via `payload.biomarkerCards.map(...)`,
+          // preserving the input order. Cards with the same category
+          // share the same `(thresholdDays, isStale)` pair.
+          //
+          // **Missing-data semantics:**
+          //   - `card.currentValue === null` → `isStale: false` +
+          //     surfaced threshold (no observation date to compare).
+          //   - `latestMap.get(card.category) === undefined` → no
+          //     matching observation row → `isStale: false`.
+          //   - `thresholdMap.get(card.category) === undefined` →
+          //     `thresholdDays = STALENESS_DEFAULT_DAYS` (AC5).
+          //   - card.category is non-string or empty → silently
+          //     filtered out of the dedup set; downstream
+          //     `thresholdMap.get(undefined)` falls back to default,
+          //     `latestMap.get(undefined)` is undefined → `isStale: false`.
+          //
+          // **Best-effort contract:** any throw from the two SQL
+          // selects below (network blip, RLS edge, schema drift)
+          // degrades silently to `biomarkerStaleness: undefined`
+          // (see the narrow-catch below). Patient surfaces remain
+          // unchanged (`isStale === undefined` short-circuits the
+          // chip render in `BiomarkerCard`).
           const categories = Array.from(
             new Set(
               payload.biomarkerCards

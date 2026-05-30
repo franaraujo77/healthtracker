@@ -4,7 +4,7 @@ import { TRPCError } from "@trpc/server";
 
 import type { RouterOutputs } from "@healthtracker/api";
 import { appRouter, createTRPCContext } from "@healthtracker/api";
-import { createSupabaseServerClient } from "@healthtracker/auth/server";
+import { getVerifiedSessionForCaller } from "@healthtracker/auth/server";
 import {
   PROFESSIONAL_STALENESS_THRESHOLDS_ROUTE,
   STALENESS_THRESHOLDS_HEADING_PT_BR,
@@ -30,27 +30,18 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export default async function LimiaresPage(): Promise<React.ReactElement> {
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
+  // R1-followup MEDIUM-4 — consolidated session helper (see
+  // `packages/auth/src/server.ts`). Replaces the inline `getUser()` +
+  // `getSession()` + synthetic-shim pattern that lived here and in
+  // `m/[token]/view/page.tsx`.
+  const session = await getVerifiedSessionForCaller();
+  if (!session) {
     redirect(
       `/auth/login?next=${encodeURIComponent(PROFESSIONAL_STALENESS_THRESHOLDS_ROUTE)}`,
     );
   }
 
   const reqHeaders = await headers();
-  const { data: sessionData } = await supabase.auth.getSession();
-  const session =
-    sessionData.session ??
-    ({
-      access_token: "",
-      refresh_token: "",
-      expires_in: 0,
-      token_type: "bearer",
-      user,
-    } as unknown as NonNullable<typeof sessionData.session>);
   const ctx = createTRPCContext({
     headers: reqHeaders,
     session,

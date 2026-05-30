@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, index, pgTable, uniqueIndex } from "drizzle-orm/pg-core";
+import { check, index, pgTable, primaryKey } from "drizzle-orm/pg-core";
 
 import { Professionals } from "./professionals";
 
@@ -64,11 +64,16 @@ export const StalenessThresholds = pgTable(
       .notNull(),
   }),
   (table) => [
-    // Composite primary key (uniqueness contract for ON CONFLICT).
-    uniqueIndex("staleness_thresholds_pk").on(
-      table.professionalUserId,
-      table.biomarkerCategory,
-    ),
+    // Composite primary key — mirrors Story 5.1's `share_token_biomarkers`
+    // precedent (`packages/db/src/schema/sharing.ts`). R1-followup
+    // MEDIUM-3 (Story 6.5): originally declared as `uniqueIndex` only
+    // (table had NO PK); switched to real `primaryKey()` so the
+    // schema's "composite PK" claim is truthful and the ON CONFLICT
+    // target is explicit.
+    primaryKey({
+      name: "staleness_thresholds_pk",
+      columns: [table.professionalUserId, table.biomarkerCategory],
+    }),
     // Listing index for the settings page render.
     index("staleness_thresholds_professional_idx").on(table.professionalUserId),
     check(

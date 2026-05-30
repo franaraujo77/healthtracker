@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import {
   STALENESS_THRESHOLD_DAYS_LABEL_PT_BR,
@@ -31,6 +31,7 @@ export function StalenessThresholdsForm(props: {
 }) {
   const trpc = useTRPC();
   const router = useRouter();
+  const queryClient = useQueryClient();
 
   // Local form state — row index → current value (string for input).
   const [rows, setRows] = useState(
@@ -47,12 +48,50 @@ export function StalenessThresholdsForm(props: {
     text: string;
   } | null>(null);
 
+  // R1-followup LOW-1 — auto-clear toast after 4s so a stale "Salvo"
+  // doesn't sit in the viewport forever. Cleanup on unmount + on every
+  // new toast supersedes prior timers.
+  useEffect(() => {
+    if (toast === null) return;
+    const id = setTimeout(() => setToast(null), 4000);
+    return () => clearTimeout(id);
+  }, [toast]);
+
   const mutation = useMutation(
     trpc.account.updateStalenessThresholds.mutationOptions({
-      onSuccess: () => {
+      onSuccess: (_data, variables) => {
         setToast({
           kind: "success",
           text: STALENESS_THRESHOLD_SAVE_TOAST_PT_BR,
+        });
+        // R1-followup LOW-2 — sync local state from the submitted
+        // values so `isDefault` flips to false for any newly-persisted
+        // category and `touched` resets. Without this, the form's
+        // `isDefault` hint kept showing even after a save because the
+        // RSC re-fetch did not propagate into `useState`.
+        const persistedByCategory = new Map(
+          variables.thresholds.map((t) => [
+            t.biomarkerCategory,
+            t.thresholdDays,
+          ]),
+        );
+        setRows((prev) =>
+          prev.map((r) => {
+            const persisted = persistedByCategory.get(r.biomarkerCategory);
+            if (persisted === undefined) return { ...r, touched: false };
+            return {
+              ...r,
+              value: String(persisted),
+              isDefault: false,
+              touched: false,
+            };
+          }),
+        );
+        // Invalidate the tRPC query so any sibling RSC / hook that
+        // reads `listStalenessThresholds` re-fetches. `router.refresh()`
+        // still triggers the RSC re-render below.
+        void queryClient.invalidateQueries({
+          queryKey: trpc.account.listStalenessThresholds.queryKey(),
         });
         router.refresh();
       },

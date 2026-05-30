@@ -1,5 +1,5 @@
 # generated: 2026-05-15
-# last_updated: 2026-05-30 (story 6.5 → review)
+# last_updated: 2026-05-30 (story 6.5 R1-followup patches → still review)
 # project: healthtracker
 # project_key: NOKEY
 # tracking_system: file-system
@@ -570,6 +570,38 @@ development_status:
   6-3-doctor-activates-a-professional-account-from-the-conversation-starter-view: review
   6-4-doctor-invites-a-patient-to-create-a-health-tracker-account: review
   6-5-doctor-configures-biomarker-staleness-thresholds-for-their-professional-view: review
+  # Story 6.5 R1-followup patches landed. All remaining R1 findings
+  # (MEDIUM-1/2/3/4 + LOW-1/2/3) addressed in a single commit on
+  # `worktree-story-6-2` / PR #57. Headline R1-followup fixes:
+  # (a) MEDIUM-1 — activation gate folded INTO
+  # `professionalSessionProcedure` middleware so the procedure name
+  # is truthful (signed-in non-doctor now hits PRECONDITION_FAILED
+  # at the middleware, not in the resolver body); both staleness
+  # resolvers stripped of their inline activation SELECTs;
+  # new `professional-session-gate.test.ts` (4 cases) mirrors the
+  # `doctor-procedure-session-gate.test.ts` shape. (b) MEDIUM-2 —
+  # canonical Given/When/Then ACs restored verbatim from epic
+  # 1521–1545; implementation-contract ACs 5–13 preserved as a
+  # subsection. (c) MEDIUM-3 — `staleness_thresholds` table now
+  # declares a real `primaryKey()` (composite on
+  # professional_user_id + biomarker_category) matching Story 5.1's
+  # `share_token_biomarkers` precedent; previous `uniqueIndex` was
+  # misleading. No migration ships (Story 6.6 batches Epic 6 SQL).
+  # (d) MEDIUM-4 — synthetic Session shim consolidated into a new
+  # `getVerifiedSessionForCaller()` helper in
+  # `@healthtracker/auth/server`; limiares page migrated; view page
+  # left for Story 6.6 hardening (token-status gate interleaves).
+  # (e) LOW-1 — form toast auto-clears after 4s via useEffect.
+  # (f) LOW-2 — form `onSuccess` syncs local `useState` from the
+  # submitted thresholds (`isDefault` flips false, `touched`
+  # resets) + invalidates the tRPC query. (g) LOW-3 — dedup→fan-out
+  # contract documented in `sharing.ts` (order guarantee,
+  # missing-data semantics, best-effort silent-degrade). Quality
+  # gates: typecheck 17/17 clean; lint clean for changed packages;
+  # api test:unit 334/334 (was 330; +4 new). db test:integration
+  # SKIPPED (testcontainers infra unavailable — Docker not running
+  # in worktree; RLS contract unchanged this round). review status
+  # unchanged — Francis flips.
   # Story 6.5 implementation complete → review. Stacked on
   # worktree-story-6-2 / PR #57 (6.2+6.3+6.4 already in review). FR31
   # doctor-side preference surface delivered. NEW `staleness_thresholds`
