@@ -2,6 +2,7 @@ import { TRPCError } from "@trpc/server";
 
 import { and, eq, isNull, sql } from "@healthtracker/db";
 import {
+  EmotionalCheckins,
   ExtractionReviewQueue,
   Observations,
   Uploads,
@@ -43,6 +44,15 @@ export async function getUploadDetailForPatient(
   createdAt: Date;
   processingStartedAt: Date | null;
   processingCompletedAt: Date | null;
+  // Story 7.2 — viewed_at is NULL until the first open of the upload
+  // detail screen. `isFirstView` is derived BEFORE any side-effect so
+  // the client can gate the pre-results emotional check-in sheet on
+  // it; the actual mark lands via the separate `markUploadViewed`
+  // mutation that the client fires from the sheet's open/skip
+  // handlers.
+  viewedAt: Date | null;
+  isFirstView: boolean;
+  hasPreEmotionalCheckIn: boolean;
   lowConfidenceFields: {
     id: string;
     biomarkerName: string;
@@ -62,6 +72,7 @@ export async function getUploadDetailForPatient(
       createdAt: Uploads.createdAt,
       processingStartedAt: Uploads.processingStartedAt,
       processingCompletedAt: Uploads.processingCompletedAt,
+      viewedAt: Uploads.viewedAt,
     })
     .from(Uploads)
     .where(and(eq(Uploads.id, uploadId), eq(Uploads.patientId, patientId)))
@@ -115,12 +126,29 @@ export async function getUploadDetailForPatient(
       ),
     );
 
+  // Story 7.2 — defense-in-depth on top of `viewed_at`: even if a
+  // future bug failed to mark `viewed_at`, the existing pre check-in
+  // row blocks the sheet from re-prompting. RLS scopes by patient.
+  const [preCheckInExists] = await database
+    .select({ c: sql<number>`count(*)::int` })
+    .from(EmotionalCheckins)
+    .where(
+      and(
+        eq(EmotionalCheckins.uploadId, uploadId),
+        eq(EmotionalCheckins.patientId, patientId),
+        eq(EmotionalCheckins.type, "pre"),
+      ),
+    );
+
   return {
     id: uploadRow.id,
     status: uploadRow.status,
     createdAt: uploadRow.createdAt,
     processingStartedAt: uploadRow.processingStartedAt,
     processingCompletedAt: uploadRow.processingCompletedAt,
+    viewedAt: uploadRow.viewedAt,
+    isFirstView: uploadRow.viewedAt === null,
+    hasPreEmotionalCheckIn: (preCheckInExists?.c ?? 0) > 0,
     lowConfidenceFields: lowConfidenceRows,
     hasOperatorOnlyRows,
     publishedObservationCount: obsCountRow?.c ?? 0,

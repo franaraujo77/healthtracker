@@ -1,6 +1,7 @@
 export * from "./account";
 export * from "./audit";
 export * from "./consent";
+export * from "./emotional_checkins";
 export * from "./extraction_review_queue";
 export * from "./letters";
 export * from "./life_events";

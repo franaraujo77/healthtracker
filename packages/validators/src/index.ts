@@ -10,6 +10,7 @@ export * from "./professional";
 export * from "./sharing";
 export * from "./staleness";
 export * from "./life-events";
+export * from "./emotional-checkins";
 
 /**
  * Story 2.4 — pt-BR copy + route constants for the upload detail

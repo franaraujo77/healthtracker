@@ -5,6 +5,8 @@ import { Stack, useLocalSearchParams } from "expo-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Input, Text, YStack } from "tamagui";
 
+import type { EmotionalCheckinState } from "@healthtracker/validators";
+import { EmotionalCheckInSheet } from "@healthtracker/ui";
 import {
   formatBrazilianDecimal,
   parseBrazilianDecimal,
@@ -141,12 +143,77 @@ function ReviewCard({ uploadId, field }: CardProps) {
 
 export default function UploadDetailScreen() {
   const { uploadId } = useLocalSearchParams<{ uploadId: string }>();
+  const queryClient = useQueryClient();
   const query = useQuery(
     trpc.uploads.getUploadDetail.queryOptions(
       { uploadId },
       { refetchOnWindowFocus: true },
     ),
   );
+
+  // Story 7.2 — pre-results emotional check-in sheet (AC1).
+  // Gate: status === 'complete' AND isFirstView AND no pre-check-in
+  // row exists yet, AND the patient hasn't already dismissed/submitted
+  // within this screen mount. Derived inline (no setState-in-effect)
+  // — `preCheckInDismissed` is the only piece of imperative state.
+  const [preCheckInDismissed, setPreCheckInDismissed] = useState(false);
+  // R1-L2 — explicit Boolean coercion so the type is `boolean` (not
+  // `boolean | undefined`) for the EmotionalCheckInSheet `open` prop.
+  const preCheckInSheetOpen = Boolean(
+    !preCheckInDismissed &&
+    query.data?.status === "complete" &&
+    query.data.isFirstView &&
+    !query.data.hasPreEmotionalCheckIn,
+  );
+
+  const recordPreCheckInMutation = useMutation(
+    trpc.emotionalCheckIns.recordPreResults.mutationOptions(),
+  );
+  const markViewedMutation = useMutation(
+    trpc.uploads.markUploadViewed.mutationOptions(),
+  );
+
+  function invalidateUploadDetail() {
+    void queryClient.invalidateQueries({
+      queryKey: trpc.uploads.getUploadDetail.queryKey({ uploadId }),
+    });
+  }
+
+  async function handlePreCheckInSubmit(state: EmotionalCheckinState) {
+    await recordPreCheckInMutation.mutateAsync({
+      uploadId,
+      state,
+      type: "pre",
+    });
+    markViewedMutation.mutate(
+      { uploadId },
+      { onSettled: invalidateUploadDetail },
+    );
+  }
+
+  // R1-H3 / R1-M1 — every non-decision close path (Pular, Android
+  // back-press, Tamagui internal close, sheet handle gesture) is
+  // treated as Skip: dismisses the sheet AND marks the upload viewed
+  // so the patient doesn't get re-prompted on next mount. Without
+  // this, `viewed_at` stays NULL on any close path that wasn't the
+  // explicit submit/skip handler, defeating the AC1 non-dismissible
+  // contract and creating a re-prompt loop.
+  function dismissPreCheckInAsSkip() {
+    if (preCheckInDismissed) return;
+    setPreCheckInDismissed(true);
+    markViewedMutation.mutate(
+      { uploadId },
+      { onSettled: invalidateUploadDetail },
+    );
+  }
+
+  function handlePreCheckInSkip() {
+    dismissPreCheckInAsSkip();
+  }
+
+  function handlePreCheckInOpenChange(next: boolean) {
+    if (!next) dismissPreCheckInAsSkip();
+  }
 
   let banner: string | null = null;
   if (query.data) {
@@ -163,6 +230,11 @@ export default function UploadDetailScreen() {
     }
   }
 
+  // Story 7.2 — results body hides while the pre-results check-in
+  // sheet is open so the patient doesn't peek at the values before
+  // making their selection (AC1: "before results appear").
+  const resultsHidden = preCheckInSheetOpen;
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: BACKGROUND_PRIMARY }}>
       <Stack.Screen options={{ title: "Resultado" }} />
@@ -175,7 +247,7 @@ export default function UploadDetailScreen() {
           />
         }
       >
-        <YStack gap="$3">
+        <YStack gap="$3" opacity={resultsHidden ? 0 : 1}>
           {query.isLoading ? <Text>{UPLOAD_DETAIL_LOADING_PT_BR}</Text> : null}
           {query.isError ? (
             <Text accessibilityRole="alert">{UPLOAD_DETAIL_ERROR_PT_BR}</Text>
@@ -195,6 +267,13 @@ export default function UploadDetailScreen() {
           ) : null}
         </YStack>
       </ScrollView>
+      <EmotionalCheckInSheet
+        open={preCheckInSheetOpen}
+        onOpenChange={handlePreCheckInOpenChange}
+        onSubmit={handlePreCheckInSubmit}
+        onSkip={handlePreCheckInSkip}
+        isSubmitting={recordPreCheckInMutation.isPending}
+      />
     </SafeAreaView>
   );
 }

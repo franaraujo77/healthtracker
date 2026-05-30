@@ -21,6 +21,7 @@ import {
 } from "../storage";
 import { protectedProcedure } from "../trpc";
 import { enqueueExtractDocument, writeUpload } from "../uploads";
+import { markUploadViewed } from "../uploads-mark-viewed";
 import {
   confirmReviewFieldAsPatient,
   getUploadDetailForPatient,
@@ -299,6 +300,23 @@ export const uploadsRouter = {
     .query(async ({ ctx, input }) => {
       const patientId = ctx.session.user.id;
       return getUploadDetailForPatient(ctx.db, patientId, input.uploadId);
+    }),
+
+  /**
+   * Story 7.2 — mark this upload as viewed by the owning patient.
+   * Idempotent: the `WHERE viewed_at IS NULL` guard makes second
+   * calls return `{ marked: false }`. No audit write — render path
+   * is high-frequency (AC12).
+   *
+   * Fired by the Expo upload detail screen from both branches of the
+   * pre-results emotional check-in sheet (state-selected AND
+   * skipped).
+   */
+  markUploadViewed: protectedProcedure
+    .input(z.object({ uploadId: z.string().uuid() }).strict())
+    .mutation(async ({ ctx, input }) => {
+      const patientId = ctx.session.user.id;
+      return markUploadViewed(ctx.db, patientId, input.uploadId);
     }),
 
   /**
