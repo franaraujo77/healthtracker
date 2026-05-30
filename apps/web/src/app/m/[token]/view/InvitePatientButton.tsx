@@ -25,13 +25,20 @@ export interface InvitePatientButtonProps {
 }
 
 function ButtonBody(props: { onOpen: () => void }): React.ReactElement {
+  // **R1-M3 fix.** Previously both the wrapping `<section>` and the
+  // inner `<button>` carried `aria-label={INVITE_PATIENT_BUTTON_PT_BR}`,
+  // so screen-reader users heard "Convidar paciente" twice. Identify
+  // the section via the `<strong>` heading (`aria-labelledby`) so the
+  // accessible name flows from the visible label exactly once.
   return (
     <section
-      aria-label={INVITE_PATIENT_BUTTON_PT_BR}
+      aria-labelledby="invite-patient-heading"
       className="border-border bg-muted mt-4 flex items-center gap-3 rounded-md border p-4"
     >
       <div className="flex flex-1 flex-col gap-1">
-        <strong className="text-[15px]">{INVITE_PATIENT_BUTTON_PT_BR}</strong>
+        <strong id="invite-patient-heading" className="text-[15px]">
+          {INVITE_PATIENT_BUTTON_PT_BR}
+        </strong>
       </div>
       <button
         type="button"

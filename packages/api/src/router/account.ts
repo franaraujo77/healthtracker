@@ -410,16 +410,52 @@ async function resolvePatientInviteWithinTx(
       metadata: { doctorUserId: row.professionalUserId },
     });
   } catch (err) {
-    if (
-      err instanceof TypeError ||
-      err instanceof ReferenceError ||
-      err instanceof SyntaxError
-    ) {
-      throw err;
+    // **R1-M2 narrow catch.** Spec AC7 / T4.4 mandates "MUST NOT
+    // THROW" — registration completes even if every invite-resolution
+    // step fails. But the previous broad catch swallowed EVERY non-
+    // programmer-error from the SELECT, the HMAC compare, and the
+    // UPDATE — exactly the failure mode CLAUDE.md "Narrow catches"
+    // warns against. We now articulate which error shapes we
+    // intentionally swallow:
+    //   - Postgres FK violation (23503) — patient_invites row was
+    //     concurrently deleted (cascade from professionals delete).
+    //   - Postgres unique violation (23505) — defense-in-depth; not
+    //     expected on the resolved-flip UPDATE but harmless if seen
+    //     (a parallel UPDATE already won the race).
+    //   - Postgres serialization / deadlock (40001 / 40P01) — the
+    //     racing-revoke window the spec explicitly accepts.
+    //   - TRPCError shapes (writeAuditLog can emit these) — the
+    //     audit is doctor-side telemetry, not a registration gate.
+    // Everything else — including programmer errors (TypeError,
+    // ReferenceError, SyntaxError) and unknown infra failures —
+    // propagates so the initializeProfile mutation surfaces the
+    // failure rather than silently fail-opening.
+    if (isExpectedInviteResolutionError(err)) {
+      console.warn(
+        "[initializeProfile] patient_invite resolution failed — continuing",
+        err,
+      );
+      return;
     }
-    console.warn(
-      "[initializeProfile] patient_invite resolution failed — continuing",
-      err,
-    );
+    throw err;
   }
+}
+
+/**
+ * Story 6.4 R1-M2 — narrow-catch predicate for
+ * `resolvePatientInviteWithinTx`. Returns true only for the small set
+ * of error shapes the spec mandates we swallow (see resolver
+ * docstring). Everything else propagates.
+ */
+function isExpectedInviteResolutionError(err: unknown): boolean {
+  if (err instanceof TRPCError) return true;
+  if (typeof err !== "object" || err === null) return false;
+  if (!("code" in err)) return false;
+  const code = (err as { code?: unknown }).code;
+  return (
+    code === "23503" || // FK violation (concurrent delete cascade)
+    code === "23505" || // unique violation (parallel resolved-flip won)
+    code === "40001" || // serialization failure
+    code === "40P01" //   deadlock detected
+  );
 }

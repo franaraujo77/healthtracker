@@ -9,6 +9,14 @@ import type {
   ShareDuration,
 } from "@healthtracker/validators";
 import { and, desc, eq, gt, inArray, isNull, or, sql } from "@healthtracker/db";
+// Story 6.4 R1-M1 — bare service-role-bound `db` connection used by
+// `createPatientInvite` to probe `auth.users` from outside the
+// doctor's GUC-bound tx. Hoisted to a static top-level import (the
+// previous `await import(...)` inside the resolver hot path paid a
+// module-resolution cost on every call and hid the dependency from
+// static analysis). Alias to `serviceRoleDb` so it's NEVER confused
+// with `ctx.db` (the per-request tx-scoped Drizzle handle).
+import { db as serviceRoleDb } from "@healthtracker/db/client";
 import {
   ConversationStarterCache,
   Exports,
@@ -1918,18 +1926,19 @@ export const sharingRouter = {
       // — doctors are authenticated, accountable, low-volume.
       let alreadyRegistered = false;
       try {
-        // Use the bare `db` connection (not `ctx.db` — that's the
+        // Use the bare `db` connection (`serviceRoleDb`, hoisted at
+        // module scope — see import block) NOT `ctx.db` (that's the
         // tx-scoped Drizzle handle inside the doctorProcedure tx and
         // querying `auth.users` from inside the doctor's GUC-bound tx
         // is brittle if a future change drops privileges). The bare
         // connection rides on the service-role postgres user so the
         // SELECT on `auth.users` succeeds.
-        const { db: rawDb } = await import("@healthtracker/db/client");
+        //
         // Supabase stores `auth.users.phone` WITHOUT the leading `+`
         // (E.164-trimmed); strip it for the probe.
         const phoneProbe =
           kind === "phone" ? normalized.replace(/^\+/, "") : null;
-        const probeRows = await rawDb.execute<{ one: number }>(sql`
+        const probeRows = await serviceRoleDb.execute<{ one: number }>(sql`
           SELECT 1 AS one
           FROM auth.users
           WHERE ${kind === "email" ? sql`email = ${normalized}` : sql`phone = ${phoneProbe}`}

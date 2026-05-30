@@ -156,7 +156,12 @@ export const PATIENT_INVITE_RESOLVED_AUDIT = "patient_invite.resolved" as const;
  */
 export const createPatientInviteInputSchema = z.object({
   identifier: z.string().trim().min(3).max(254),
-  displayName: z.string().trim().min(1).max(80).nullable().default(null),
+  // R1-N2: `.min(1)` was tautological after `.nullable()` + the
+  // modal's client-side "send null when empty after trim" policy —
+  // a sub-min-length string never reaches the wire. Source of truth
+  // stays "modal sends null when empty"; the server-side schema
+  // accepts any non-null trimmed string up to 80 chars or null.
+  displayName: z.string().trim().max(80).nullable().default(null),
 });
 export type CreatePatientInviteInput = z.input<
   typeof createPatientInviteInputSchema
@@ -223,6 +228,7 @@ export const INVITE_PATIENT_GENERIC_ERROR_PT_BR =
   "Não foi possível enviar o convite agora. Tente novamente.";
 export const INVITE_PATIENT_IDENTIFIER_INVALID_PT_BR =
   "Informe um e-mail ou telefone válido.";
+export const INVITE_PATIENT_CLOSE_PT_BR = "Fechar";
 
 // ---------------------------------------------------------------------------
 // pt-BR copy — invite landing (AC7)
@@ -325,7 +331,13 @@ export function normalizePatientIdentifier(
  * `null` for any malformed input — caller renders the "convite inválido"
  * landing without a DB hit.
  */
-const UUID_SHAPE_REGEX =
+/**
+ * Story 6.4 R1-L1 — shared canonical UUID shape regex. Exported so
+ * downstream surfaces (e.g. the doctor view page's segment parse)
+ * import this single source of truth rather than re-declare a near-
+ * identical regex.
+ */
+export const UUID_SHAPE_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function parsePatientInviteSegment(

@@ -7,6 +7,7 @@ import type { RouterOutputs } from "@healthtracker/api";
 import { appRouter, createTRPCContext } from "@healthtracker/api";
 import { createSupabaseServerClient } from "@healthtracker/auth/server";
 import { BiomarkerCard, ConversationStarterPrompt } from "@healthtracker/ui";
+import { UUID_SHAPE_REGEX } from "@healthtracker/validators";
 
 import { ConversationStarterPolling } from "./ConversationStarterPolling";
 import { InvitePatientButton } from "./InvitePatientButton";
@@ -41,9 +42,6 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-const UUID_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 interface PageProps {
   params: Promise<{ token: string }>;
 }
@@ -59,7 +57,9 @@ export default async function DoctorReportView({
   const tokenHmac =
     dotIdx > 0 && dotIdx < token.length - 1 ? token.slice(dotIdx + 1) : "";
   const malformed =
-    dotIdx <= 0 || tokenHmac.length === 0 || !UUID_REGEX.test(shareTokenId);
+    dotIdx <= 0 ||
+    tokenHmac.length === 0 ||
+    !UUID_SHAPE_REGEX.test(shareTokenId);
   if (malformed) {
     redirect(`/m/${token}`);
   }

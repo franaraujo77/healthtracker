@@ -8,6 +8,7 @@ import { Input } from "@healthtracker/ui/input";
 import { Label } from "@healthtracker/ui/label";
 import {
   INVITE_PATIENT_ALREADY_REGISTERED_PT_BR,
+  INVITE_PATIENT_CLOSE_PT_BR,
   INVITE_PATIENT_COPY_LINK_PT_BR,
   INVITE_PATIENT_COPY_LINK_TOAST_PT_BR,
   INVITE_PATIENT_CTA_LOADING_PT_BR,
@@ -168,7 +169,7 @@ export function InvitePatientModal(
           onClick={props.onClose}
           className="border-border bg-background cursor-pointer self-start rounded border px-3 py-1.5 text-sm"
         >
-          Fechar
+          {INVITE_PATIENT_CLOSE_PT_BR}
         </button>
       </div>
     );
@@ -188,7 +189,7 @@ export function InvitePatientModal(
           onClick={props.onClose}
           className="border-border bg-background cursor-pointer self-start rounded border px-3 py-1.5 text-sm"
         >
-          Fechar
+          {INVITE_PATIENT_CLOSE_PT_BR}
         </button>
       </div>
     );

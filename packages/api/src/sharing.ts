@@ -359,7 +359,10 @@ export function humanizeEmailLocal(email: string): string | null {
  * documents the invariant; the regression test
  * `signShareToken(raw) !== signPatientInviteToken(raw)` locks it in.
  */
-const PATIENT_INVITE_HMAC_DOMAIN_PREFIX = "patient_invite:";
+// **Exported (R1-L2)** so regression tests can assert against the
+// literal value directly. The constant itself MUST NOT change — any
+// future refactor that drops the prefix is a vulnerability.
+export const PATIENT_INVITE_HMAC_DOMAIN_PREFIX = "patient_invite:";
 
 /**
  * Generates a fresh opaque patient-invite token. Returns the raw token
@@ -387,6 +390,16 @@ export function signPatientInviteToken(raw: string): string {
  * Constant-time HMAC verification for patient-invite tokens. Pairs with
  * `signPatientInviteToken` — applies the SAME domain prefix internally
  * so callers pass the raw, not the prefixed value.
+ *
+ * **R1-L3 note — test-only contract.** No production code path holds
+ * the raw token: the doctor distributes the URL containing
+ * `<inviteId>.<tokenHmac>`, and the resolver-side check uses
+ * `constantTimeEqualHmac(persistedHmac, urlHmac)` (the URL itself
+ * carries the signature, not the raw). This helper exists so the
+ * regression tests in `patient-invite-helpers.test.ts` can lock the
+ * sign/verify round-trip + cross-surface replay invariant without
+ * reaching into the resolver internals. Do not remove — the tests
+ * are the reason it ships.
  */
 export function verifyPatientInviteToken(
   raw: string,

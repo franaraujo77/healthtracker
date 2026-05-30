@@ -19,6 +19,7 @@ import {
 } from "@healthtracker/validators";
 
 import { createSupabaseClient } from "~/auth/client";
+import { env } from "~/env";
 import { useTRPC } from "~/trpc/react";
 
 /**
@@ -33,6 +34,21 @@ export interface RegisterFormProps {
 }
 
 export function RegisterForm(props: RegisterFormProps = {}) {
+  // **R1-M4 dev-only guard.** Partial-prop pair `{ inviteId, tokenHmac }`
+  // would silently fall through to the unattributed path (the
+  // `props.inviteId && props.tokenHmac` ternary below). The only call
+  // site (`PatientInviteLanding`) always passes both, so a partial
+  // pair is a programmer error worth surfacing in development —
+  // production builds NODE_ENV=production stays quiet to avoid a
+  // user-visible console spam regression.
+  if (
+    env.NODE_ENV !== "production" &&
+    Boolean(props.inviteId) !== Boolean(props.tokenHmac)
+  ) {
+    console.warn(
+      "[RegisterForm] partial invite-prop pair — both inviteId and tokenHmac must be set together; falling back to unattributed registration",
+    );
+  }
   const router = useRouter();
   const trpc = useTRPC();
   const [serverError, setServerError] = useState<string | null>(null);

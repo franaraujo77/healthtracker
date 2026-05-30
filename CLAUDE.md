@@ -276,6 +276,14 @@ The `patient_invites` table is the doctor-side acquisition surface — populated
 - **auth.users existence-oracle:** the AC11 already-registered check via service-role SELECT on `auth.users` IS a bounded enumeration oracle (doctors can probe whether any email is a HT user). Accepted as bounded — doctors are authenticated, accountable, low-volume; the check writes no audit and never JOINs to sharing tables. Rate-limiting and constant-time response delays tracked in deferred-work.
 - **Epic 6 consolidated migration ownership:** no `supabase/migrations/*` file ships in Story 6.4. Prod deploy lands in Story 6.6 and MUST include `CREATE TABLE patient_invites`, `patient_invite_status_enum`, the partial unique index + check constraint + RLS policies, AND the `patient_invites_resolved_user_id_users_id_fk … ON DELETE SET NULL` constraint.
 
+### Integration test discipline (Story 6.4 R1 H1 addendum)
+
+The Story 6.1 → 6.2 → 6.4 sprint-level pattern: spec-mandated integration tests get cut at PR open, the resolver's narrow-23505 / gate / catch logic only ever lives behind unit-test mocks, and the testcontainer file ends up mirroring a partial SQL subset of the resolver. Round-1 reviewers MUST reject this pattern going forward:
+
+- **Resolver-call integration tests are the default.** A new tRPC resolver landing testcontainer coverage SHOULD ship its integration test in `packages/api/__tests__/<router>/*.integration.test.ts` invoking `appRouter.createCaller(ctx).<router>.<resolver>(...)` against a testcontainer-bound `ctx.db`. The test exercises the resolver's gate-throws, narrow-catch composition, and audit emission end-to-end — NOT just the SQL shape.
+- **Inline-SQL mirrors are the documented fallback ONLY when the dep graph blocks the resolver call.** The db package CANNOT import api (api → db is the only allowed direction). When the resolver-call path is blocked at the workspace level — as it is for Story 6.4's `createPatientInvite`, whose testcontainer-side `auth.users` schema is Supabase-managed and not provisioned by `drizzle-kit push` — the inline mirror MUST: (a) cover every spec T8.\* case the resolver does (no "subset, the unit tests cover the rest"); (b) include the activation gate, the existence probe, AND the partial-index race in the same mirror; (c) explicitly document at the file header WHY the resolver-call path is blocked. Round-1 reviewers verify EVERY spec case has a corresponding `it(...)` block.
+- **The forward fix is to hoist the testcontainer harness.** Once `startIntegrationDb` lives in a workspace-shared location both api and db can import (e.g. a `tooling/testcontainers` package or a published api-package devDep on the db test surface), the inline-SQL fallback is no longer accepted. Tracked in deferred-work.
+
 ## Tooling conventions
 
 - **TypeScript**: strict mode, `noUncheckedIndexedAccess`, `moduleResolution: "Bundler"`, ES2022 target.
