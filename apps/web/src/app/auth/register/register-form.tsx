@@ -19,9 +19,36 @@ import {
 } from "@healthtracker/validators";
 
 import { createSupabaseClient } from "~/auth/client";
+import { env } from "~/env";
 import { useTRPC } from "~/trpc/react";
 
-export function RegisterForm() {
+/**
+ * Story 6.4 AC7 — `inviteId` + `tokenHmac` props thread into the
+ * `initializeProfile` mutation when the patient signed up via a
+ * `/convite/<id>.<hmac>` link. Both are OPTIONAL — the default
+ * unattributed registration path is unchanged.
+ */
+export interface RegisterFormProps {
+  inviteId?: string;
+  tokenHmac?: string;
+}
+
+export function RegisterForm(props: RegisterFormProps = {}) {
+  // **R1-M4 dev-only guard.** Partial-prop pair `{ inviteId, tokenHmac }`
+  // would silently fall through to the unattributed path (the
+  // `props.inviteId && props.tokenHmac` ternary below). The only call
+  // site (`PatientInviteLanding`) always passes both, so a partial
+  // pair is a programmer error worth surfacing in development —
+  // production builds NODE_ENV=production stays quiet to avoid a
+  // user-visible console spam regression.
+  if (
+    env.NODE_ENV !== "production" &&
+    Boolean(props.inviteId) !== Boolean(props.tokenHmac)
+  ) {
+    console.warn(
+      "[RegisterForm] partial invite-prop pair — both inviteId and tokenHmac must be set together; falling back to unattributed registration",
+    );
+  }
   const router = useRouter();
   const trpc = useTRPC();
   const [serverError, setServerError] = useState<string | null>(null);
@@ -70,7 +97,13 @@ export function RegisterForm() {
         return;
       }
       try {
-        await initializeProfile.mutateAsync();
+        // Story 6.4 — thread the optional invite context. When absent,
+        // `initializeProfile` runs unchanged (legacy unattributed path).
+        await initializeProfile.mutateAsync(
+          props.inviteId && props.tokenHmac
+            ? { inviteId: props.inviteId, tokenHmac: props.tokenHmac }
+            : undefined,
+        );
         router.push("/onboarding/consent");
       } catch {
         setServerError(GENERIC_REGISTRATION_ERROR_MESSAGE_PT_BR);

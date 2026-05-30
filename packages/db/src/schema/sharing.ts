@@ -76,10 +76,26 @@ export const PendingInvites = pgTable(
     /** SHA-256 hex of the doctor's email or CRM. Never store raw. */
     identifierHash: t.text().notNull(),
     /**
-     * Filled by Epic 6's `claimInviteByDoctor` when the doctor signs
-     * up. FK to `users(id)` deferred to Epic 6 (doctor-account surface).
+     * Story 6.3 — flipped from NULL to the doctor's `auth.uid()` by
+     * `sharingRouter.activateProfessionalAccount` (the long-deferred
+     * Epic 5 → Epic 6 hand-off).
+     *
+     * **`onDelete: "set null"` (NOT cascade)** — the ONLY documented
+     * exception to Story 5.6's "every new FK to `users(id)` MUST use
+     * cascade" rule. Rationale: the `pending_invites` row encodes the
+     * patient's intent ("I wanted to share with Dr. X"). If Dr. X later
+     * deletes their account, the patient's intent should survive —
+     * the row simply orphans back to "unresolved". Cascading would
+     * silently delete patient-authored data on a third-party
+     * (doctor) action, which is directionally wrong.
+     *
+     * Locked into a regression test
+     * (`pending_invites_resolved_user_id_fk.rls.test.ts`) so a future
+     * refactor that "fixes" this to cascade fails CI.
      */
-    resolvedUserId: t.uuid(),
+    resolvedUserId: t
+      .uuid()
+      .references(() => Users.id, { onDelete: "set null" }),
     createdAt: t
       .timestamp({ mode: "date", withTimezone: true })
       .defaultNow()

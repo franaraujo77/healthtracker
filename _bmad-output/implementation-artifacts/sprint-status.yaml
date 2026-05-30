@@ -1,5 +1,5 @@
 # generated: 2026-05-15
-# last_updated: 2026-05-29
+# last_updated: 2026-05-30 (story 6.6 implementation complete → review)
 # project: healthtracker
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,12 +35,41 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-05-15
-last_updated: 2026-05-29
+last_updated: 2026-05-30
 # Stale-status cleanup: Story 3.5 (baseline migration) merged via PR #18
 # weeks ago (commit 56bedef); flipping `3-5-...: review → done` and
 # `epic-3: in-progress → done`. All 5 Epic 3 stories now done +
 # epic-3-retrospective already done (2026-05-23 with 3.5 addendum
 # 2026-05-27). Epic 3 fully closed.
+# Story 6.3 spec created → ready-for-dev. Stacks on Story 6.2 / PR #57.
+# Doctor activates professional account from Conversation Starter view.
+# ADRs locked: (a) NEW `professionals` table — PK = user_id, single
+# row per Supabase user; `onDelete: cascade` on FK to users. (b)
+# `pending_invites.resolved_user_id` finally gets FK declaration —
+# `onDelete: set null` (the ONE justified exception to Story 5.6's
+# cascade-rule: the invite encodes patient intent and outlives the
+# doctor's account; cascade would silently delete patient-authored
+# data on a third-party (doctor) deletion). (c) `claimInviteByDoctor`
+# integrated INTO `activateProfessionalAccount` mutation — single
+# atomic tx (SELECT FOR UPDATE + branch on resolved_user_id + INSERT
+# professionals + audit). Cross-doctor invite-claim race → CONFLICT
+# (first to activate wins). (d) `professional_account.activated`
+# audit kind is system telemetry; NOT in ACCESS_LOG_EVENT_KINDS
+# (round-1 product question whether patient should see "Dr. X
+# activated" deferred). (e) NEW `professionalCategoryEnum`
+# (endocrinologista|cardiologista|medicina_esportiva|nutrologo|
+# nutricionista|clinico_geral|outro); pgEnum + Zod twins; pt-BR
+# label map adjacent. (f) NO CRM/license validation (UX-DR9
+# frictionless; deferred for regulatory revisit). (g) Activation
+# status is user-scoped, NOT token-scoped (Doctor Acquisition Loop
+# closure: activated under patient A's token IS activated when
+# opening patient B's token). (h) Migration deferred to Story 6.6
+# (Epic 6 batched-migration pattern). New tRPC: sharingRouter.
+# activateProfessionalAccount + getActivationStatus (both
+# doctorProcedure). NEW web components: ProfessionalAccountBanner
+# + ProfessionalAccountModal mounted in /m/[token]/view RSC via
+# Promise.all parallel-RTT (NFR-P4 budget). 6-identity RLS matrix
+# on `professionals` mandatory.
 # Story 5.6 implementation + R1 review complete → review. PR #56 (stacked).
 # Two convergent CRITICAL findings caught: (1) account.deletion_failed
 # audit used raw patientId after step-2 pseudonymized everything else
@@ -537,10 +566,243 @@ development_status:
   # Epic 6: Doctor Can View a Patient's Conversation Starter
   epic-6: in-progress
   6-1-doctor-views-pre-auth-landing-page-showing-patient-name-and-share-context: done
-  6-2-doctor-authenticates-via-magic-link-and-views-the-conversation-starter-report: backlog
-  6-3-doctor-activates-a-professional-account-from-the-conversation-starter-view: backlog
-  6-4-doctor-invites-a-patient-to-create-a-health-tracker-account: backlog
-  6-5-doctor-configures-biomarker-staleness-thresholds-for-their-professional-view: backlog
+  6-2-doctor-authenticates-via-magic-link-and-views-the-conversation-starter-report: review
+  6-3-doctor-activates-a-professional-account-from-the-conversation-starter-view: review
+  6-4-doctor-invites-a-patient-to-create-a-health-tracker-account: review
+  6-5-doctor-configures-biomarker-staleness-thresholds-for-their-professional-view: review
+  6-6-author-incremental-supabase-migration-for-epic-6-schema: review
+  # Story 6.6 R1-followup-2 (2026-05-30): M1 patched inline — Epic 5
+  # baseline migration authored as
+  # `supabase/migrations/0005_epic_5_sharing_baseline.sql` (4 enums:
+  # `share_duration_enum`, `export_format_enum`, `export_status_enum`,
+  # `account_deletion_status_enum`; 6 tables: `pending_invites`,
+  # `share_tokens`, `share_token_biomarkers`,
+  # `conversation_starter_cache`, `exports`,
+  # `account_deletion_requests`; 6 RLS policy bodies copied verbatim
+  # from `packages/db/policies/custom_rls_*.sql`; Supabase Storage
+  # `exports` bucket; `pseudonymize_patient_id()` SQL helper).
+  # Companion file
+  # `supabase/migrations-postapply/0008_epic_5_partial_uniques.sql`
+  # creates 4 CONCURRENTLY partial unique indexes
+  # (`share_tokens_invite_active_uq`,
+  # `share_tokens_patient_invite_active_uq`, `exports_active_uq`,
+  # `account_deletion_requests_active_uq`). Epic 6 migrations
+  # renumbered: `0005_epic_6_doctor_accounts.sql` →
+  # `0006_epic_6_doctor_accounts.sql`;
+  # `migrations-postapply/0006_epic_6_patient_invites_active_uq.sql`
+  # → `migrations-postapply/0007_epic_6_patient_invites_active_uq.sql`.
+  # CLAUDE.md ops note + cross-references updated. Unblocks the
+  # `rls-adversarial` CI check on PR #57 (the fresh-DB apply chain
+  # now creates `pending_invites` BEFORE the Epic 6 FK ALTER touches
+  # it). deferred-work tracker M1 entry struck through.
+  # Story 6.6 R1-followup (round-1 follow-up patches, 2026-05-30): H1 +
+  # M2 + L2 patched inline; M1 split out as a future story. (a) H1 —
+  # extended `.github/workflows/supabase-deploy.yml` with a `psql`
+  # autocommit step that applies every file under a new sibling
+  # `supabase/migrations-postapply/` directory after `supabase db
+  # push`. Moved `0006_epic_6_patient_invites_active_uq.sql` into the
+  # new dir so the Supabase CLI does NOT pick it up inside its
+  # implicit per-file tx (SQLSTATE 25001 root cause). Production
+  # deploy of Epic 6 is now unblocked. (b) M2 — named the
+  # `staleness_thresholds` FK explicitly via Drizzle's
+  # `foreignKey({ name: "staleness_thresholds_user_id_fk", ... })`
+  # table-builder (30 chars; previously auto-named at 67 chars and
+  # silently truncated to 63 by Postgres NAMEDATALEN, breaking
+  # idempotent `IF NOT EXISTS` guards on re-apply). Migration 0005
+  # gained an idempotent `ALTER TABLE … RENAME CONSTRAINT` DO-block
+  # at the top of the FK section (only fires on DBs that received the
+  # truncated name via prior `pnpm db:push`) so both fresh applies
+  # and re-applies converge on the new short name. (c) L2 — rewrote
+  # the misleading 0006 header that falsely claimed the deploy
+  # workflow already handled split-apply; new text accurately
+  # describes the post-apply dir contract + the R1 H1 patch. (d) M1
+  # — Epic 5 baseline migration (`pending_invites`, `share_tokens`,
+  # `share_token_biomarkers`, `conversation_starter_cache`,
+  # `exports`, `account_deletion_requests` + 4 enums + 5 indexes
+  # incl. 3 partial UNIQUE that need CONCURRENTLY post-apply files +
+  # 7 RLS policy files + Storage bucket setup) is genuinely too
+  # large for a single follow-up patch round. SPLIT INTO NEW
+  # FOLLOW-UP STORY (proposal: "Story 5.7 — Epic 5 baseline
+  # migration" or "Epic 5 retro addendum"). Inventory recorded in
+  # the R1 review addendum. Fresh-DB rehydration remains broken for
+  # 0005 (references `pending_invites`) until that story lands —
+  # production is unaffected (live DB was primed via `pnpm db:push`
+  # during Stories 5.x/6.x); deferred-work tracker updated. Quality
+  # gates: `pnpm -w typecheck` ✅ 17/17; `pnpm -w lint` ✅ 15/15;
+  # `pnpm --filter @healthtracker/api test:unit` ✅ 38 files / 334
+  # tests; integration still skipped (Rancher Desktop docker.sock
+  # bind-mount unsupported). Drift-check via `drizzle-kit push
+  # --verbose --strict` against dev DB shows only known pre-existing
+  # noise (RLS DROP/CREATE, `desc` index re-emission, interval
+  # defaults) PLUS the expected staleness FK rename — no Epic 6
+  # net-new drift.
+  # Story 6.6 implementation complete → review. PR #57 (stacked).
+  # Two migration files shipped (`0005_epic_6_doctor_accounts.sql` +
+  # `0006_epic_6_patient_invites_active_uq.sql`) hand-authored from
+  # Drizzle schema + RLS policy source-of-truth (the `supabase db
+  # diff --use-migra` path was blocked: the shadow-DB apply of 0005
+  # requires `pending_invites` which has no Epic 5 migration file —
+  # pre-existing Epic 5 migration gap, out of Story 6.6 scope). 0005
+  # contains the 2 enums + 3 tables + 11 RLS policies + the deferred
+  # `pending_invites.resolved_user_id` FK; 0006 contains the
+  # CONCURRENTLY partial UQ split out per SQLSTATE 25001 rule.
+  # Drift signal (re-`pnpm db:push` against dev DB after migrations
+  # applied): only known pre-existing Drizzle churn — RLS-policy
+  # DROP/CREATE (drizzle-kit always emits against externally loaded
+  # policies), `created_at desc` index re-emission (known
+  # drizzle-kit DESC quirk affecting Epic 3-6 uniformly), and one
+  # constraint-name truncation on the staleness FK (PostgreSQL
+  # NAMEDATALEN=63 — Drizzle's "desired" carries the full 67-char
+  # name; pre-existing in Story 6.5's Drizzle output). NO Epic 6
+  # net-new drift. `pnpm -w typecheck` + `pnpm -w lint` clean.
+  # `test:integration` SKIPPED — Rancher Desktop's lima VM rejects
+  # testcontainers' docker.sock bind-mount (mirrors Story 6.5
+  # R1-followup skip rationale; Story 6.6 ships zero runtime code so
+  # the existing RLS suites still lock the invariant). CLAUDE.md
+  # "Migration discipline" appendix gets a 3-line stanza. Sprint
+  # last_updated bumped.
+  # Story 6.6 spec created → ready-for-dev. Stacks on 6.2+6.3+6.4+6.5 / PR #57.
+  # Final story of Epic 6: SQL-only batched Supabase migration. No
+  # application code; mirrors Story 3.5 baseline / Story 4.4 incremental
+  # pattern. Output is TWO files:
+  #   (1) `supabase/migrations/0005_epic_6_doctor_accounts.sql` —
+  #       `professional_category_enum` + `professionals` table +
+  #       `pending_invites.resolved_user_id` FK addition +
+  #       `patient_invite_status_enum` + `patient_invites` table +
+  #       non-CONCURRENTLY indexes/CHECKs + `staleness_thresholds` table
+  #       (composite PK) + bodies of all three new `custom_rls_*.sql`
+  #       policy files (professionals / patient_invites /
+  #       staleness_thresholds). All `IF NOT EXISTS`-guarded so a
+  #       `pnpm db:push`'d DB re-applies cleanly (mirrors
+  #       `0003_epic_4_letters_schema.sql`).
+  #   (2) `supabase/migrations/0006_epic_6_patient_invites_active_uq.sql`
+  #       — `CREATE UNIQUE INDEX CONCURRENTLY` for
+  #       `patient_invites_professional_identifier_active_uq` (partial
+  #       UQ on (professional_user_id, identifier_hash) WHERE
+  #       status='pending'). Split out because `CONCURRENTLY` fails
+  #       inside Supabase's implicit per-file transaction with
+  #       SQLSTATE 25001 (CLAUDE.md ops note lines 114–124; mirrors
+  #       `0004_epic_4_audit_index_letter_queued.sql`). Applied via
+  #       `psql` directly by supabase-deploy.
+  # **Critical gotcha for dev:** `supabase db diff --use-migra
+  # --linked` is only as correct as the linked Supabase project's
+  # current schema state. Dev MUST verify the worktree is `supabase
+  # link`-ed to the same project Stories 6.3/6.4/6.5 have been
+  # `pnpm db:push`-applied against — otherwise the diff will silently
+  # MISS objects. If unclear, dev STOPS and asks Francis. Two
+  # documented `ON DELETE SET NULL` FKs to `users(id)` ship in this
+  # migration (`pending_invites.resolved_user_id` from 6.3 +
+  # `patient_invites.resolved_user_id` from 6.4) — both are the
+  # ONLY exceptions to Story 5.6's cascade rule; reviewer must
+  # verify they spell `SET NULL`. `staleness_thresholds` ships a
+  # real composite `PRIMARY KEY` (not UNIQUE INDEX; 6.5 R1-followup
+  # MEDIUM-3 made this load-bearing for ON CONFLICT symbol-grounding)
+  # and intentionally has NO DELETE policy. Drift sanity-check via
+  # `pnpm db:push` + `supabase db diff … _drift_check` must both
+  # emit empty diffs after apply (AC10). NO new runtime test —
+  # existing `professionals.rls.test.ts` /
+  # `patient_invites.rls.test.ts` /
+  # `staleness_thresholds.rls.test.ts` are the RLS invariant lock.
+  # Story 6.5 R1-followup patches landed. All remaining R1 findings
+  # (MEDIUM-1/2/3/4 + LOW-1/2/3) addressed in a single commit on
+  # `worktree-story-6-2` / PR #57. Headline R1-followup fixes:
+  # (a) MEDIUM-1 — activation gate folded INTO
+  # `professionalSessionProcedure` middleware so the procedure name
+  # is truthful (signed-in non-doctor now hits PRECONDITION_FAILED
+  # at the middleware, not in the resolver body); both staleness
+  # resolvers stripped of their inline activation SELECTs;
+  # new `professional-session-gate.test.ts` (4 cases) mirrors the
+  # `doctor-procedure-session-gate.test.ts` shape. (b) MEDIUM-2 —
+  # canonical Given/When/Then ACs restored verbatim from epic
+  # 1521–1545; implementation-contract ACs 5–13 preserved as a
+  # subsection. (c) MEDIUM-3 — `staleness_thresholds` table now
+  # declares a real `primaryKey()` (composite on
+  # professional_user_id + biomarker_category) matching Story 5.1's
+  # `share_token_biomarkers` precedent; previous `uniqueIndex` was
+  # misleading. No migration ships (Story 6.6 batches Epic 6 SQL).
+  # (d) MEDIUM-4 — synthetic Session shim consolidated into a new
+  # `getVerifiedSessionForCaller()` helper in
+  # `@healthtracker/auth/server`; limiares page migrated; view page
+  # left for Story 6.6 hardening (token-status gate interleaves).
+  # (e) LOW-1 — form toast auto-clears after 4s via useEffect.
+  # (f) LOW-2 — form `onSuccess` syncs local `useState` from the
+  # submitted thresholds (`isDefault` flips false, `touched`
+  # resets) + invalidates the tRPC query. (g) LOW-3 — dedup→fan-out
+  # contract documented in `sharing.ts` (order guarantee,
+  # missing-data semantics, best-effort silent-degrade). Quality
+  # gates: typecheck 17/17 clean; lint clean for changed packages;
+  # api test:unit 334/334 (was 330; +4 new). db test:integration
+  # SKIPPED (testcontainers infra unavailable — Docker not running
+  # in worktree; RLS contract unchanged this round). review status
+  # unchanged — Francis flips.
+  # Story 6.5 implementation complete → review. Stacked on
+  # worktree-story-6-2 / PR #57 (6.2+6.3+6.4 already in review). FR31
+  # doctor-side preference surface delivered. NEW `staleness_thresholds`
+  # table (composite PK, no synthetic id) shipped via Drizzle schema +
+  # `custom_rls_staleness_thresholds.sql` (no `supabase/migrations/*` —
+  # deferred to Story 6.6 per Epic 6 consolidated-migration pattern).
+  # NEW `accountRouter.updateStalenessThresholds` +
+  # `listStalenessThresholds` under a NEW `professionalSessionProcedure`
+  # (session-only doctor procedure that binds
+  # `app.current_doctor_user_id` without requiring an `x-share-token`
+  # header — the `/profissional/*` settings subtree has no token in
+  # context). The original spec named `doctorProcedure`; that procedure
+  # requires `x-share-token`, so a session-only sibling was the
+  # cleanest resolution. Activation gate (SELECT professionals)
+  # + Zod refine for duplicate-by-category + unknown-category
+  # cross-check vs `loinc_ref` + UPSERT batch via onConflictDoUpdate
+  # + audit row inside same tx — all in `account.ts`. Empty-array =
+  # no-op (NOT delete-all). `getConversationStarter` extended with
+  # the OPTIONAL `biomarkerStaleness` parallel array; cache payload
+  # JSONB unchanged. BiomarkerCard gained OPTIONAL `isStale` +
+  # `stalenessThresholdDays` props — chip uses `$textSecondary` +
+  # `$border` Tamagui tokens (NOT amber); patient surfaces unchanged
+  # when `isStale === undefined`. NEW
+  # `/profissional/configuracoes/limiares` RSC + client form
+  # (per-row numeric input + amber-not-red inline validation + global
+  # save). Tier-3 link added under InvitePatientButton on the view
+  # page when activated. 7-identity RLS matrix landed at
+  # `staleness_thresholds.rls.test.ts` (10 cases inc.
+  # UNRELATED_DOCTOR, INSERT WITH CHECK, cross-tenant UPDATE 0-rows,
+  # DELETE-policy-absent). API unit tests: Zod boundary + ageInDays
+  # exhaustive boundary + AC2 label fallback. CLAUDE.md "Doctor
+  # staleness thresholds (Story 6.5)" section + Story 6.6 migration
+  # checklist appended. typecheck 17/17; lint 15/15; api test:unit
+  # 330/330. Deviation from spec: UI snapshot tests (T6.4 / T8.3)
+  # not added — `@healthtracker/ui` package has no test script
+  # wired in this repo (other UI components also lack tests); patient
+  # surface regression risk is mitigated by the `isStale === undefined`
+  # short-circuit in `buildAccessibilityLabel` + the chip render
+  # branch. Code-review may flag.
+  # Story 6.5 spec created → ready-for-dev. Stacks on 6.2+6.3+6.4 / PR #57.
+  # FR31 doctor-side preference surface. ADRs locked: (a) NEW
+  # `staleness_thresholds` table with composite PK
+  # (professional_user_id, biomarker_category) — no synthetic id;
+  # mirrors share_token_biomarkers pattern from Story 5.1. (b) Absent
+  # row → STALENESS_DEFAULT_DAYS=180 applied at READ time only; defaults
+  # NEVER persisted (avoids row-bloat). (c) Staleness flag computed
+  # server-side at getConversationStarter resolver boundary, propagated
+  # via NEW optional `biomarkerStaleness` parallel array on the output
+  # schema. The conversation_starter_cache.payload JSONB is UNCHANGED —
+  # avoids regenerating every cached row + worker prompt drift. (d)
+  # BiomarkerCard gains OPTIONAL `isStale` + `stalenessThresholdDays`
+  # props — orthogonal to existing `state` (notable AND stale is a
+  # valid distinct visual; both chips render). Patient surfaces
+  # unchanged (regression test mandatory). (e) NEW
+  # accountRouter.updateStalenessThresholds + listStalenessThresholds
+  # under doctorProcedure. UPSERT batch with onConflictDoUpdate inside
+  # tx + audit row same tx. Empty array = no-op (not delete-all —
+  # safety against form-reset bugs). (f) Unknown-category cross-check
+  # against `SELECT DISTINCT category FROM loinc_ref` (mirrors Story 5.1
+  # R1 widening; category set is data-seeded, not a closed Zod enum).
+  # (g) NEW `staleness_threshold.updated` audit kind — NOT in
+  # ACCESS_LOG_EVENT_KINDS (doctor preference, patient cannot
+  # access-log). (h) NEW web route /profissional/configuracoes/limiares
+  # (first /profissional/* surface) with TanStack Form. Tier-3 link from
+  # the Conversation Starter view (NOT Tier-1 — UX-DR20 reserves Tier-1
+  # for InvitePatientButton from Story 6.4). (i) 7-identity RLS matrix
+  # (Story 6.4 introduction) reaffirmed. (j) Migration deferred to
+  # Story 6.6. No new env vars; no new HMAC secrets.
   epic-6-retrospective: optional
 
   # Epic 7: Patient Adds Personal Context to Their Record

@@ -343,6 +343,88 @@ export function humanizeEmailLocal(email: string): string | null {
  * `TypeError` / `ReferenceError` / `SyntaxError` still propagate
  * (CLAUDE.md narrow-catch discipline).
  */
+// ---------------------------------------------------------------------------
+// Story 6.4 — Patient-invite (doctor → patient) token helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Story 6.4 AC8 — domain-prefix isolation between share-token and
+ * patient-invite HMACs. Both surfaces reuse `SHARE_TOKEN_HMAC_SECRET`
+ * (NFR-S6 — one secret, one boot-gate); the prefix ensures a signature
+ * minted for a `share_tokens.id` UUID can never be reused as a
+ * `patient_invites.id` signature even if the raw UUIDs collided.
+ *
+ * **Load-bearing security guarantee.** Any future refactor that drops
+ * the prefix is a vulnerability. CLAUDE.md "Patient invite discipline"
+ * documents the invariant; the regression test
+ * `signShareToken(raw) !== signPatientInviteToken(raw)` locks it in.
+ */
+// **Exported (R1-L2)** so regression tests can assert against the
+// literal value directly. The constant itself MUST NOT change — any
+// future refactor that drops the prefix is a vulnerability.
+export const PATIENT_INVITE_HMAC_DOMAIN_PREFIX = "patient_invite:";
+
+/**
+ * Generates a fresh opaque patient-invite token. Returns the raw token
+ * (embedded once in the magic URL) and the HMAC signature (lookup +
+ * authorization key). Note: no `tokenHash` — the doctor-side lookup
+ * path is by `patient_invites.id` directly (no opaque-raw lookup), so
+ * there's no parity column needed.
+ */
+export function generatePatientInviteToken(): {
+  raw: string;
+  tokenHmac: string;
+} {
+  const raw = randomBytes(32).toString("base64url");
+  const tokenHmac = signPatientInviteToken(raw);
+  return { raw, tokenHmac };
+}
+
+export function signPatientInviteToken(raw: string): string {
+  return createHmac("sha256", getHmacSecret())
+    .update(PATIENT_INVITE_HMAC_DOMAIN_PREFIX + raw)
+    .digest("base64url");
+}
+
+/**
+ * Constant-time HMAC verification for patient-invite tokens. Pairs with
+ * `signPatientInviteToken` — applies the SAME domain prefix internally
+ * so callers pass the raw, not the prefixed value.
+ *
+ * **R1-L3 note — test-only contract.** No production code path holds
+ * the raw token: the doctor distributes the URL containing
+ * `<inviteId>.<tokenHmac>`, and the resolver-side check uses
+ * `constantTimeEqualHmac(persistedHmac, urlHmac)` (the URL itself
+ * carries the signature, not the raw). This helper exists so the
+ * regression tests in `patient-invite-helpers.test.ts` can lock the
+ * sign/verify round-trip + cross-surface replay invariant without
+ * reaching into the resolver internals. Do not remove — the tests
+ * are the reason it ships.
+ */
+export function verifyPatientInviteToken(
+  raw: string,
+  signature: string,
+): boolean {
+  const expected = signPatientInviteToken(raw);
+  const a = Buffer.from(expected);
+  const b = Buffer.from(signature);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
+/**
+ * Story 6.4 AC5 — composes the `${WEB_APP_URL}/convite/${inviteId}.${tokenHmac}`
+ * URL the doctor distributes to the patient. Mirrors `buildShareUrl`;
+ * reuses the `WEB_APP_URL` boot-gate.
+ */
+export function buildPatientInviteUrl(
+  inviteId: string,
+  tokenHmac: string,
+): string {
+  const base = getWebAppUrl();
+  return `${base}/convite/${inviteId}.${tokenHmac}`;
+}
+
 export async function resolvePatientFirstName(
   supabaseAdmin: {
     auth: {

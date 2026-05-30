@@ -65,6 +65,8 @@ export type {
   PreAuthLandingCardProps,
   PreAuthLandingStatus,
 } from "./components/PreAuthLandingCard";
+export { ConversationStarterPrompt } from "./components/ConversationStarterPrompt";
+export type { ConversationStarterPromptProps } from "./components/ConversationStarterPrompt";
 export {
   Toast,
   ToastProvider,

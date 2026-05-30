@@ -1,0 +1,70 @@
+-- =============================================================================
+-- 0007_epic_6_patient_invites_active_uq.sql
+-- =============================================================================
+--
+-- Creates the partial unique index
+-- `patient_invites_professional_identifier_active_uq` introduced by
+-- Story 6.4 — the doctor → patient re-invite idempotency gate
+-- (`(professional_user_id, identifier_hash) WHERE status = 'pending'`).
+-- Re-inviting the same patient by the same doctor returns the existing
+-- pending row's id rather than creating a duplicate. After expiry the
+-- partial index releases and re-invite creates a NEW row (renewal flow).
+--
+-- ## Why this index lives in its own file (CONCURRENTLY split)
+--
+-- The Supabase CLI wraps every migration file in an implicit transaction
+-- (see CLAUDE.md ops note "Migration discipline"). `CREATE … CONCURRENTLY`
+-- cannot run inside a transaction — it fails with SQLSTATE 25001. There
+-- is no public `-- supabase: no-transaction` directive that disables the
+-- per-migration tx, contrary to community lore.
+--
+-- The partial unique index here is on the patient-data path: it gates
+-- the doctor → patient invite write surface. Concurrent re-invite
+-- double-taps from the doctor's UI could race the index build window
+-- if applied non-CONCURRENTLY. Per AC3 + AC8 of the Story 6.6 spec and
+-- the CLAUDE.md ops note, this DDL therefore ships in a sibling file
+-- applied via `psql` directly, bypassing the Supabase CLI's transaction
+-- wrapper. Mirrors the `0004_epic_4_audit_index_letter_queued.sql`
+-- precedent.
+--
+-- ## Operator apply procedure
+--
+-- The companion file `0006_epic_6_doctor_accounts.sql` lands the
+-- `patient_invites` table itself; this file MUST be applied AFTER
+-- 0006 (it references the table + the partial WHERE on the
+-- `status` column whose enum type is created by 0006).
+--
+-- ## Deploy contract (Story 6.6 R1 H1 patch)
+--
+-- This file lives under `supabase/migrations-postapply/`, NOT under
+-- `supabase/migrations/`. Supabase CLI's `db push` scans only the
+-- canonical `migrations/` dir and so does NOT attempt to apply this
+-- file inside its implicit per-file transaction (which would fail
+-- with SQLSTATE 25001 on the `CONCURRENTLY` keyword).
+--
+-- The R1 H1 patch extends `.github/workflows/supabase-deploy.yml`
+-- with a second step that, after `supabase db push`, iterates every
+-- file under `supabase/migrations-postapply/*.sql` in lexicographic
+-- order and applies it via `psql` in autocommit mode (no `-1` flag;
+-- the file ships as bare DDL with NO `BEGIN`/`COMMIT`, so psql runs
+-- it in autocommit and `CREATE … CONCURRENTLY` succeeds).
+--
+-- Naming contract: any future CONCURRENTLY-bearing companion
+-- migration on a patient-data table MUST land in
+-- `supabase/migrations-postapply/` (NOT in `supabase/migrations/`)
+-- and MUST ship as bare DDL with `IF NOT EXISTS` guards. Sequence
+-- across the two directories is the operator's responsibility —
+-- the parent table for every post-apply file MUST be created by a
+-- migration that ran in `db push` above. See CLAUDE.md "Migration
+-- discipline" stanza for the full operator runbook.
+--
+-- The `IF NOT EXISTS` guard keeps this file idempotent against a DB
+-- that has already received the index via `pnpm db:push` (Drizzle
+-- defaults to non-CONCURRENTLY for unique indexes; the production
+-- apply path is what makes it CONCURRENTLY) AND against re-runs of
+-- the deploy job after a partial earlier success.
+
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS
+    patient_invites_professional_identifier_active_uq
+    ON public.patient_invites USING btree (professional_user_id, identifier_hash)
+    WHERE (status = 'pending'::public.patient_invite_status_enum);

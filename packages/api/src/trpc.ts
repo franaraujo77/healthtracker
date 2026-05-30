@@ -101,8 +101,102 @@ export const protectedProcedure = t.procedure
     });
   });
 
-// Doctor procedure: authenticated via x-share-token header (no Supabase session).
-// Sets app.current_share_token_id instead of app.current_patient_id.
+// Doctor procedure: authenticated via x-share-token header AND a
+// verified Supabase auth session (Story 6.2 AC4 / T4).
+//
+// **Defense in depth, two gates:**
+//   1. `x-share-token` header — binds the RLS principal via
+//      `set_config('app.current_share_token_id', …)`.
+//   2. `ctx.session.user` — proves the request rides on a verified
+//      Supabase auth.users row (the doctor verified their magic-link).
+//
+// Without the session gate a malicious browser extension could mint
+// an `x-share-token` header on an UNAUTHENTICATED tab and read the
+// Conversation Starter payload — the GUC alone would still pass the
+// doctor-side RLS predicate. The session gate ensures every consumer
+// of `doctorProcedure` carries a doctor-attributable `auth.uid()` for
+// the `share_token.read` audit row's `actorId` (NOT the shareTokenId
+// sentinel that Story 6.1's pre-auth path used).
+//
+// Story 5.1 deliberately landed without the session gate (the only
+// consumer was a future story); Story 6.2 is the first production
+// consumer (`sharingRouter.getConversationStarter`) and adds it.
+//
+// Reviewers: confirm the resolver ALSO does a
+// `constantTimeEqualHmac` re-check against the persisted
+// `share_tokens.token_hmac` — the GUC proves "client claims X", the
+// HMAC compare proves "client holds the URL the patient signed for X".
+/**
+ * Story 6.5 — `professionalSessionProcedure`.
+ *
+ * Session-only ACTIVATED-doctor procedure for `/profissional/*`
+ * surfaces that have NO share-token in context (settings pages,
+ * dashboards). Binds `app.current_doctor_user_id` from the verified
+ * Supabase session uid so the `professionals`-family RLS policies
+ * (which key off this GUC, NOT `auth.uid()` — see
+ * `custom_rls_professionals.sql` rationale) can exercise.
+ *
+ * Distinct from `doctorProcedure`: NO `x-share-token` header required,
+ * NO `app.current_share_token_id` GUC bound, NO HMAC re-check.
+ *
+ * **R1-followup MEDIUM-1 (Story 6.5):** the activation gate (SELECT
+ * `professionals`) is folded INTO this middleware so the procedure
+ * name is truthful — any consumer is guaranteed a session AND an
+ * activated `professionals` row before the resolver runs. Without
+ * this fold, a signed-in patient would only be rejected by an
+ * application-layer recheck inside each resolver; the name implied
+ * "doctor-verified" but only the session was verified.
+ *
+ * The SELECT runs INSIDE the transaction so the GUC binding and the
+ * activation check share a single RTT cluster (savepoint-cheap) and
+ * so future RLS predicates that rely on `app.current_doctor_user_id`
+ * can be exercised by the SELECT itself if desired.
+ *
+ * The `app.current_user_role` GUC is set to `"doctor"` so any future
+ * shared RLS predicate that disambiguates patient-vs-doctor sees the
+ * correct role.
+ */
+export const professionalSessionProcedure = t.procedure
+  .use(timingMiddleware)
+  .use(async ({ ctx, next }) => {
+    if (!ctx.session?.user) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: "DOCTOR_SESSION_REQUIRED",
+      });
+    }
+    const session = ctx.session;
+    return ctx.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT set_config('app.current_doctor_user_id', ${session.user.id}, true)`,
+      );
+      await tx.execute(
+        sql`SELECT set_config('app.current_user_role', ${"doctor"}, true)`,
+      );
+      // R1-followup MEDIUM-1 — activation gate inlined. PRECONDITION_FAILED
+      // (NOT UNAUTHORIZED) preserves the existing application-layer
+      // contract that resolvers / RSCs catch to render the
+      // "ative sua conta" placeholder card (see
+      // `/profissional/configuracoes/limiares/page.tsx`).
+      const activated = await tx.execute<{ user_id: string }>(
+        sql`SELECT user_id FROM professionals WHERE user_id = ${session.user.id} LIMIT 1`,
+      );
+      const activatedRows = activated as unknown as { user_id: string }[];
+      if (activatedRows.length === 0) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "DOCTOR_NOT_ACTIVATED",
+        });
+      }
+      return next({
+        ctx: {
+          session: { ...session, user: session.user },
+          db: tx,
+        },
+      });
+    });
+  });
+
 export const doctorProcedure = t.procedure
   .use(timingMiddleware)
   .use(async ({ ctx, next }) => {
@@ -113,6 +207,16 @@ export const doctorProcedure = t.procedure
         message: "SHARE_TOKEN_REQUIRED",
       });
     }
+    // Story 6.2 T4.1 — session gate. Without this, a missing or
+    // forged session pairs with a fabricated `x-share-token` header
+    // to read the doctor surface anonymously.
+    if (!ctx.session?.user) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: "DOCTOR_SESSION_REQUIRED",
+      });
+    }
+    const session = ctx.session;
     return ctx.db.transaction(async (tx) => {
       // See protectedProcedure above for why `set_config` is used here
       // instead of `SET LOCAL = ${value}`.
@@ -122,9 +226,18 @@ export const doctorProcedure = t.procedure
       await tx.execute(
         sql`SELECT set_config('app.current_user_role', ${"doctor"}, true)`,
       );
+      // Story 6.3 — bind the doctor's Supabase user id for the
+      // `professionals` RLS predicate. Activation is `auth.uid()`-scoped,
+      // not share-token-scoped (a doctor activated via patient A's token
+      // IS activated viewing patient B's report — Doctor Acquisition
+      // Loop closure). Using the GUC pattern (vs raw `auth.uid()`)
+      // keeps the policy testable against the bare testcontainer.
+      await tx.execute(
+        sql`SELECT set_config('app.current_doctor_user_id', ${session.user.id}, true)`,
+      );
       return next({
         ctx: {
-          session: ctx.session,
+          session: { ...session, user: session.user },
           db: tx,
           headers: ctx.headers,
           shareTokenId,

@@ -8,15 +8,15 @@
  * one card per visible biomarker, deterministic shape — that the
  * doctor surface (Story 6.2) consumes.
  *
- * The real Anthropic adapter throws `Not implemented — Story 6.2`;
- * we assert that too.
+ * Story 6.2 R1 fix-up: the real Anthropic adapter is now implemented.
+ * Its argument-shape / JSON-parse / Anthropic.APIError-rethrow contract
+ * is covered by `adapters/anthropic-conversation-starter.test.ts`
+ * (vi.mock'd Anthropic SDK). The old "throws Not implemented" assertion
+ * was removed as obsolete.
  */
 import { describe, expect, it } from "vitest";
 
-import {
-  createAnthropicAdapter,
-  createStubLLMAdapter,
-} from "../src/adapters/anthropic.ts";
+import { createStubLLMAdapter } from "../src/adapters/anthropic.ts";
 
 describe("conversation starter — stub LLM adapter", () => {
   it("returns 3 prompts + one card per visible biomarker", async () => {
@@ -57,18 +57,5 @@ describe("conversation starter — stub LLM adapter", () => {
       visibleBiomarkers: [{ category: "ferritin" }],
     });
     expect(a).toEqual(b);
-  });
-});
-
-describe("conversation starter — real Anthropic adapter (Story 5.2 gate)", () => {
-  it("throws 'Not implemented' so the worker fails fast until Story 6.2", async () => {
-    const adapter = createAnthropicAdapter({ apiKey: "sk-test-not-used" });
-    await expect(
-      adapter.generateConversationStarter({
-        shareTokenId: "x",
-        patientId: "y",
-        visibleBiomarkers: [],
-      }),
-    ).rejects.toThrow(/Story 6\.2/);
   });
 });

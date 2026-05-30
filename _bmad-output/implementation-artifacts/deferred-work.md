@@ -1,5 +1,48 @@
 # Deferred Work
 
+## Deferred from: code review of story-6.6 round 1 (2026-05-30)
+
+- ~~**Epic 5 baseline Supabase migration is missing** — Story 6.6 R1 M1.~~
+  **RESOLVED (2026-05-30, Story 6.6 follow-up commit).** Authored
+  `supabase/migrations/0005_epic_5_sharing_baseline.sql` (Epic 5 schema:
+  4 enums, 6 tables, RLS policies for all 6 tables, Supabase Storage
+  `exports` bucket, `pseudonymize_patient_id()` helper) +
+  `supabase/migrations-postapply/0008_epic_5_partial_uniques.sql` (4
+  CONCURRENTLY partial unique indexes). Renumbered Epic 6 migrations
+  (`0005_epic_6_*` → `0006_epic_6_*`; `0006_epic_6_*_active_uq` →
+  `0007_epic_6_*_active_uq`). Unblocks the `rls-adversarial` CI check
+  on PR #57. The original M1 deferral note (kept below for traceability):
+- ~~**Epic 5 baseline Supabase migration is missing** — original Story 6.6 R1 M1.~~
+  `supabase/migrations/0005_epic_6_doctor_accounts.sql` references
+  `public.pending_invites` in its FK declaration, but no migration
+  file ever creates the `pending_invites` / `share_tokens` /
+  `share_token_biomarkers` / `conversation_starter_cache` /
+  `exports` / `account_deletion_requests` tables (Epic 5 shipped via
+  `pnpm db:push` only). Fresh-DB rehydration (CI shadow-DB, new
+  staging, prod recovery from baseline) will fail at 0005 with
+  `relation "pending_invites" does not exist`. Production deploy
+  is unaffected today because the live DB was primed via
+  `pnpm db:push` during Stories 5.x/6.x, but the migration chain is
+  broken for any clean re-apply. PROPOSED FOLLOW-UP STORY: "Story
+  5.7 — Epic 5 baseline migration" (or "Epic 5 retro addendum"). Scope:
+  4 enums (`share_duration_enum`, `export_format_enum`,
+  `export_status_enum`, `account_deletion_status_enum`); 6 tables;
+  5 indexes including 3 partial UNIQUE that require post-apply
+  CONCURRENTLY files under `supabase/migrations-postapply/`
+  (`share_tokens_invite_active_uq`,
+  `share_tokens_patient_invite_active_uq`, `exports_active_uq`,
+  `account_deletion_requests_active_uq`); 7 RLS policy files
+  (`pending_invites`, `share_tokens`, `share_token_biomarkers`,
+  `conversation_starter_cache`, `exports`,
+  `account_deletion_requests`, plus the `supabase_storage_exports.sql`
+  bucket policy). Notable design decisions to preserve verbatim per
+  CLAUDE.md: per-biomarker junction table (NFR-S3), nullable
+  `expires_at` (Story 5.2), HMAC + `tokenHash` separation, soft-delete
+  via `revoked_at`, tombstone `patient_id` on
+  `account_deletion_requests` (no FK to `users(id)`). Significant
+  lift (10+ objects + 7 policy files + Storage bucket); too large
+  for a single follow-up patch round on Story 6.6.
+
 ## Deferred from: code review of story-2-3 round 2 (2026-05-22)
 
 - **F115: `sql.begin` test mock makes `tx === sql`** — production `postgres.js` `TransactionSql` forbids nested `.begin` without `.savepoint`; current tests give false confidence. Add typing-only doc; integration test deferred.
@@ -397,3 +440,29 @@
 
 - Pre-auth landing DoS surface (`/m/<random>.<random>` audit-row spam) — mitigation lands at the Next.js edge / Vercel WAF, NOT in the resolver. Keeping the resolver dumb keeps the audit promise honest. Future infra story (Epic 6.x).
 - Malformed-segment audit rows are service-role-visible only (no patient owns the sentinel `resource_id`). Surfacing per-patient probes would require a per-patient short-code in the URL — not in scope for Epic 6. R1-H1 trade-off documented in `writePreAuthAudit` + CLAUDE.md "Pre-auth landing discipline".
+
+## Deferred from: code review of story-6.2 (2026-05-29)
+
+- R1-M3 — `shareTokenHolder` module-level singleton is a tab-wide race when two doctor-view tabs are open in one browser process. The second mount overwrites `current`; the first tab's next tRPC call sends the second tab's token. Defense-in-depth `constantTimeEqualHmac` re-check in the resolver catches as `NOT_FOUND` (degraded UX, not data leak). Acceptable for 6.2 (one-token-per-tab is the dominant flow). Fix lands when Story 6.3+ introduces multi-tab flows — likely via React-context-scoped tRPC client per shareTokenId.
+- R1-N3 — inline `style={{}}` throughout `view/page.tsx`, `auth/page.tsx`, `ReportLayout.tsx` rather than Tailwind 4 classes. Acceptable for MVP doctor surface; flag for follow-up refactor when the doctor surface gains a design pass.
+- T8.6 — Component snapshot tests for `<ConversationStarterPrompt>` + `<BiomarkerCard variant="report">`. Lower blast-radius — UI regressions are visually obvious. Track as polish.
+- T8.7 — E2E Playwright spec for `/m/[token]/auth → callback → /view` happy path. Skip-in-CI absent Supabase test project; harness deferred.
+
+## Deferred from: story-6.3 (2026-05-29)
+
+- Story 6.6 (Epic 6 consolidated migration) MUST include: (a) `CREATE TABLE professionals` + `professional_category_enum`; (b) `ALTER TABLE pending_invites ADD CONSTRAINT pending_invites_resolved_user_id_users_id_fk FOREIGN KEY (resolved_user_id) REFERENCES users(id) ON DELETE SET NULL`; (c) `professionals` RLS policies (`select_own`, `insert_own`, `service_role_all`); (d) any `professional_category_enum` value additions that land between 6.3 and 6.6.
+- Round-1 product question (AC6) — surface `professional_account.activated` to patient Access Log as a positive-signal event ("Dr. Rodrigo abriu sua conta")? Today: NO (out of scope; doctor-side identity telemetry). If product decides YES, add the event to `ACCESS_LOG_EVENT_KINDS`, extend `audit_log_select_own` RLS to surface rows whose `metadata->>shareTokenId` matches one of the patient's share-tokens, and add a pt-BR label. Defer to 6.4 retro.
+- CRM / professional-license validation — Story 6.3 ships with category-only metadata per UX-DR9 frictionless framing. Revisit before Epic 6 launch if regulatory review demands it. CRM gating would convert the activation surface from "offer" to "gate", contradicting the governing UX intent.
+- Banner per-session dismiss vs persistent preference — Story 6.3 ships per-session in-memory dismiss only. If conversion data shows banner fatigue, add a `professional_account_banner_dismissed_at` column (or prefs table), a `dismissProfessionalAccountBanner` mutation, and an RSC-side preference fetch. Spec T5.2 open question.
+- Display-name prefill quality — email local-part (`dr.rodrigo@gmail.com` → `dr.rodrigo`) is a low-bar default. If patient-side perception research shows the prefill leaks "looks like a username", add a stricter refinement (reject `\d` chars, require space separator, etc.). Currently trust the doctor's editorial discretion. Spec open question #6.
+- `professional_category_enum` `ALTER TYPE ADD VALUE` procedure — adding categories later is a Postgres-additive migration (non-CONCURRENTLY-safe under the same rules as widening a CHECK). Document the runbook before the first category change ships.
+
+## Deferred from: story-6.4 (2026-05-29)
+
+- **Story 6.6 (Epic 6 consolidated migration) MUST include:** (a) `CREATE TABLE patient_invites` + `patient_invite_status_enum`; (b) the `patient_invites_professional_identifier_active_uq` partial unique index `WHERE status = 'pending'`; (c) the `patient_invites_identifier_kind_check` CHECK constraint; (d) the `patient_invites_resolved_user_id_users_id_fk … ON DELETE SET NULL` constraint; (e) `custom_rls_patient_invites.sql` RLS policies (`select_own`, `insert_own`, `update_own_or_resolving_patient`, `service_role_all`).
+- **`revokePatientInvite` mutation** — doctor-initiated revoke of a pending invite. Out of scope for 6.4 (column reserved, UI deferred). Lands when the dashboard story (6.5 or 6.x) owns the invite-history list view.
+- **Transactional email/SMS send to the patient** — the doctor self-distributes the URL today via WhatsApp / SMS / email. Adding SendGrid/Twilio introduces LGPD Art. 7 compliance surface without unblocking the Doctor Acquisition Loop. Revisit if conversion data shows the manual hand-off is a drop-off point.
+- **Rate-limiting / auth.users enumeration mitigation on `createPatientInvite`** — the AC11 already-registered check is a bounded enumeration oracle. Today's spec accepts the leak (doctors are authenticated, accountable, low-volume). Mitigation options: (a) per-doctor daily cap via a partial unique index; (b) constant-time response delay matching the INSERT path. Defer until observed abuse signal.
+- **Doctor invite-history list view** — the `patient_invites_professional_created_idx` index is already in place; UI owned by Story 6.5 / 6.x dashboard.
+- **Início "Convidado por Dr. [Nome]" referrer-attribution surface** — the data path (JOIN on `patient_invites → professionals` for `resolved_user_id = auth.uid()`) is not yet shipped. Story 6.4 ships the resolved-flip atomicity but not the patient-facing render. Deferred to the dashboard / Início empty-state story.
+- **Phone-format strictness** — the Brazilian phone normaliser accepts BR mobile numbers only (+55 prefix, 9-prefix subscriber). Landlines + international numbers throw. Revisit if a non-BR market signal demands wider support.
