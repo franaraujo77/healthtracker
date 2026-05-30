@@ -1,5 +1,5 @@
 # generated: 2026-05-15
-# last_updated: 2026-05-30 (story 6.5 R1-followup patches → still review)
+# last_updated: 2026-05-30 (story 6.6 implementation complete → review)
 # project: healthtracker
 # project_key: NOKEY
 # tracking_system: file-system
@@ -570,6 +570,74 @@ development_status:
   6-3-doctor-activates-a-professional-account-from-the-conversation-starter-view: review
   6-4-doctor-invites-a-patient-to-create-a-health-tracker-account: review
   6-5-doctor-configures-biomarker-staleness-thresholds-for-their-professional-view: review
+  6-6-author-incremental-supabase-migration-for-epic-6-schema: review
+  # Story 6.6 implementation complete → review. PR #57 (stacked).
+  # Two migration files shipped (`0005_epic_6_doctor_accounts.sql` +
+  # `0006_epic_6_patient_invites_active_uq.sql`) hand-authored from
+  # Drizzle schema + RLS policy source-of-truth (the `supabase db
+  # diff --use-migra` path was blocked: the shadow-DB apply of 0005
+  # requires `pending_invites` which has no Epic 5 migration file —
+  # pre-existing Epic 5 migration gap, out of Story 6.6 scope). 0005
+  # contains the 2 enums + 3 tables + 11 RLS policies + the deferred
+  # `pending_invites.resolved_user_id` FK; 0006 contains the
+  # CONCURRENTLY partial UQ split out per SQLSTATE 25001 rule.
+  # Drift signal (re-`pnpm db:push` against dev DB after migrations
+  # applied): only known pre-existing Drizzle churn — RLS-policy
+  # DROP/CREATE (drizzle-kit always emits against externally loaded
+  # policies), `created_at desc` index re-emission (known
+  # drizzle-kit DESC quirk affecting Epic 3-6 uniformly), and one
+  # constraint-name truncation on the staleness FK (PostgreSQL
+  # NAMEDATALEN=63 — Drizzle's "desired" carries the full 67-char
+  # name; pre-existing in Story 6.5's Drizzle output). NO Epic 6
+  # net-new drift. `pnpm -w typecheck` + `pnpm -w lint` clean.
+  # `test:integration` SKIPPED — Rancher Desktop's lima VM rejects
+  # testcontainers' docker.sock bind-mount (mirrors Story 6.5
+  # R1-followup skip rationale; Story 6.6 ships zero runtime code so
+  # the existing RLS suites still lock the invariant). CLAUDE.md
+  # "Migration discipline" appendix gets a 3-line stanza. Sprint
+  # last_updated bumped.
+  # Story 6.6 spec created → ready-for-dev. Stacks on 6.2+6.3+6.4+6.5 / PR #57.
+  # Final story of Epic 6: SQL-only batched Supabase migration. No
+  # application code; mirrors Story 3.5 baseline / Story 4.4 incremental
+  # pattern. Output is TWO files:
+  #   (1) `supabase/migrations/0005_epic_6_doctor_accounts.sql` —
+  #       `professional_category_enum` + `professionals` table +
+  #       `pending_invites.resolved_user_id` FK addition +
+  #       `patient_invite_status_enum` + `patient_invites` table +
+  #       non-CONCURRENTLY indexes/CHECKs + `staleness_thresholds` table
+  #       (composite PK) + bodies of all three new `custom_rls_*.sql`
+  #       policy files (professionals / patient_invites /
+  #       staleness_thresholds). All `IF NOT EXISTS`-guarded so a
+  #       `pnpm db:push`'d DB re-applies cleanly (mirrors
+  #       `0003_epic_4_letters_schema.sql`).
+  #   (2) `supabase/migrations/0006_epic_6_patient_invites_active_uq.sql`
+  #       — `CREATE UNIQUE INDEX CONCURRENTLY` for
+  #       `patient_invites_professional_identifier_active_uq` (partial
+  #       UQ on (professional_user_id, identifier_hash) WHERE
+  #       status='pending'). Split out because `CONCURRENTLY` fails
+  #       inside Supabase's implicit per-file transaction with
+  #       SQLSTATE 25001 (CLAUDE.md ops note lines 114–124; mirrors
+  #       `0004_epic_4_audit_index_letter_queued.sql`). Applied via
+  #       `psql` directly by supabase-deploy.
+  # **Critical gotcha for dev:** `supabase db diff --use-migra
+  # --linked` is only as correct as the linked Supabase project's
+  # current schema state. Dev MUST verify the worktree is `supabase
+  # link`-ed to the same project Stories 6.3/6.4/6.5 have been
+  # `pnpm db:push`-applied against — otherwise the diff will silently
+  # MISS objects. If unclear, dev STOPS and asks Francis. Two
+  # documented `ON DELETE SET NULL` FKs to `users(id)` ship in this
+  # migration (`pending_invites.resolved_user_id` from 6.3 +
+  # `patient_invites.resolved_user_id` from 6.4) — both are the
+  # ONLY exceptions to Story 5.6's cascade rule; reviewer must
+  # verify they spell `SET NULL`. `staleness_thresholds` ships a
+  # real composite `PRIMARY KEY` (not UNIQUE INDEX; 6.5 R1-followup
+  # MEDIUM-3 made this load-bearing for ON CONFLICT symbol-grounding)
+  # and intentionally has NO DELETE policy. Drift sanity-check via
+  # `pnpm db:push` + `supabase db diff … _drift_check` must both
+  # emit empty diffs after apply (AC10). NO new runtime test —
+  # existing `professionals.rls.test.ts` /
+  # `patient_invites.rls.test.ts` /
+  # `staleness_thresholds.rls.test.ts` are the RLS invariant lock.
   # Story 6.5 R1-followup patches landed. All remaining R1 findings
   # (MEDIUM-1/2/3/4 + LOW-1/2/3) addressed in a single commit on
   # `worktree-story-6-2` / PR #57. Headline R1-followup fixes:

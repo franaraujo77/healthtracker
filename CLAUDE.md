@@ -134,6 +134,19 @@ CONCURRENTLY ...` and apply via `psql` directly (Supabase CLI's
 > `supabase/migrations/0004_epic_4_audit_index_letter_queued.sql`
 > for the canonical 3-step pattern (create `_v2` → drop original →
 > rename to preserve `ON CONFLICT ON CONSTRAINT <name>` symbols).
+>
+> **Ops note (Epic 6 consolidated migration / Story 6.6):** Two files ship —
+> `supabase/migrations/0005_epic_6_doctor_accounts.sql` (tables, enums, FKs,
+> non-CONCURRENTLY indexes, RLS policies for `professionals` / `patient_invites`
+> / `staleness_thresholds` + the deferred `pending_invites.resolved_user_id` FK)
+> and `supabase/migrations/0006_epic_6_patient_invites_active_uq.sql` (the
+> partial unique index `patient_invites_professional_identifier_active_uq` —
+> split out because it gates the doctor → patient invite write surface and
+> MUST apply with `CREATE … CONCURRENTLY` via `psql` directly per the
+> SQLSTATE 25001 rule above). The runtime doctor-data-isolation invariant is
+> locked in by `packages/db/__tests__/rls/{professionals,patient_invites,
+staleness_thresholds}.rls.test.ts` — those suites are the source of truth
+> for what the migration's RLS bodies must enforce.
 
 **UI components**
 

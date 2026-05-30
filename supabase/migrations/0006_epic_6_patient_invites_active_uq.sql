@@ -1,0 +1,52 @@
+-- =============================================================================
+-- 0006_epic_6_patient_invites_active_uq.sql
+-- =============================================================================
+--
+-- Creates the partial unique index
+-- `patient_invites_professional_identifier_active_uq` introduced by
+-- Story 6.4 — the doctor → patient re-invite idempotency gate
+-- (`(professional_user_id, identifier_hash) WHERE status = 'pending'`).
+-- Re-inviting the same patient by the same doctor returns the existing
+-- pending row's id rather than creating a duplicate. After expiry the
+-- partial index releases and re-invite creates a NEW row (renewal flow).
+--
+-- ## Why this index lives in its own file (CONCURRENTLY split)
+--
+-- The Supabase CLI wraps every migration file in an implicit transaction
+-- (see CLAUDE.md ops note "Migration discipline"). `CREATE … CONCURRENTLY`
+-- cannot run inside a transaction — it fails with SQLSTATE 25001. There
+-- is no public `-- supabase: no-transaction` directive that disables the
+-- per-migration tx, contrary to community lore.
+--
+-- The partial unique index here is on the patient-data path: it gates
+-- the doctor → patient invite write surface. Concurrent re-invite
+-- double-taps from the doctor's UI could race the index build window
+-- if applied non-CONCURRENTLY. Per AC3 + AC8 of the Story 6.6 spec and
+-- the CLAUDE.md ops note, this DDL therefore ships in a sibling file
+-- applied via `psql` directly, bypassing the Supabase CLI's transaction
+-- wrapper. Mirrors the `0004_epic_4_audit_index_letter_queued.sql`
+-- precedent.
+--
+-- ## Operator apply procedure
+--
+-- The companion file `0005_epic_6_doctor_accounts.sql` lands the
+-- `patient_invites` table itself; this file MUST be applied AFTER
+-- 0005 (it references the table + the partial WHERE on the
+-- `status` column whose enum type is created by 0005).
+--
+-- Apply via `psql` against the live database (NOT via the bundled
+-- Supabase migration runner). The supabase-deploy GitHub Actions
+-- workflow already implements this split-apply path for
+-- `0004_*.sql`; if it does not auto-pick `0006_*.sql` via a glob
+-- pattern, the workflow needs a minor follow-up extension (out of
+-- Story 6.6 scope — coordinate with Francis).
+--
+-- The `IF NOT EXISTS` guard keeps this file idempotent against a DB
+-- that has already received the index via `pnpm db:push` (Drizzle
+-- defaults to non-CONCURRENTLY for unique indexes; the production
+-- apply path is what makes it CONCURRENTLY).
+
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS
+    patient_invites_professional_identifier_active_uq
+    ON public.patient_invites USING btree (professional_user_id, identifier_hash)
+    WHERE (status = 'pending'::public.patient_invite_status_enum);
