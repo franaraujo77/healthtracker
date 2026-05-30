@@ -90,6 +90,27 @@ last_updated: 2026-05-30
 # clean (15 packages, only pre-existing warnings); pnpm -w test passes
 # 338 @healthtracker/api tests; db test:integration SKIPPED (Rancher
 # docker.sock — same env limitation as Epic 6).
+# R1-followup (2026-05-30): all five remaining R1 findings patched in
+# one commit. Highlights:
+#   - MED — pt-BR date input UX: `LifeEventSheet` now accepts BOTH
+#     `dd/mm/aaaa` (preferred) and ISO `yyyy-mm-dd`, converting to
+#     ISO before the mutation. Placeholder/keyboard/a11y hint
+#     updated. Native picker (`@react-native-community/datetimepicker`)
+#     NOT added — dep not in workspace; deferred to Story 7.x.
+#   - LOW — `description` removed from `FingerprintLifeEventMarker`
+#     and from the mobile resolver→chart mapping (PII discipline;
+#     resolver/cache still returns it for future sheet/editor surfaces).
+#   - LOW — Tier-2 CTA Button now has explicit `accessibilityLabel`.
+#   - LOW — `LifeEventSheet` focuses the description Input one tick
+#     after open (screen-reader users no longer land on the handle).
+#   - LOW — `lifeEventWindow` "today" now uses `todayInSaoPauloIso()`
+#     instead of the device local clock (fixes one-day window drift).
+# Also restored the story spec file (was missing from worktree; the
+# original `dfd11bc` commit never staged it — copied from main repo).
+# Quality gates re-run post-patch: pnpm -w typecheck 17/17;
+# pnpm -w lint 15/15; pnpm --filter @healthtracker/api test:unit
+# 338/338; db integration still skipped (Rancher).
+# Status stays `review` pending re-approval on PR #59.
 # Stale-status cleanup: Story 3.5 (baseline migration) merged via PR #18
 # weeks ago (commit 56bedef); flipping `3-5-...: review → done` and
 # `epic-3: in-progress → done`. All 5 Epic 3 stories now done +

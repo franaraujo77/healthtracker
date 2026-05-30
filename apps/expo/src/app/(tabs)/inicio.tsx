@@ -40,6 +40,7 @@ import {
   LIFE_EVENT_SAVE_ERROR_PT_BR,
   LIFE_EVENT_SAVED_TOAST_PT_BR,
   MANUAL_BIA_ROUTE,
+  todayInSaoPauloIso,
   UPLOAD_ALLOWED_MIME_TYPES,
   UPLOAD_STATUS_LABELS_PT_BR,
 } from "@healthtracker/validators";
@@ -449,8 +450,12 @@ export default function Inicio() {
       }
     }
     if (min === null || max === null) return null;
-    const d = new Date();
-    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    // R1-followup LOW #4 — use São Paulo "today" instead of the
+    // device local clock so devices set to a non-Brazil timezone
+    // don't see a one-day window drift. The server refine
+    // (`todayInSaoPauloIso` in the validator) is the auth boundary;
+    // matching the client here is just consistency.
+    const today = todayInSaoPauloIso();
     return { fromDate: min, toDate: max > today ? max : today };
   }, [baselineChartBiomarkers]);
 
@@ -475,10 +480,13 @@ export default function Inicio() {
 
   const lifeEventMarkers: FingerprintLifeEventMarker[] = useMemo(() => {
     const events = lifeEventsQuery.data?.events ?? [];
+    // R1-followup LOW #1 — PII discipline: only ship id + eventDate
+    // to the chart layer. `description` stays in the React Query
+    // cache for the future sheet/editor surface, but never reaches
+    // the marker prop or render tree.
     return events.map((e) => ({
       id: e.id,
       eventDate: e.eventDate,
-      description: e.description,
     }));
   }, [lifeEventsQuery.data]);
 
@@ -696,6 +704,7 @@ export default function Inicio() {
                       setLifeEventSheetOpen(true);
                     }}
                     accessibilityRole="button"
+                    accessibilityLabel={LIFE_EVENT_CTA_PT_BR}
                   >
                     {LIFE_EVENT_CTA_PT_BR}
                   </Button>

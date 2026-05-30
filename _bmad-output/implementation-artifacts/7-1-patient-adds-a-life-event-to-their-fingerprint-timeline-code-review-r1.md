@@ -98,3 +98,38 @@ The `LifeEventSheet` uses a free-text `<Input>` for the date with placeholder `A
 ## Commit SHAs
 
 - Patch commit (after this report writes): see PR body.
+
+---
+
+## R1-followup addendum — 2026-05-30
+
+Francis approved fixing all remaining R1 findings. The original report above is preserved; this section summarises the patches.
+
+### Spec-file recovery
+
+The story spec `7-1-patient-adds-a-life-event-to-their-fingerprint-timeline.md` was missing from the worktree (never committed in `dfd11bc`; review agent had nothing to read at review time). Restored by copying from the main worktree (the canonical copy at `/Users/francisaraujo/repos/healthtracker/_bmad-output/implementation-artifacts/`). Included in the followup commit.
+
+### Patches applied
+
+| ID  | Severity | Finding                                                                              | Patch                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| --- | -------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| #1  | MED      | Free-text `yyyy-mm-dd` date input is poor UX for pt-BR patients                      | Added `parseLifeEventDateInput()` accepting BOTH `dd/mm/aaaa` and ISO `yyyy-mm-dd`, converting to ISO before tRPC submit. Placeholder updated to `DD/MM/AAAA`, `accessibilityHint` added in pt-BR, `keyboardType="numbers-and-punctuation"`. **Picker dependency NOT added** — `@react-native-community/datetimepicker` is not in the workspace; adding a dep mid-PR was out of scope per the followup brief. Picker remains a Story 7.x follow-up. The server-side `isRealIsoDate` refine stays as defence-in-depth. (`packages/ui/src/components/LifeEventSheet.tsx:71-128, 154-159, 211-220`) |
+| #2  | LOW      | `description` shipped to chart marker prop but never rendered (PII discipline)       | Removed `description` from `FingerprintLifeEventMarker` interface and from the marker mapping in `inicio.tsx`. The resolver/cache still carries it (spec contract for future sheet/editor surfaces), but it never reaches the render tree or React DevTools. (`packages/ui/src/fingerprint-chart-baseline.tsx:96-105`, `apps/expo/src/app/(tabs)/inicio.tsx:476-486`)                                                                                                                                                                                                                            |
+| #3  | LOW      | Tier-2 CTA `<Button>` lacked explicit `accessibilityLabel`                           | Added `accessibilityLabel={LIFE_EVENT_CTA_PT_BR}` to match the convention used by neighbouring CTAs. (`apps/expo/src/app/(tabs)/inicio.tsx:701`)                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| #4  | LOW      | `LifeEventSheet` had no focus management on open                                     | Added `descriptionRef` (typed against a local `FocusableRef` interface so `packages/ui` doesn't take an RN dep) and a `useEffect` that fires `descriptionRef.current?.focus()` one tick after the sheet opens. Screen-reader users now land on the description field instead of the sheet handle. (`packages/ui/src/components/LifeEventSheet.tsx:79-89, 133-141, 173-181, 194-205`)                                                                                                                                                                                                             |
+| #5  | LOW      | `lifeEventWindow` "today" derivation used device local clock instead of São Paulo TZ | Imported `todayInSaoPauloIso` and replaced the inline `new Date()`-derived ISO. Eliminates the one-day window drift on devices set to a non-Brazil TZ. (`apps/expo/src/app/(tabs)/inicio.tsx:42, 451-457`)                                                                                                                                                                                                                                                                                                                                                                                       |
+
+### Deferred (intentionally not patched in this round)
+
+- **Hand-crafted `Line` points with placeholder `xValue: 0, yValue: 0`** (original LOW about Victory Native fragility). Visual QA against the chart is what the original review recommended; no clean code-only fix exists today. Left for retro / Story 7.x follow-up.
+
+### Picker decision
+
+Option 3 (pt-BR parser fallback) chosen because `@react-native-community/datetimepicker` is NOT in `package.json` anywhere in the workspace and the followup brief explicitly forbade adding a dep mid-PR. The accepted-formats list (`dd/mm/aaaa` and ISO `yyyy-mm-dd`) is exported as `parseLifeEventDateInput` so a future picker swap is mechanical. Native picker tracked as a Story 7.x deferred item.
+
+### Quality-gate output (post-followup)
+
+- `pnpm -w typecheck` → 17/17 successful.
+- `pnpm -w lint` → 15/15 successful, 0 errors (pre-existing warnings only).
+- `pnpm --filter @healthtracker/api test:unit` → 39 files / 338 tests passing (no API surface changes; validator schema unchanged).
+- `pnpm --filter @healthtracker/db test:integration` → skipped (Docker still blocked under Rancher; documented as carry-over).

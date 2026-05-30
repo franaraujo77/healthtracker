@@ -92,11 +92,17 @@ export interface FingerprintChartBaselineBiomarker {
  * prop — when omitted (or empty), the chart renders unchanged. Each
  * marker becomes a neutral teal-grey vertical line at the matching
  * `event_date` on every per-biomarker mini-chart.
+ *
+ * PII discipline (R1-followup LOW #1): the free-text `description`
+ * is intentionally OMITTED from the chart prop. The resolver still
+ * returns it (spec contract for the sheet/editor surface), but the
+ * chart layer never sees it — minimises what's serialised through
+ * React DevTools and the render tree. Add it back only when a
+ * tooltip surface is shipped (deferred to Story 7.x).
  */
 export interface FingerprintLifeEventMarker {
   id: string;
   eventDate: string;
-  description: string;
 }
 
 export interface FingerprintBaselineChartProps {
