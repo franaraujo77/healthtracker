@@ -1,5 +1,10 @@
 ---
-stepsCompleted: ["step-01-validate-prerequisites", "step-02-design-epics", "step-03-create-stories"]
+stepsCompleted:
+  [
+    "step-01-validate-prerequisites",
+    "step-02-design-epics",
+    "step-03-create-stories",
+  ]
 inputDocuments:
   - "_bmad-output/planning-artifacts/prd.md"
   - "_bmad-output/planning-artifacts/architecture.md"
@@ -17,6 +22,7 @@ This document provides the complete epic and story breakdown for Health Tracker,
 ### Functional Requirements
 
 **Health Data Ingestion**
+
 - FR1: Patient can upload a blood test result as a PDF file from device storage
 - FR2: Patient can upload a blood test result as an image (JPEG/PNG/HEIC) from camera roll or direct camera capture
 - FR3: System can extract biomarker values, units, reference ranges, lab name, and collection date from uploaded PDFs and images
@@ -29,6 +35,7 @@ This document provides the complete epic and story breakdown for Health Tracker,
 - FR10: System can handle Brazilian lab decimal separator conventions (comma vs period) and multiple reference range formats
 
 **Longitudinal Record & Fingerprint**
+
 - FR11: Patient can view their complete longitudinal biomarker record across all uploaded draws, sorted by collection date
 - FR12: System can compute a personal baseline for each biomarker from the patient's own historical draws (2+ draws required)
 - FR13: Patient can view the Longitudinal Fingerprint — a visualization of each biomarker's trend plotted against their personal baseline band
@@ -37,12 +44,14 @@ This document provides the complete epic and story breakdown for Health Tracker,
 - FR16: Patient can view cached Fingerprint data without an active network connection, with a "last updated" timestamp
 
 **AI Narrative (The Letter)**
+
 - FR17: Patient can receive a streamed narrative summary (The Letter) after a new draw is confirmed, framed as a message from their past self
 - FR18: System can generate The Letter incorporating longitudinal patterns across all data types (blood markers + BIA) in the patient's record
 - FR19: All AI-generated text is framed as suggestion rather than diagnosis, using "it may be worth discussing with a [specialist type]" framing
 - FR20: Patient can re-read a previously generated Letter from the record history
 
 **Sharing & Access Control**
+
 - FR21: Patient can configure which biomarker categories are shared with each named doctor or health professional
 - FR22: Patient can revoke a doctor's access to their record at any time
 - FR23: Patient can generate a time-limited shareable link to their Conversation Starter report for a specific doctor; duration selection is presented with a 7-day default, with options for 30 days, 24 hours, or no expiry (no-expiry requires an additional confirmation step)
@@ -50,6 +59,7 @@ This document provides the complete epic and story breakdown for Health Tracker,
 - FR25: Access log entries are immutable; they cannot be deleted by the patient or operator
 
 **Doctor Experience**
+
 - FR26: Doctor can open a shared patient link without installing an app; authentication required before any patient health data is displayed; pre-auth landing page shows only patient name and share context
 - FR27: Doctor can view the Conversation Starter report — biomarker trend cards with current value, previous value, trend direction, and patient's personal baseline band
 - FR28: Doctor can view up to 3 AI-generated discussion prompts derived from the patient's data
@@ -58,6 +68,7 @@ This document provides the complete epic and story breakdown for Health Tracker,
 - FR31: Doctor can configure biomarker staleness thresholds for their professional view
 
 **Privacy & Compliance**
+
 - FR32: Patient must provide explicit, per-data-type consent before any health data is collected or processed
 - FR33: System records consent events with timestamp, consent text version, and data type scope
 - FR34: Patient can export their complete health record as a JSON file at any time
@@ -66,12 +77,14 @@ This document provides the complete epic and story breakdown for Health Tracker,
 - FR37: Patient can view a summary of all consent agreements currently active on their account
 
 **Operator & Administration**
+
 - FR38: Operator can view a manual review queue of extraction results flagged below the confidence threshold, with anonymised patient identifiers
 - FR39: Operator can confirm or reject individual extraction field values in the manual review queue
 - FR40: Confirmed extraction results are published to the patient's record and the patient is notified
 - FR41: System maintains an immutable audit log of all data access events (read, write, share, revoke) with actor, resource, and timestamp
 
 **Account & Authentication**
+
 - FR42: Patient can create an account with email and password
 - FR43: Patient can authenticate using biometric authentication (Face ID / fingerprint) as an alternative to password entry
 - FR44: Patient can receive push notifications for key events (extraction complete, Letter ready, manual review required, access log event)
@@ -86,6 +99,7 @@ This document provides the complete epic and story breakdown for Health Tracker,
 ### NonFunctional Requirements
 
 **Performance**
+
 - NFR-P1: Extraction completes within 30s at p95 for documents up to 10 pages/5 MB, under 100 concurrent jobs
 - NFR-P2: The Letter streams first token within 3s; full narrative (~300 words) in <15s
 - NFR-P3: Longitudinal Fingerprint renders within 2s of draw confirmation
@@ -94,6 +108,7 @@ This document provides the complete epic and story breakdown for Health Tracker,
 - NFR-P6: Mobile app launch-to-interactive under 3s on mid-range Android (Moto G class)
 
 **Security**
+
 - NFR-S1: All patient health data encrypted at rest (AES-256) and in transit (TLS 1.3)
 - NFR-S2: Row-Level Security enforced at PostgreSQL layer; no application-layer query can access another patient's data
 - NFR-S3: Doctor-shared links use signed, scoped tokens with configurable expiry; revocable by patient
@@ -104,12 +119,14 @@ This document provides the complete epic and story breakdown for Health Tracker,
 - NFR-S8: All patient health data stored/processed within Brazil or EU data regions only
 
 **Scalability**
+
 - NFR-SC1: Extraction pipeline supports horizontal scaling — additional workers addable without architectural changes
 - NFR-SC2: System sustains baseline performance up to 10x launch-day concurrent users without architectural intervention
 - NFR-SC3: LLM streaming infrastructure handles concurrent Letter generation without visible queuing delays; graceful degradation with patient notification beyond peak thresholds
 - NFR-SC4: Fingerprint computation queries complete within 500ms at p95 against 10M biomarker records, validated by load test before launch
 
 **Accessibility**
+
 - NFR-A1: Web app (Next.js) meets WCAG 2.1 Level AA for all core patient flows
 - NFR-A2: Mobile app supports system-level text size preferences (Dynamic Type/iOS, font scale/Android)
 - NFR-A3: All non-decorative images/icons include accessible labels; screen readers can navigate core flows
@@ -117,12 +134,14 @@ This document provides the complete epic and story breakdown for Health Tracker,
 - NFR-A5: Minimum contrast ratio 4.5:1 for body text, 3:1 for large text and UI components
 
 **Integration**
+
 - NFR-I1: Extraction pipeline handles PDF and image formats from at least Fleury, DASA, and Hermes Pardini at MVP launch, with documented per-lab adapters
 - NFR-I2: Extraction correctly parses Brazilian decimal separator (comma) and multiple reference range formats
 - NFR-I3: If LLM provider unavailable, upload processing and Fingerprint continue; Letter queued with patient notification
 - NFR-I4: Data portability export (JSON + PDF) is self-contained; LOINC codes include human-readable biomarker names
 
 **Reliability**
+
 - NFR-R1: Core endpoints (ingestion, Fingerprint, Access Log) maintain 99.5% uptime monthly
 - NFR-R2: Failed extraction jobs retry with exponential backoff; after 3 failed attempts, patient notified and upload enters manual review
 - NFR-R3: No patient health data silently lost — every upload either succeeds, enters manual review, or triggers a patient-visible failure notification
@@ -235,44 +254,53 @@ Architecture-derived requirements that directly shape epic and story content:
 ## Epic List
 
 ### Epic 0: Project Foundation & Development Environment
+
 Initialize the monorepo, configure all infrastructure, and establish sprint 0 non-negotiables so the system is ready for feature development with RLS, audit logging, and LGPD compliance foundations in place.
 **Requirements covered:** AR1–AR21, UX-DR1, UX-DR18, UX-DR19
 
 ### Epic 1: Patient Can Create an Account and Their Health Record Begins
+
 A patient can register, give explicit LGPD-compliant consent per data type, enable biometric unlock, and optionally import prior lab results — so their longitudinal record starts on day one, not draw one.
 **FRs covered:** FR32, FR33, FR37, FR42, FR43, FR46
 **UX-DRs covered:** UX-DR10, UX-DR11, UX-DR20
 
 ### Epic 2: Patient Can Upload and Review Blood Test Results
+
 A patient can upload a PDF or camera-roll photo of any Brazilian lab report, watch extraction in progress, confirm or correct low-confidence values, and queue uploads while offline — so blood test data enters the record accurately and with their explicit sign-off.
 **FRs covered:** FR1–FR10, FR44, FR45
 **UX-DRs covered:** UX-DR4, UX-DR12
 
 ### Epic 3: Patient Can See Their Health Fingerprint Over Time
+
 A patient can view their complete longitudinal biomarker record plotted against their own personal baseline — not a population average — so they see their health as a trajectory rather than a single number.
 **FRs covered:** FR11–FR16
 **UX-DRs covered:** UX-DR2, UX-DR3
 
 ### Epic 4: Patient Receives a Personal Health Narrative
+
 A patient receives a streamed, warm, ANVISA-compliant narrative after each draw that reflects their longitudinal patterns — and can tap any biomarker to get a calm, suggested question to raise with their specialist.
 **FRs covered:** FR17–FR20, FR50 (Growth)
 **UX-DRs covered:** UX-DR5
 
 ### Epic 5: Patient Controls Who Sees Their Health Data
+
 A patient can configure exactly which biomarkers each doctor sees, generate time-limited sharing links (7-day default), view an immutable Access Log, revoke access at any time, export their complete record, and permanently delete their account.
 **FRs covered:** FR21–FR25, FR34–FR36
 **UX-DRs covered:** UX-DR6, UX-DR7, UX-DR13, UX-DR14
 
 ### Epic 6: Doctor Can View a Patient's Conversation Starter
+
 A doctor can tap a WhatsApp link, authenticate in one step, and see a pre-generated Conversation Starter report — 3 discussion prompts and biomarker trend cards — within 90 seconds, without installing anything.
 **FRs covered:** FR26–FR31
 **UX-DRs covered:** UX-DR8, UX-DR9, UX-DR16
 
 ### Epic 7: Patient Adds Personal Context to Their Record
+
 A patient can add life events to their Fingerprint timeline, capture their emotional state before and after results, and record a voice memo at upload — so the record reflects lived experience alongside biomarker data.
 **FRs covered:** FR47, FR48 (Growth), FR49 (Growth), FR51 (Vision)
 
 ### Epic 8: Operator Can Manage Extraction Quality
+
 An operator can view a queue of low-confidence extraction results (anonymised), confirm or reject individual field values, and see results published to the patient's record — so the confidence gate operates at scale.
 **FRs covered:** FR38–FR41
 
@@ -1688,7 +1716,35 @@ A patient can add life events to their Fingerprint timeline, capture their emoti
 
 ---
 
-#### Story 7.5: Author incremental Supabase migration for Epic 7 schema
+#### Story 7.5: Patient picks a life event date via a platform-native date picker
+
+**As a** patient adding a life event,
+**I want** to pick the event date using my phone's native date picker,
+**So that** I can enter dates quickly without typing errors, matching the experience I have with every other native app.
+
+**Acceptance Criteria:**
+
+**Given** I tap "Adicionar evento de vida" and the LifeEventSheet appears,
+**When** I tap the date field,
+**Then** the platform-native date picker (`@react-native-community/datetimepicker` on Expo) opens with the current São Paulo date pre-selected.
+
+**Given** I attempt to select a future date,
+**When** the picker is open,
+**Then** the picker enforces `maximumDate = today in São Paulo` so the invalid state is never reachable from the UI.
+
+**Given** I confirm a valid past or present date in the picker,
+**When** the picker closes,
+**Then** the field displays the date in pt-BR `dd/mm/aaaa` format and the tRPC mutation receives ISO `yyyy-mm-dd`; the existing Story 7.1 server-side Zod refine remains in place as defense-in-depth.
+
+**Given** I am on a web surface (post-MVP),
+**When** I add a life event,
+**Then** the Story 7.1 pt-BR `dd/mm/aaaa` / ISO text-input fallback continues to work; no native picker is required on web.
+
+**Requirements:** UX-DR20, FR47 (Story 7.1)
+
+---
+
+#### Story 7.6: Author incremental Supabase migration for Epic 7 schema
 
 **As a** platform engineer,
 **I want** a versioned Supabase migration file that captures every net-new table, column, index, trigger, and RLS policy introduced by Epic 7 (personal context — life events on the Fingerprint timeline, emotional check-ins pre/post results, voice memo attachments),
@@ -1893,4 +1949,4 @@ Dependabot/Renovate are configured to ignore `eslint` + `@eslint/js` for this re
 - Lower blast radius than M1 / M2 (tooling only, no product surface). Can land in any sprint that has spare capacity.
 - Bundle with the prettier-ecosystem reflow (PRs #29 prettier-core + #42 prettier-plugin-tailwindcss are both on hold for `pnpm format:fix` reflow) **only if** they happen to land in the same sprint — they're independent otherwise.
 
-**Requirements:** none (operational). Touches: tooling/eslint/*, tooling/prettier/* (only if bundled), .github/workflows/ci.yml (Node version), eslint.config.ts in every package.
+**Requirements:** none (operational). Touches: tooling/eslint/_, tooling/prettier/_ (only if bundled), .github/workflows/ci.yml (Node version), eslint.config.ts in every package.

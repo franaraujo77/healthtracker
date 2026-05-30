@@ -886,7 +886,8 @@ development_status:
   7-2-patient-captures-emotional-check-in-before-results-appear-growth: backlog
   7-3-patient-captures-emotional-check-in-after-reviewing-results-growth: backlog
   7-4-patient-records-a-voice-memo-at-the-time-of-upload-vision: backlog
-  7-5-author-incremental-supabase-migration-for-epic-7-schema: backlog
+  7-5-patient-picks-a-life-event-date-via-platform-native-picker: backlog
+  7-6-author-incremental-supabase-migration-for-epic-7-schema: backlog
   epic-7-retrospective: optional
 
   # Epic 8: Operator Can Manage Extraction Quality
