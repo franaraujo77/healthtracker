@@ -75,10 +75,37 @@ const isoDateRegex = /^\d{4}-\d{2}-\d{2}$/;
  * Zod-refine time (NOT module load) so a long-lived server process
  * doesn't freeze "today" at boot.
  */
+/**
+ * Calendar-validity check — defense against malformed ISO strings that
+ * pass the regex but aren't real dates (e.g. `2024-02-30`, `2024-13-01`).
+ * Without this guard the resolver would forward the value to Postgres'
+ * `DATE` parser and surface a generic 500-class error instead of the
+ * friendly pt-BR `LIFE_EVENT_EVENT_DATE_INVALID` validation message.
+ * Mirrors the defense-in-depth pattern used by `BiaSubmissionSchema`'s
+ * `collectedAt` refine.
+ */
+function isRealIsoDate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const y = Number(match[1]);
+  const m = Number(match[2]);
+  const d = Number(match[3]);
+  if (y < 1900 || y > 2100) return false;
+  if (m < 1 || m > 12) return false;
+  if (d < 1 || d > 31) return false;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return (
+    dt.getUTCFullYear() === y &&
+    dt.getUTCMonth() === m - 1 &&
+    dt.getUTCDate() === d
+  );
+}
+
 export const createLifeEventInputSchema = z.object({
   eventDate: z
     .string()
     .regex(isoDateRegex, "LIFE_EVENT_EVENT_DATE_INVALID")
+    .refine(isRealIsoDate, { message: "LIFE_EVENT_EVENT_DATE_INVALID" })
     .refine((value) => value <= todayInSaoPauloIso(), {
       message: "LIFE_EVENT_EVENT_DATE_FUTURE",
     }),
