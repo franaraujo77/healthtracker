@@ -70,6 +70,39 @@ export type RecordEmotionalCheckInInput = z.infer<
   typeof recordEmotionalCheckInInputSchema
 >;
 
+/**
+ * Story 7.3 — post-results check-in input. Same shape as the pre
+ * schema except `type` is the literal `'post'`. The two schemas are
+ * deliberately separate so each resolver advertises its truthful
+ * contract via input narrowing (AC7).
+ */
+export const recordPostEmotionalCheckInInputSchema = z
+  .object({
+    uploadId: z.string().uuid(),
+    state: z.enum(EMOTIONAL_CHECKIN_STATES),
+    type: z.literal("post"),
+  })
+  .strict();
+export type RecordPostEmotionalCheckInInput = z.infer<
+  typeof recordPostEmotionalCheckInInputSchema
+>;
+
+/**
+ * Story 7.3 — output shape of `emotionalCheckIns.listPairs`. One row
+ * per upload that has BOTH `type='pre'` AND `type='post'` rows for the
+ * calling patient. Ordered by `createdAtPre desc`.
+ */
+export const emotionalCheckInPairSchema = z.object({
+  uploadId: z.string().uuid(),
+  preState: z.enum(EMOTIONAL_CHECKIN_STATES),
+  postState: z.enum(EMOTIONAL_CHECKIN_STATES),
+  createdAtPre: z.date(),
+  createdAtPost: z.date(),
+  labName: z.string().nullable(),
+  completedAt: z.date().nullable(),
+});
+export type EmotionalCheckInPair = z.infer<typeof emotionalCheckInPairSchema>;
+
 export const emotionalCheckInViewSchema = z.object({
   id: z.string().uuid(),
   uploadId: z.string().uuid(),
@@ -86,6 +119,13 @@ export type EmotionalCheckInView = z.infer<typeof emotionalCheckInViewSchema>;
 
 export const EMOTIONAL_CHECKIN_SHEET_TITLE_PT_BR =
   "Antes de ver seus resultados, como você está?";
+
+/** Story 7.3 — post-results sheet title (AC9). */
+export const EMOTIONAL_CHECKIN_POST_SHEET_TITLE_PT_BR =
+  "Como você está depois de ver seus resultados?";
+
+/** Story 7.3 — Tier-2 CTA on the upload detail screen (AC1). */
+export const EMOTIONAL_CHECKIN_POST_CTA_PT_BR = "Finalizar revisão";
 
 export const EMOTIONAL_CHECKIN_ACKNOWLEDGMENT_PT_BR =
   "Obrigado por compartilhar como você está.";

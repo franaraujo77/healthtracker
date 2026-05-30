@@ -7,6 +7,7 @@ import type { EmotionalCheckinState } from "@healthtracker/validators";
 import {
   EMOTIONAL_CHECKIN_ACKNOWLEDGMENT_MS,
   EMOTIONAL_CHECKIN_ACKNOWLEDGMENT_PT_BR,
+  EMOTIONAL_CHECKIN_POST_SHEET_TITLE_PT_BR,
   EMOTIONAL_CHECKIN_SAVE_ERROR_PT_BR,
   EMOTIONAL_CHECKIN_SHEET_A11Y_LABEL_PT_BR,
   EMOTIONAL_CHECKIN_SHEET_TITLE_PT_BR,
@@ -44,6 +45,13 @@ export interface EmotionalCheckInSheetProps {
   onSkip: () => void;
   /** True while the parent mutation is in flight. */
   isSubmitting?: boolean;
+  /**
+   * Story 7.3 — selects the title copy. `'pre'` (default) shows the
+   * pre-results question; `'post'` shows the post-results question.
+   * Everything else (5 state buttons, Pular, acknowledgment, R1-H1
+   * guards, non-dismissibility) is unchanged across modes.
+   */
+  mode?: "pre" | "post";
 }
 
 export function EmotionalCheckInSheet({
@@ -52,6 +60,7 @@ export function EmotionalCheckInSheet({
   onSubmit,
   onSkip,
   isSubmitting,
+  mode = "pre",
 }: EmotionalCheckInSheetProps) {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [showAcknowledgment, setShowAcknowledgment] = useState(false);
@@ -71,6 +80,14 @@ export function EmotionalCheckInSheet({
       }
     };
   }, []);
+
+  // R1-M1 (Story 7.3) — invariant: callers MUST render a fresh
+  // instance per `mode` (the Story 7.3 upload detail screen does this
+  // via two separate `<EmotionalCheckInSheet>` siblings). Toggling
+  // `mode` on a single mounted instance is not supported because it
+  // would leak the prior mode's acknowledgment / error UI state. If
+  // a future consumer needs single-instance toggling, the React
+  // idiom is `key={mode}` on the parent to force remount.
 
   function handleOpenChange(next: boolean) {
     if (!next) {
@@ -111,8 +128,12 @@ export function EmotionalCheckInSheet({
       open={open}
       onOpenChange={handleOpenChange}
       snapPointsMode="fit"
-      dismissOnSnapToBottom={false}
-      dismissOnOverlayPress={false}
+      // R1-M2 (Story 7.3) — non-dismissibility is load-bearing for
+      // the PRE sheet (AC1 first-view gate); for the POST sheet
+      // (voluntary CTA entry), the patient must be able to back out
+      // without making a selection.
+      dismissOnSnapToBottom={mode === "post"}
+      dismissOnOverlayPress={mode === "post"}
       animation="medium"
     >
       <Sheet.Overlay
@@ -132,7 +153,9 @@ export function EmotionalCheckInSheet({
           fontWeight="700"
           color="$textPrimary"
         >
-          {EMOTIONAL_CHECKIN_SHEET_TITLE_PT_BR}
+          {mode === "post"
+            ? EMOTIONAL_CHECKIN_POST_SHEET_TITLE_PT_BR
+            : EMOTIONAL_CHECKIN_SHEET_TITLE_PT_BR}
         </Text>
 
         {showAcknowledgment ? (

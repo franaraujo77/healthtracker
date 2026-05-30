@@ -1,8 +1,15 @@
 import type { TRPCRouterRecord } from "@trpc/server";
 
-import { recordEmotionalCheckInInputSchema } from "@healthtracker/validators";
+import {
+  recordEmotionalCheckInInputSchema,
+  recordPostEmotionalCheckInInputSchema,
+} from "@healthtracker/validators";
 
-import { recordPreResultsEmotionalCheckIn } from "../emotional-checkins";
+import {
+  listEmotionalCheckInPairs,
+  recordPostResultsEmotionalCheckIn,
+  recordPreResultsEmotionalCheckIn,
+} from "../emotional-checkins";
 import { protectedProcedure } from "../trpc";
 
 /**
@@ -30,4 +37,29 @@ export const emotionalCheckInsRouter = {
         input,
       );
     }),
+
+  /**
+   * Story 7.3 — post-results check-in. Gated server-side on a
+   * pre-existing `type='pre'` row for the same `(uploadId, patientId)`
+   * (AC5 defense-in-depth — UI gate is necessary but not sufficient).
+   */
+  recordPostResults: protectedProcedure
+    .input(recordPostEmotionalCheckInInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      return recordPostResultsEmotionalCheckIn(
+        ctx.db,
+        ctx.session.user.id,
+        input,
+      );
+    }),
+
+  /**
+   * Story 7.3 — personal-history pair listing. Returns one row per
+   * upload that has BOTH pre AND post check-in rows for the calling
+   * patient. The Acessos tab is the doctor-access surface; this is
+   * the patient-private longitudinal signal (AC3).
+   */
+  listPairs: protectedProcedure.query(async ({ ctx }) => {
+    return listEmotionalCheckInPairs(ctx.db, ctx.session.user.id);
+  }),
 } satisfies TRPCRouterRecord;

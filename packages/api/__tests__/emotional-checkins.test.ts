@@ -4,10 +4,15 @@ import {
   ACCESS_LOG_EVENT_KINDS,
   EMOTIONAL_CHECKIN_STATES,
   recordEmotionalCheckInInputSchema,
+  recordPostEmotionalCheckInInputSchema,
 } from "@healthtracker/validators";
 
 import type { AuditDb } from "../src/audit";
-import { recordPreResultsEmotionalCheckIn } from "../src/emotional-checkins";
+import {
+  listEmotionalCheckInPairs,
+  recordPostResultsEmotionalCheckIn,
+  recordPreResultsEmotionalCheckIn,
+} from "../src/emotional-checkins";
 
 describe("Story 7.2 — validators (AC7 + Zod boundary)", () => {
   it("ACCESS_LOG_EVENT_KINDS does NOT contain 'emotional_checkin.recorded' (AC7 regression lock)", () => {
@@ -33,6 +38,24 @@ describe("Story 7.2 — validators (AC7 + Zod boundary)", () => {
       type: "post",
     });
     expect(out.success).toBe(false);
+  });
+
+  it("Story 7.3 — recordPostEmotionalCheckInInputSchema rejects type='pre'", () => {
+    const out = recordPostEmotionalCheckInInputSchema.safeParse({
+      uploadId: "00000000-0000-0000-0000-000000000001",
+      state: "hopeful",
+      type: "pre",
+    });
+    expect(out.success).toBe(false);
+  });
+
+  it("Story 7.3 — recordPostEmotionalCheckInInputSchema accepts a valid post check-in", () => {
+    const out = recordPostEmotionalCheckInInputSchema.safeParse({
+      uploadId: "12345678-1234-4234-8234-123456789012",
+      state: "hopeful",
+      type: "post",
+    });
+    expect(out.success).toBe(true);
   });
 
   it("rejects an unknown state", () => {
@@ -312,5 +335,145 @@ describe("recordPreResultsEmotionalCheckIn", () => {
         type: "pre",
       }),
     ).rejects.toThrow(/no row/);
+  });
+});
+
+describe("recordPostResultsEmotionalCheckIn (Story 7.3)", () => {
+  // Build a mock DB that returns: 1st SELECT → upload ownership row;
+  // 2nd SELECT → pre check-in existence row; then a successful INSERT
+  // + audit. Each test composes its own variations.
+  function makeSelectChain(
+    results: ({ id: string }[] | undefined)[],
+  ): ReturnType<typeof vi.fn> {
+    const fn = vi.fn();
+    for (const r of results) {
+      const limit = vi.fn(() => Promise.resolve(r ?? []));
+      const where = vi.fn(() => ({ limit }));
+      const from = vi.fn(() => ({ where }));
+      fn.mockImplementationOnce(() => ({ from }));
+    }
+    return fn;
+  }
+
+  it("writes the row and audit with metadata.type='post'", async () => {
+    const createdAt = new Date("2026-05-30T12:00:00Z");
+    const returnedRow = {
+      id: "ec-post-1",
+      patientId: PATIENT_ID,
+      uploadId: UPLOAD_ID,
+      state: "exhausted" as const,
+      type: "post" as const,
+      privacyFlag: "patient_only" as const,
+      createdAt,
+    };
+    const insertReturning = vi.fn(() => Promise.resolve([returnedRow]));
+    const insertValues = vi.fn(() => ({ returning: insertReturning }));
+    const insertFn = vi.fn(() => ({ values: insertValues }));
+    const auditValues = vi.fn(() => Promise.resolve(undefined));
+
+    const db = {
+      select: makeSelectChain([
+        [{ id: UPLOAD_ID }], // ownership
+        [{ id: "ec-pre-1" }], // pre exists
+      ]),
+      insert: vi
+        .fn()
+        .mockImplementationOnce(insertFn)
+        .mockImplementationOnce(() => ({ values: auditValues })),
+    } as unknown as AuditDb;
+
+    const out = await recordPostResultsEmotionalCheckIn(db, PATIENT_ID, {
+      uploadId: UPLOAD_ID,
+      state: "exhausted",
+      type: "post",
+    });
+
+    expect(out).toEqual(returnedRow);
+    expect(auditValues).toHaveBeenCalledTimes(1);
+    const firstCall = auditValues.mock.calls[0] as unknown as
+      | [{ event: string; metadata: Record<string, unknown> }]
+      | undefined;
+    if (!firstCall) throw new Error("audit values not called");
+    const auditArg = firstCall[0];
+    expect(auditArg.event).toBe("emotional_checkin.recorded");
+    expect(auditArg.metadata).toEqual({
+      uploadId: UPLOAD_ID,
+      type: "post",
+      state: "exhausted",
+    });
+  });
+
+  it("throws NOT_FOUND when the upload does not belong to caller", async () => {
+    const insertFn = vi.fn();
+    const db = {
+      select: makeSelectChain([[]]), // ownership empty
+      insert: insertFn,
+    } as unknown as AuditDb;
+
+    await expect(
+      recordPostResultsEmotionalCheckIn(db, PATIENT_ID, {
+        uploadId: UPLOAD_ID,
+        state: "hopeful",
+        type: "post",
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+
+    expect(insertFn).not.toHaveBeenCalled();
+  });
+
+  it("throws PRECONDITION_FAILED when no pre check-in exists (AC4 defense-in-depth)", async () => {
+    const insertFn = vi.fn();
+    const db = {
+      select: makeSelectChain([
+        [{ id: UPLOAD_ID }], // ownership OK
+        [], // pre missing
+      ]),
+      insert: insertFn,
+    } as unknown as AuditDb;
+
+    await expect(
+      recordPostResultsEmotionalCheckIn(db, PATIENT_ID, {
+        uploadId: UPLOAD_ID,
+        state: "hopeful",
+        type: "post",
+      }),
+    ).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+      message: "PRE_CHECKIN_REQUIRED",
+    });
+
+    expect(insertFn).not.toHaveBeenCalled();
+  });
+});
+
+describe("listEmotionalCheckInPairs (Story 7.3 AC3)", () => {
+  it("delegates to the Drizzle query builder and returns the result rows", async () => {
+    const expected = [
+      {
+        uploadId: UPLOAD_ID,
+        preState: "hopeful" as const,
+        postState: "exhausted" as const,
+        createdAtPre: new Date("2026-05-01T10:00:00Z"),
+        createdAtPost: new Date("2026-05-01T10:30:00Z"),
+        labName: "Lab A",
+        completedAt: new Date("2026-05-01T09:50:00Z"),
+      },
+    ];
+
+    const orderBy = vi.fn(() => Promise.resolve(expected));
+    const where = vi.fn(() => ({ orderBy }));
+    const leftJoin = vi.fn(() => ({ where }));
+    const innerJoin = vi.fn(() => ({ leftJoin }));
+    const from = vi.fn(() => ({ innerJoin }));
+    const select = vi.fn(() => ({ from }));
+    const db = { select } as unknown as AuditDb;
+
+    const rows = await listEmotionalCheckInPairs(db, PATIENT_ID);
+
+    expect(rows).toEqual(expected);
+    // Verify the JOIN chain was assembled (INNER pre→post, LEFT pre→uploads).
+    expect(innerJoin).toHaveBeenCalledTimes(1);
+    expect(leftJoin).toHaveBeenCalledTimes(1);
+    expect(orderBy).toHaveBeenCalledTimes(1);
   });
 });

@@ -148,4 +148,74 @@ describe("emotional_checkins table RLS — Story 7.2 patient surface", () => {
 
     expect(rows).toHaveLength(0);
   });
+
+  // Story 7.3 AC8 — the post-row 4-identity matrix. Same denial
+  // shape as the pre-row tests above; the discriminator is the
+  // `type='post'` seeded value.
+  describe("type='post' (Story 7.3)", () => {
+    it("correctPatient sees their own post check-in row", async () => {
+      const patientId = crypto.randomUUID();
+      const seededId = await seedEmotionalCheckin({ patientId, type: "post" });
+      const run = asIdentity("correctPatient", { patientId });
+
+      const rows = await run(
+        (tx) => tx<{ id: string }[]>`
+          SELECT id FROM emotional_checkins
+          WHERE patient_id = ${patientId}::uuid AND type = 'post'
+        `,
+      );
+
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.id).toBe(seededId);
+    });
+
+    it("wrongPatient sees zero post rows (RLS isolation holds for both types)", async () => {
+      const patientId = crypto.randomUUID();
+      const otherPatientId = crypto.randomUUID();
+      await seedEmotionalCheckin({ patientId, type: "post" });
+      const run = asIdentity("wrongPatient", { patientId, otherPatientId });
+
+      const rows = await run(
+        (tx) => tx<{ id: string }[]>`
+          SELECT id FROM emotional_checkins
+          WHERE patient_id = ${patientId}::uuid AND type = 'post'
+        `,
+      );
+
+      expect(rows).toHaveLength(0);
+    });
+
+    it("doctorWithAccess sees zero post rows (denial-by-RLS-absence covers both types)", async () => {
+      const patientId = crypto.randomUUID();
+      await seedEmotionalCheckin({ patientId, type: "post" });
+      const run = asIdentity("doctorWithAccess", {
+        patientId,
+        shareToken: crypto.randomUUID(),
+      });
+
+      const rows = await run(
+        (tx) => tx<{ id: string }[]>`
+          SELECT id FROM emotional_checkins
+          WHERE patient_id = ${patientId}::uuid AND type = 'post'
+        `,
+      );
+
+      expect(rows).toHaveLength(0);
+    });
+
+    it("doctorWithoutAccess sees zero post rows", async () => {
+      const patientId = crypto.randomUUID();
+      await seedEmotionalCheckin({ patientId, type: "post" });
+      const run = asIdentity("doctorWithoutAccess", { patientId });
+
+      const rows = await run(
+        (tx) => tx<{ id: string }[]>`
+          SELECT id FROM emotional_checkins
+          WHERE patient_id = ${patientId}::uuid AND type = 'post'
+        `,
+      );
+
+      expect(rows).toHaveLength(0);
+    });
+  });
 });

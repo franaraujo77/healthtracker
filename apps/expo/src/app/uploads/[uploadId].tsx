@@ -8,6 +8,7 @@ import { Button, Input, Text, YStack } from "tamagui";
 import type { EmotionalCheckinState } from "@healthtracker/validators";
 import { EmotionalCheckInSheet } from "@healthtracker/ui";
 import {
+  EMOTIONAL_CHECKIN_POST_CTA_PT_BR,
   formatBrazilianDecimal,
   parseBrazilianDecimal,
   UPLOAD_DETAIL_ALL_DONE_PT_BR,
@@ -169,9 +170,45 @@ export default function UploadDetailScreen() {
   const recordPreCheckInMutation = useMutation(
     trpc.emotionalCheckIns.recordPreResults.mutationOptions(),
   );
+  const recordPostCheckInMutation = useMutation(
+    trpc.emotionalCheckIns.recordPostResults.mutationOptions(),
+  );
   const markViewedMutation = useMutation(
     trpc.uploads.markUploadViewed.mutationOptions(),
   );
+
+  // Story 7.3 — post-results sheet (AC1). Opens on tap of the
+  // "Finalizar revisão" CTA at the bottom of the screen, NOT on
+  // mount (the patient must first review the results).
+  const [postCheckInSheetOpen, setPostCheckInSheetOpen] = useState(false);
+  // R1-H3 — gate the post CTA on `!preCheckInSheetOpen` AND
+  // `!postCheckInSheetOpen` so opacity-0 results body (while either
+  // sheet is open) can't expose a hit-target the patient accidentally
+  // activates. Mirrors the AC1 "before results appear" contract.
+  const showPostCheckInCta = Boolean(
+    query.data?.status === "complete" &&
+    query.data.hasPreEmotionalCheckIn &&
+    !query.data.hasPostEmotionalCheckIn &&
+    !preCheckInSheetOpen &&
+    !postCheckInSheetOpen,
+  );
+
+  async function handlePostCheckInSubmit(state: EmotionalCheckinState) {
+    await recordPostCheckInMutation.mutateAsync({
+      uploadId,
+      state,
+      type: "post",
+    });
+    invalidateUploadDetail();
+  }
+
+  function handlePostCheckInSkip() {
+    setPostCheckInSheetOpen(false);
+  }
+
+  function handlePostCheckInOpenChange(next: boolean) {
+    setPostCheckInSheetOpen(next);
+  }
 
   function invalidateUploadDetail() {
     void queryClient.invalidateQueries({
@@ -247,7 +284,11 @@ export default function UploadDetailScreen() {
           />
         }
       >
-        <YStack gap="$3" opacity={resultsHidden ? 0 : 1}>
+        <YStack
+          gap="$3"
+          opacity={resultsHidden ? 0 : 1}
+          pointerEvents={resultsHidden ? "none" : "auto"}
+        >
           {query.isLoading ? <Text>{UPLOAD_DETAIL_LOADING_PT_BR}</Text> : null}
           {query.isError ? (
             <Text accessibilityRole="alert">{UPLOAD_DETAIL_ERROR_PT_BR}</Text>
@@ -263,6 +304,14 @@ export default function UploadDetailScreen() {
               {query.data.lowConfidenceFields.map((field) => (
                 <ReviewCard key={field.id} uploadId={uploadId} field={field} />
               ))}
+              {showPostCheckInCta ? (
+                <Button
+                  onPress={() => setPostCheckInSheetOpen(true)}
+                  accessibilityRole="button"
+                >
+                  {EMOTIONAL_CHECKIN_POST_CTA_PT_BR}
+                </Button>
+              ) : null}
             </>
           ) : null}
         </YStack>
@@ -273,6 +322,14 @@ export default function UploadDetailScreen() {
         onSubmit={handlePreCheckInSubmit}
         onSkip={handlePreCheckInSkip}
         isSubmitting={recordPreCheckInMutation.isPending}
+      />
+      <EmotionalCheckInSheet
+        mode="post"
+        open={postCheckInSheetOpen}
+        onOpenChange={handlePostCheckInOpenChange}
+        onSubmit={handlePostCheckInSubmit}
+        onSkip={handlePostCheckInSkip}
+        isSubmitting={recordPostCheckInMutation.isPending}
       />
     </SafeAreaView>
   );

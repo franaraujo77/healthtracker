@@ -53,6 +53,7 @@ export async function getUploadDetailForPatient(
   viewedAt: Date | null;
   isFirstView: boolean;
   hasPreEmotionalCheckIn: boolean;
+  hasPostEmotionalCheckIn: boolean;
   lowConfidenceFields: {
     id: string;
     biomarkerName: string;
@@ -140,6 +141,20 @@ export async function getUploadDetailForPatient(
       ),
     );
 
+  // Story 7.3 — same existence probe for the post check-in. Gates
+  // the "Finalizar revisão" CTA so the post sheet is only offered
+  // when (a) a pre row exists, AND (b) no post row exists yet.
+  const [postCheckInExists] = await database
+    .select({ c: sql<number>`count(*)::int` })
+    .from(EmotionalCheckins)
+    .where(
+      and(
+        eq(EmotionalCheckins.uploadId, uploadId),
+        eq(EmotionalCheckins.patientId, patientId),
+        eq(EmotionalCheckins.type, "post"),
+      ),
+    );
+
   return {
     id: uploadRow.id,
     status: uploadRow.status,
@@ -149,6 +164,7 @@ export async function getUploadDetailForPatient(
     viewedAt: uploadRow.viewedAt,
     isFirstView: uploadRow.viewedAt === null,
     hasPreEmotionalCheckIn: (preCheckInExists?.c ?? 0) > 0,
+    hasPostEmotionalCheckIn: (postCheckInExists?.c ?? 0) > 0,
     lowConfidenceFields: lowConfidenceRows,
     hasOperatorOnlyRows,
     publishedObservationCount: obsCountRow?.c ?? 0,
