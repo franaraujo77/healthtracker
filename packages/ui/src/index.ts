@@ -31,6 +31,8 @@ export type {
 } from "./extraction-pulse";
 export { UploadSourceSheet } from "./upload-source-sheet";
 export type { UploadSourceSheetProps } from "./upload-source-sheet";
+export { LifeEventSheet } from "./components/LifeEventSheet";
+export type { LifeEventSheetProps } from "./components/LifeEventSheet";
 export { Field, FieldGroup, FieldInput, FieldRow } from "./field";
 export { Input } from "./input";
 export { Label } from "./label";

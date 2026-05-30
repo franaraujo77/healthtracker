@@ -12,7 +12,6 @@ import {
   formatBrazilianDecimal,
 } from "@healthtracker/validators";
 
-import type { FingerprintChartBaselineBiomarker } from "./fingerprint-chart-baseline";
 /**
  * Story 3.2 — `FingerprintChart` (UX spec lines 848–866).
  *
@@ -43,7 +42,10 @@ import type { FingerprintChartBaselineBiomarker } from "./fingerprint-chart-base
  * (the per-`BiomarkerCard` label below the chart carries each
  * biomarker's narration).
  */
-
+import type {
+  FingerprintChartBaselineBiomarker,
+  FingerprintLifeEventMarker,
+} from "./fingerprint-chart-baseline";
 import { FingerprintBaselineChart } from "./fingerprint-chart-baseline";
 
 export type FingerprintChartState = "cold-start-1" | "baseline-established";
@@ -72,6 +74,8 @@ export type FingerprintChartProps =
       state: "baseline-established";
       baselines: FingerprintChartBaselineBiomarker[];
       reducedMotion?: boolean;
+      /** Story 7.1 — additive life-event vertical-line markers. */
+      lifeEvents?: FingerprintLifeEventMarker[];
     };
 
 const PULSE_PERIOD_MS = 2000;
@@ -246,6 +250,7 @@ export function FingerprintChart(props: FingerprintChartProps) {
         <FingerprintBaselineChart
           biomarkers={props.baselines}
           reducedMotion={props.reducedMotion}
+          lifeEvents={props.lifeEvents}
         />
       );
     case "cold-start-1":

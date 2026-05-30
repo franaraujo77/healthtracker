@@ -2,14 +2,18 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AccessibilityInfo } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, Stack, useLocalSearchParams } from "expo-router";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Text, YStack } from "tamagui";
 
-import type { FingerprintChartBaselineBiomarker } from "@healthtracker/ui/fingerprint-chart-baseline";
+import type {
+  FingerprintChartBaselineBiomarker,
+  FingerprintLifeEventMarker,
+} from "@healthtracker/ui/fingerprint-chart-baseline";
 import {
   BiomarkerCard,
   EmptyStateRecord,
   ExtractionPulse,
+  LifeEventSheet,
 } from "@healthtracker/ui";
 import { FingerprintChart } from "@healthtracker/ui/fingerprint-chart";
 import { UploadSourceSheet } from "@healthtracker/ui/upload-source-sheet";
@@ -32,6 +36,9 @@ import {
   INICIO_HEADLINE_DRAW_ONE_PT_BR,
   INICIO_HEADLINE_PT_BR,
   INICIO_OFFLINE_UPLOAD_DISABLED_PT_BR,
+  LIFE_EVENT_CTA_PT_BR,
+  LIFE_EVENT_SAVE_ERROR_PT_BR,
+  LIFE_EVENT_SAVED_TOAST_PT_BR,
   MANUAL_BIA_ROUTE,
   UPLOAD_ALLOWED_MIME_TYPES,
   UPLOAD_STATUS_LABELS_PT_BR,
@@ -77,6 +84,13 @@ export default function Inicio() {
   const [sheetOpen, setSheetOpen] = useState(
     params.source === "post_onboarding_photo",
   );
+  // Story 7.1 — life-event Tier-2 sheet state. Visible only on the
+  // `baseline-established` branch (one Fingerprint = one place to
+  // contextualise). The save error is rendered inline below the CTA.
+  const [lifeEventSheetOpen, setLifeEventSheetOpen] = useState(false);
+  const [lifeEventError, setLifeEventError] = useState<string | null>(null);
+  const [lifeEventToast, setLifeEventToast] = useState<string | null>(null);
+  const queryClient = useQueryClient();
   const [reducedMotion, setReducedMotion] = useState(false);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const {
@@ -420,6 +434,73 @@ export default function Inicio() {
     baselineKeys,
   ]);
 
+  // Story 7.1 — life-event window. Derive the visible Fingerprint
+  // window from the merged baseline chart data (chronological history
+  // across every biomarker). When the patient has at least one
+  // historical sample we pad the window to "today" so just-saved
+  // events are immediately visible as markers (AC3).
+  const lifeEventWindow = useMemo(() => {
+    let min: string | null = null;
+    let max: string | null = null;
+    for (const b of baselineChartBiomarkers) {
+      for (const h of b.history) {
+        if (min === null || h.collectedAt < min) min = h.collectedAt;
+        if (max === null || h.collectedAt > max) max = h.collectedAt;
+      }
+    }
+    if (min === null || max === null) return null;
+    const d = new Date();
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    return { fromDate: min, toDate: max > today ? max : today };
+  }, [baselineChartBiomarkers]);
+
+  // The tRPC adapter requires a concrete input even when the query is
+  // disabled (the queryKey carries the input). Pass the sentinel
+  // window when none is derivable yet — `enabled` short-circuits the
+  // network call and the resolver is never reached.
+  const SENTINEL_WINDOW = {
+    fromDate: "1970-01-01",
+    toDate: "1970-01-01",
+  } as const;
+  const lifeEventsQuery = useQuery(
+    trpc.lifeEvents.listInWindow.queryOptions(
+      lifeEventWindow ?? SENTINEL_WINDOW,
+      {
+        staleTime: 0,
+        refetchOnWindowFocus: true,
+        enabled: lifeEventWindow !== null,
+      },
+    ),
+  );
+
+  const lifeEventMarkers: FingerprintLifeEventMarker[] = useMemo(() => {
+    const events = lifeEventsQuery.data?.events ?? [];
+    return events.map((e) => ({
+      id: e.id,
+      eventDate: e.eventDate,
+      description: e.description,
+    }));
+  }, [lifeEventsQuery.data]);
+
+  const createLifeEventMutation = useMutation(
+    trpc.lifeEvents.createLifeEvent.mutationOptions({
+      onSuccess: () => {
+        setLifeEventError(null);
+        setLifeEventToast(LIFE_EVENT_SAVED_TOAST_PT_BR);
+        setLifeEventSheetOpen(false);
+        // Refetch markers — the new row may or may not fall inside the
+        // current chart window; the query refetch is cheap and
+        // mirrors the existing Fingerprint cache-invalidation pattern.
+        void queryClient.invalidateQueries({
+          queryKey: [["lifeEvents", "listInWindow"]],
+        });
+      },
+      onError: () => {
+        setLifeEventError(LIFE_EVENT_SAVE_ERROR_PT_BR);
+      },
+    }),
+  );
+
   // Story 3.2 Task 3.7 — error surfaces a console.warn only (no red
   // banner). Use a ref so we don't spam the log on every re-render.
   const warnedErrorRef = useRef<unknown>(null);
@@ -602,8 +683,40 @@ export default function Inicio() {
                   state="baseline-established"
                   baselines={baselineChartBiomarkers}
                   reducedMotion={reducedMotion}
+                  lifeEvents={lifeEventMarkers}
                 />
                 <YStack gap="$2" paddingHorizontal="$3" paddingBottom="$3">
+                  {/* Story 7.1 — Tier-2 "Adicionar evento de vida" CTA. */}
+                  <Button
+                    disabled={isOffline || createLifeEventMutation.isPending}
+                    onPress={() => {
+                      if (isOffline) return;
+                      setLifeEventError(null);
+                      setLifeEventToast(null);
+                      setLifeEventSheetOpen(true);
+                    }}
+                    accessibilityRole="button"
+                  >
+                    {LIFE_EVENT_CTA_PT_BR}
+                  </Button>
+                  {lifeEventError ? (
+                    <Text
+                      fontSize="$2"
+                      color="$biomarkerDeviation"
+                      accessibilityRole="text"
+                    >
+                      {lifeEventError}
+                    </Text>
+                  ) : null}
+                  {lifeEventToast ? (
+                    <Text
+                      fontSize="$2"
+                      color="$textSecondary"
+                      accessibilityRole="text"
+                    >
+                      {lifeEventToast}
+                    </Text>
+                  ) : null}
                   {baselineCards.map((c) => (
                     <BiomarkerCard
                       key={c.key}
@@ -691,6 +804,17 @@ export default function Inicio() {
             </YStack>
           </>
         )}
+        <LifeEventSheet
+          open={lifeEventSheetOpen}
+          onOpenChange={(open) => {
+            setLifeEventSheetOpen(open);
+            if (!open) setLifeEventError(null);
+          }}
+          saving={createLifeEventMutation.isPending}
+          onSubmit={(values) => {
+            createLifeEventMutation.mutate(values);
+          }}
+        />
         <UploadSourceSheet
           open={sheetOpen}
           onOpenChange={setSheetOpen}

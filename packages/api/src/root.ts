@@ -2,6 +2,7 @@ import { accountRouter } from "./router/account";
 import { authRouter } from "./router/auth";
 import { consentRouter } from "./router/consent";
 import { letterRouter } from "./router/letter";
+import { lifeEventsRouter } from "./router/life-events";
 import { notificationsRouter } from "./router/notifications";
 import { observationsRouter } from "./router/observations";
 import { sharingRouter } from "./router/sharing";
@@ -13,6 +14,7 @@ export const appRouter = createTRPCRouter({
   auth: authRouter,
   consent: consentRouter,
   letter: letterRouter,
+  lifeEvents: lifeEventsRouter,
   notifications: notificationsRouter,
   observations: observationsRouter,
   sharing: sharingRouter,

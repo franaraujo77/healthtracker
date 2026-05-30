@@ -3,6 +3,7 @@ export * from "./audit";
 export * from "./consent";
 export * from "./extraction_review_queue";
 export * from "./letters";
+export * from "./life_events";
 export * from "./loinc_ref";
 export * from "./notification_preferences";
 export * from "./observations";

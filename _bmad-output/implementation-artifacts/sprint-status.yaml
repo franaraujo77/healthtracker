@@ -52,6 +52,44 @@
 
 generated: 2026-05-15
 last_updated: 2026-05-30
+# Story 7.1 implementation complete (2026-05-30). Patient can add life
+# events to their Fingerprint timeline:
+#   - New `life_events` table (Drizzle schema + `custom_rls_life_events.sql`)
+#     with `patient_id` cascade FK, DATE event_date, free-text description
+#     (CHECK 1..140), nullable category enum, privacy_flag enum default
+#     `patient_only`, and `(patient_id, event_date)` index.
+#   - RLS: SELECT-own + INSERT-own patient policies; NO doctor policy
+#     ships in 7.1 (doctor-zero-rows invariant — enforced by absence of
+#     policy, not predicate). 4-identity RLS test added (skipped today
+#     because the Rancher docker.sock testcontainer infra is still
+#     broken — same skip every Epic 6 story logged; Epic 6 retro top
+#     readiness item).
+#   - Zod twins + pt-BR copy in `@healthtracker/validators/life-events`;
+#     AC6 retroactive-only refine computes "today" in America/Sao_Paulo
+#     at refine-time (not module load) so long-lived servers don't
+#     freeze today at boot.
+#   - tRPC `lifeEvents.createLifeEvent` + `lifeEvents.listInWindow`,
+#     both `protectedProcedure` (session gate in middleware, not
+#     resolver — procedure-name truthfulness lesson from 6.5 R1).
+#   - Audit kind `life_event.created` with metadata `{eventDate,
+#     category}` ONLY — `description` is PII and must NEVER reach
+#     audit_log (append-only). NOT added to `ACCESS_LOG_EVENT_KINDS`.
+#   - Mobile UI: `LifeEventSheet` Tamagui bottom sheet + Tier-2 CTA on
+#     the baseline-established Início branch + new
+#     `$lifeEventMarker` Tamagui token (neutral teal-grey, distinct
+#     from `$primaryTeal` data colour) + additive optional
+#     `lifeEvents` prop on `FingerprintBaselineChart` rendering
+#     Victory Native v41 vertical-line annotations via render-prop
+#     chartBounds.
+# Carry-over decisions APPLIED:
+#   (1) Story 7.5 (Epic 7 migration) appended to backlog above.
+#   (2) Edit/delete life event deferred — Story 7.1 is create-only;
+#       RLS policies above intentionally omit UPDATE / DELETE.
+#   (3) Web Fingerprint life-event UI deferred — mobile-only in 7.1.
+# Quality gates: pnpm -w typecheck clean (17 packages); pnpm -w lint
+# clean (15 packages, only pre-existing warnings); pnpm -w test passes
+# 338 @healthtracker/api tests; db test:integration SKIPPED (Rancher
+# docker.sock — same env limitation as Epic 6).
 # Stale-status cleanup: Story 3.5 (baseline migration) merged via PR #18
 # weeks ago (commit 56bedef); flipping `3-5-...: review → done` and
 # `epic-3: in-progress → done`. All 5 Epic 3 stories now done +
@@ -822,11 +860,12 @@ development_status:
   epic-6-retrospective: done
 
   # Epic 7: Patient Adds Personal Context to Their Record
-  epic-7: backlog
-  7-1-patient-adds-a-life-event-to-their-fingerprint-timeline: backlog
+  epic-7: in-progress
+  7-1-patient-adds-a-life-event-to-their-fingerprint-timeline: review
   7-2-patient-captures-emotional-check-in-before-results-appear-growth: backlog
   7-3-patient-captures-emotional-check-in-after-reviewing-results-growth: backlog
   7-4-patient-records-a-voice-memo-at-the-time-of-upload-vision: backlog
+  7-5-author-incremental-supabase-migration-for-epic-7-schema: backlog
   epic-7-retrospective: optional
 
   # Epic 8: Operator Can Manage Extraction Quality

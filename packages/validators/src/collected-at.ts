@@ -35,6 +35,29 @@ export function parseCollectedAt(text: string): Date | null {
   return null;
 }
 
+/**
+ * Story 7.1 — resolver-time "today" in America/Sao_Paulo as `yyyy-mm-dd`.
+ *
+ * Computed via `Intl.DateTimeFormat` with `timeZone: 'America/Sao_Paulo'`
+ * so the answer is stable regardless of the server runtime's local TZ
+ * (Lambda / Vercel both run UTC; CI may run elsewhere). Called at
+ * Zod-refine time (NOT module load) so a server process that lives
+ * across midnight São Paulo doesn't freeze "today" at boot.
+ *
+ * Used by the AC6 retroactive-only refine for `life_events.event_date`
+ * and by any other resolver that needs a São Paulo calendar boundary.
+ */
+export function todayInSaoPauloIso(): string {
+  // `en-CA` locale yields `yyyy-mm-dd` natively.
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  return formatter.format(new Date());
+}
+
 function validDateParts(year: number, month: number, day: number): boolean {
   if (
     !Number.isInteger(year) ||

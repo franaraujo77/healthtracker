@@ -64,6 +64,8 @@ const COLOR_PRIMARY_TEAL_LIGHT = "#E0F2F1";
 const COLOR_TEXT_PRIMARY = "#1A1A1A";
 const COLOR_TEXT_SECONDARY = "#6B6B6B";
 const COLOR_BORDER = "#E8E3DB";
+// Story 7.1 — life-event marker (resolved `$lifeEventMarker` light token).
+const COLOR_LIFE_EVENT_MARKER = "#5F8A8A";
 /* eslint-enable no-restricted-syntax */
 
 const CHART_HEIGHT = 180;
@@ -85,9 +87,23 @@ export interface FingerprintChartBaselineBiomarker {
   zScore: number | null;
 }
 
+/**
+ * Story 7.1 — life-event timeline marker (AC3). Optional, additive
+ * prop — when omitted (or empty), the chart renders unchanged. Each
+ * marker becomes a neutral teal-grey vertical line at the matching
+ * `event_date` on every per-biomarker mini-chart.
+ */
+export interface FingerprintLifeEventMarker {
+  id: string;
+  eventDate: string;
+  description: string;
+}
+
 export interface FingerprintBaselineChartProps {
   biomarkers: FingerprintChartBaselineBiomarker[];
   reducedMotion?: boolean;
+  /** Story 7.1 — life-event vertical-line annotations. */
+  lifeEvents?: FingerprintLifeEventMarker[];
 }
 
 /**
@@ -151,9 +167,11 @@ export function computeTrend(
 function BaselineBiomarkerCard({
   biomarker,
   reducedMotion,
+  lifeEvents,
 }: {
   biomarker: FingerprintChartBaselineBiomarker;
   reducedMotion: boolean;
+  lifeEvents: FingerprintLifeEventMarker[];
 }) {
   const trend = computeTrend(biomarker.history);
   const sampleSize = biomarker.baseline?.sampleSize ?? biomarker.history.length;
@@ -203,7 +221,11 @@ function BaselineBiomarkerCard({
         {latestText}
         {latestDateLabel ? ` · ${latestDateLabel}` : ""}
       </Text>
-      <BaselineChartBody biomarker={biomarker} reducedMotion={reducedMotion} />
+      <BaselineChartBody
+        biomarker={biomarker}
+        reducedMotion={reducedMotion}
+        lifeEvents={lifeEvents}
+      />
     </YStack>
   );
 }
@@ -218,9 +240,11 @@ function BaselineBiomarkerCard({
 function BaselineChartBody({
   biomarker,
   reducedMotion,
+  lifeEvents,
 }: {
   biomarker: FingerprintChartBaselineBiomarker;
   reducedMotion: boolean;
+  lifeEvents: FingerprintLifeEventMarker[];
 }) {
   // Avoid importing Victory Native on web — it pulls in Skia which
   // chokes Next.js. Story 3.3 ships Expo-only.
@@ -264,6 +288,7 @@ function BaselineChartBody({
       biomarker={biomarker}
       reducedMotion={reducedMotion}
       VictoryNative={VictoryNative}
+      lifeEvents={lifeEvents}
     />
   );
 }
@@ -283,10 +308,12 @@ function BaselineSkiaChart({
   biomarker,
   reducedMotion,
   VictoryNative,
+  lifeEvents,
 }: {
   biomarker: FingerprintChartBaselineBiomarker;
   reducedMotion: boolean;
   VictoryNative: VictoryNativeModule;
+  lifeEvents: FingerprintLifeEventMarker[];
 }) {
   const { CartesianChart, Line, AreaRange, Scatter, useChartTransformState } =
     VictoryNative;
@@ -374,7 +401,66 @@ function BaselineSkiaChart({
         transformState={transformState}
         transformConfig={transformConfig}
       >
-        {({ points }: { points: { y: { x: number; xValue: unknown }[] } }) => {
+        {({
+          points,
+          chartBounds,
+        }: {
+          points: { y: { x: number; xValue: unknown }[] };
+          chartBounds?: {
+            left: number;
+            right: number;
+            top: number;
+            bottom: number;
+          };
+        }) => {
+          // Story 7.1 AC3 — life-event vertical-line markers. Filter
+          // to the visible x-range, then map each event's `eventDate`
+          // (yyyy-mm-dd) to the chart's Skia x-coordinate by linear
+          // interpolation against the data's `xValue` extents. When
+          // the chart has fewer than 2 data points (no extent to
+          // interpolate against) or `chartBounds` is missing, the
+          // markers are skipped — the chart still renders correctly.
+          const lifeEventLines: {
+            id: string;
+            x: number;
+            y0: number;
+            y1: number;
+          }[] = [];
+          if (lifeEvents.length > 0 && chartBounds && points.y.length >= 2) {
+            // Build (xValueDays, skiaX) extents from the two outermost
+            // points. xValue is the number we set as `x` above.
+            const first = points.y[0];
+            const last = points.y[points.y.length - 1];
+            const firstXValue = Number(first?.xValue ?? 0);
+            const lastXValue = Number(last?.xValue ?? 0);
+            const firstSkiaX = first?.x ?? chartBounds.left;
+            const lastSkiaX = last?.x ?? chartBounds.right;
+            const spanXValue = lastXValue - firstXValue;
+            const spanSkiaX = lastSkiaX - firstSkiaX;
+            for (const ev of lifeEvents) {
+              const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ev.eventDate);
+              if (!m) continue;
+              const evXValue = Math.floor(
+                Date.UTC(
+                  Number.parseInt(m[1] ?? "0", 10),
+                  Number.parseInt(m[2] ?? "1", 10) - 1,
+                  Number.parseInt(m[3] ?? "1", 10),
+                ) / 86_400_000,
+              );
+              if (evXValue < firstXValue || evXValue > lastXValue) continue;
+              const skiaX =
+                spanXValue === 0
+                  ? firstSkiaX
+                  : firstSkiaX +
+                    ((evXValue - firstXValue) / spanXValue) * spanSkiaX;
+              lifeEventLines.push({
+                id: ev.id,
+                x: skiaX,
+                y0: chartBounds.top,
+                y1: chartBounds.bottom,
+              });
+            }
+          }
           // R2-P263 — Victory Native v41 `Area` accepts a single `y0:
           // number` (fill between the data line and `y0`), NOT a `(y0,
           // y1)` pair. Passing `y1` was silently ignored, which made
@@ -425,6 +511,18 @@ function BaselineSkiaChart({
                 color={COLOR_PRIMARY_TEAL}
                 animate={reducedMotion ? false : { type: "timing" }}
               />
+              {lifeEventLines.map((line) => (
+                <Line
+                  key={`life-event-${line.id}`}
+                  points={[
+                    { x: line.x, y: line.y0, xValue: 0, yValue: 0 },
+                    { x: line.x, y: line.y1, xValue: 0, yValue: 0 },
+                  ]}
+                  color={COLOR_LIFE_EVENT_MARKER}
+                  strokeWidth={1.5}
+                  animate={reducedMotion ? false : { type: "timing" }}
+                />
+              ))}
             </>
           );
         }}
@@ -440,12 +538,16 @@ export const FINGERPRINT_BASELINE_TOKENS = {
   textPrimary: COLOR_TEXT_PRIMARY,
   textSecondary: COLOR_TEXT_SECONDARY,
   border: COLOR_BORDER,
+  // Story 7.1 — life-event marker.
+  lifeEventMarker: COLOR_LIFE_EVENT_MARKER,
 } as const;
 
 export function FingerprintBaselineChart({
   biomarkers,
   reducedMotion,
+  lifeEvents,
 }: FingerprintBaselineChartProps) {
+  const lifeEventList = lifeEvents ?? [];
   return (
     <YStack
       gap="$3"
@@ -464,6 +566,7 @@ export function FingerprintBaselineChart({
           key={`${b.loincCode ?? b.biomarkerName}-${b.unitUcum}-${idx}`}
           biomarker={b}
           reducedMotion={reducedMotion ?? false}
+          lifeEvents={lifeEventList}
         />
       ))}
     </YStack>
