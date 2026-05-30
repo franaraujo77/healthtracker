@@ -144,9 +144,8 @@ CONCURRENTLY ...` and apply via `psql` directly (Supabase CLI's
 > split out because it gates the doctor → patient invite write surface and
 > MUST apply with `CREATE … CONCURRENTLY` via `psql` directly per the
 > SQLSTATE 25001 rule above). The runtime doctor-data-isolation invariant is
-> locked in by `packages/db/__tests__/rls/{professionals,patient_invites,
-staleness_thresholds}.rls.test.ts` — those suites are the source of truth
-> for what the migration's RLS bodies must enforce.
+> locked in by `packages/db/__tests__/rls/{professionals,patient_invites,staleness_thresholds}.rls.test.ts`
+> — those suites are the source of truth for what the migration's RLS bodies must enforce.
 
 **UI components**
 
