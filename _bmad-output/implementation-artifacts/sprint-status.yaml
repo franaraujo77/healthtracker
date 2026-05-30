@@ -1,5 +1,21 @@
 # generated: 2026-05-15
-# last_updated: 2026-05-30 (story 6.6 implementation complete → review)
+# last_updated: 2026-05-30 (Epic 6 retrospective complete)
+# Epic 6 retrospective complete (2026-05-30; doc-driven background session,
+# no party-mode dialogue). Doc: epic-6-retro-2026-05-30.md. Headline lessons:
+# (1) Stacked-story PR pattern scaled to 5 stories on PR #57 because per-story
+# R1 review files preserve reviewability — keep for Epic 7. (2) `supabase/
+# migrations-postapply/` + GHA psql autocommit step is now a permanent
+# platform contract for CONCURRENTLY DDL; both Epic 5 baseline and Epic 6
+# inherited it. (3) Procedure-name truthfulness is load-bearing: Story 6.5
+# R1 surfaced `professionalSessionProcedure` overstating its guarantee;
+# activation gate moved INTO middleware. (4) Epic 5 baseline-migration
+# action item carried into Epic 6 unaddressed; surfaced only when PR #57
+# rls-adversarial went red. Lesson: load-bearing CI-gating action items
+# must be tracked as blockers, not next-epic notes. (5) Integration test
+# infra broken in this worktree (Rancher/testcontainers) for 3 consecutive
+# stories — platform fix is the top Epic 7 readiness item. Zero CRITICAL
+# findings across all 5 R1 reviews; ~30% Epic-5 retro follow-through (the
+# load-bearing items held).
 # project: healthtracker
 # project_key: NOKEY
 # tracking_system: file-system
@@ -803,7 +819,7 @@ development_status:
   # for InvitePatientButton from Story 6.4). (i) 7-identity RLS matrix
   # (Story 6.4 introduction) reaffirmed. (j) Migration deferred to
   # Story 6.6. No new env vars; no new HMAC secrets.
-  epic-6-retrospective: optional
+  epic-6-retrospective: done
 
   # Epic 7: Patient Adds Personal Context to Their Record
   epic-7: backlog
