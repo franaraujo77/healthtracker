@@ -352,3 +352,91 @@ export function parsePatientInviteSegment(
   if (tokenHmac.length === 0) return null;
   return { inviteId, tokenHmac };
 }
+
+// =============================================================================
+// Story 6.5 — Doctor configures biomarker staleness thresholds
+// =============================================================================
+
+/**
+ * AC8 — audit kind. NOT in `ACCESS_LOG_EVENT_KINDS` (doctor-side
+ * preference; patient cannot meaningfully observe doctor settings
+ * activity). Mirrors `professional_account.activated` and
+ * `patient_invite.sent` / `.resolved`.
+ */
+export const STALENESS_THRESHOLD_UPDATED_AUDIT =
+  "staleness_threshold.updated" as const;
+
+/**
+ * AC1 — settings route (the FIRST `/profissional/*` subtree route).
+ */
+export const PROFESSIONAL_STALENESS_THRESHOLDS_ROUTE =
+  "/profissional/configuracoes/limiares";
+
+// ---------------------------------------------------------------------------
+// pt-BR copy — staleness thresholds settings page (AC1)
+// ---------------------------------------------------------------------------
+
+export const STALENESS_THRESHOLDS_HEADING_PT_BR = "Limiares de atualização";
+export const STALENESS_THRESHOLDS_SUBHEADING_PT_BR =
+  'Defina por quantos dias um exame pode estar desatualizado antes de ser marcado como "Resultado antigo" na visão do paciente.';
+export const STALENESS_THRESHOLD_DAYS_LABEL_PT_BR = "dias";
+export const STALENESS_THRESHOLD_DEFAULT_HINT_PT_BR =
+  "Padrão do sistema: 180 dias.";
+export const STALENESS_THRESHOLD_SAVE_CTA_PT_BR = "Salvar";
+export const STALENESS_THRESHOLD_SAVE_CTA_LOADING_PT_BR = "Salvando…";
+export const STALENESS_THRESHOLD_SAVE_TOAST_PT_BR = "Limiares atualizados.";
+export const STALENESS_THRESHOLD_SAVE_ERROR_PT_BR =
+  "Não foi possível salvar agora. Tente novamente.";
+export const STALENESS_THRESHOLD_RANGE_ERROR_PT_BR =
+  "Informe um valor entre 1 e 3650 dias.";
+export const STALENESS_THRESHOLDS_LINK_PT_BR =
+  "Ajustar limiares de atualização";
+export const STALENESS_THRESHOLDS_NOT_ACTIVATED_HEADING_PT_BR =
+  "Ative sua conta profissional";
+export const STALENESS_THRESHOLDS_NOT_ACTIVATED_BODY_PT_BR =
+  "Você ainda não tem uma conta profissional ativa. Ative a partir de um relatório compartilhado por um paciente.";
+
+// ---------------------------------------------------------------------------
+// BiomarkerCard chip — pt-BR copy (AC6)
+// ---------------------------------------------------------------------------
+
+export const BIOMARKER_RESULT_STALE_LABEL_PT_BR = "Resultado antigo";
+export function BIOMARKER_RESULT_STALE_A11Y_PT_BR(n: number): string {
+  return `Resultado coletado há mais de ${n} dias.`;
+}
+
+// ---------------------------------------------------------------------------
+// AC2 — pt-BR labels for biomarker categories (LOINC seed-driven).
+// ---------------------------------------------------------------------------
+
+/**
+ * Story 6.5 AC2 — pt-BR labels for the `loinc_ref.category` values seeded
+ * by `packages/db/seed/loinc-ref.ts`. The map is intentionally OPEN —
+ * unknown categories (future seed additions) MUST fall back to the raw
+ * category string in the UI, never throw. Mirrors Story 5.1 R1's
+ * widening of biomarker-category from a closed Zod enum to
+ * `z.string().min(1).max(120)`.
+ */
+export const BIOMARKER_CATEGORY_LABELS_PT_BR: Record<string, string> = {
+  CBC: "Hemograma",
+  cbc: "Hemograma",
+  lipid_panel: "Lipídios",
+  metabolic: "Metabolismo",
+  metabolic_panel: "Metabolismo",
+  thyroid: "Tireoide",
+  thyroid_panel: "Tireoide",
+  iron: "Ferro",
+  iron_panel: "Ferro",
+  crp: "Inflamação",
+  bia: "Bioimpedância",
+  glycemia: "Glicemia",
+};
+
+/**
+ * Resolve a category to its pt-BR label. Unknown categories fall back
+ * to the raw input string (AC2 contract — UI MUST NOT throw on a
+ * seed-only addition).
+ */
+export function biomarkerCategoryLabelPtBr(category: string): string {
+  return BIOMARKER_CATEGORY_LABELS_PT_BR[category] ?? category;
+}

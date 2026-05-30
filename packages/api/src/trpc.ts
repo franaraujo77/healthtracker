@@ -126,6 +126,52 @@ export const protectedProcedure = t.procedure
 // `constantTimeEqualHmac` re-check against the persisted
 // `share_tokens.token_hmac` — the GUC proves "client claims X", the
 // HMAC compare proves "client holds the URL the patient signed for X".
+/**
+ * Story 6.5 — `professionalSessionProcedure`.
+ *
+ * Session-only doctor procedure for `/profissional/*` surfaces that
+ * have NO share-token in context (settings pages, dashboards). Binds
+ * `app.current_doctor_user_id` from the verified Supabase session uid
+ * so the `professionals`-family RLS policies (which key off this GUC,
+ * NOT `auth.uid()` — see `custom_rls_professionals.sql` rationale) can
+ * exercise.
+ *
+ * Distinct from `doctorProcedure`: NO `x-share-token` header required,
+ * NO `app.current_share_token_id` GUC bound, NO HMAC re-check in the
+ * resolver. The activation gate is the application layer's
+ * responsibility (the resolver must SELECT `professionals` and reject
+ * inactive doctors with `PRECONDITION_FAILED`).
+ *
+ * The `app.current_user_role` GUC is set to `"doctor"` so any future
+ * shared RLS predicate that disambiguates patient-vs-doctor sees the
+ * correct role.
+ */
+export const professionalSessionProcedure = t.procedure
+  .use(timingMiddleware)
+  .use(async ({ ctx, next }) => {
+    if (!ctx.session?.user) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: "DOCTOR_SESSION_REQUIRED",
+      });
+    }
+    const session = ctx.session;
+    return ctx.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT set_config('app.current_doctor_user_id', ${session.user.id}, true)`,
+      );
+      await tx.execute(
+        sql`SELECT set_config('app.current_user_role', ${"doctor"}, true)`,
+      );
+      return next({
+        ctx: {
+          session: { ...session, user: session.user },
+          db: tx,
+        },
+      });
+    });
+  });
+
 export const doctorProcedure = t.procedure
   .use(timingMiddleware)
   .use(async ({ ctx, next }) => {

@@ -6,23 +6,36 @@ import { and, eq, inArray, sql } from "@healthtracker/db";
 import {
   AccountDeletionRequests,
   PatientInvites,
+  Professionals,
+  StalenessThresholds,
   Users,
 } from "@healthtracker/db/schema";
 import {
   ACCOUNT_AUDIT_DELETION_REQUESTED,
+  biomarkerCategoryLabelPtBr,
   getDeletionStatusInputSchema,
   getDeletionStatusOutputSchema,
   getPatientInviteContextInputSchema,
   getPatientInviteContextOutputSchema,
+  listStalenessThresholdsInputSchema,
+  listStalenessThresholdsOutputSchema,
   PATIENT_INVITE_RESOLVED_AUDIT,
   requestDeletionInputSchema,
   requestDeletionOutputSchema,
+  STALENESS_DEFAULT_DAYS,
+  STALENESS_THRESHOLD_UPDATED_AUDIT,
+  updateStalenessThresholdsInputSchema,
+  updateStalenessThresholdsOutputSchema,
 } from "@healthtracker/validators";
 
 import type { AuditDb } from "../audit";
 import { writeAuditLog } from "../audit";
 import { constantTimeEqualHmac } from "../sharing";
-import { protectedProcedure, publicProcedure } from "../trpc";
+import {
+  professionalSessionProcedure,
+  protectedProcedure,
+  publicProcedure,
+} from "../trpc";
 
 /**
  * Postgres unique-constraint violation. Drizzle surfaces these via the
@@ -328,6 +341,175 @@ export const accountRouter = {
         requestedAt: row.requestedAt.toISOString(),
         completedAt: row.completedAt ? row.completedAt.toISOString() : null,
         failureReason: row.failureReason ?? null,
+      };
+    }),
+  /**
+   * Story 6.5 AC4 — `updateStalenessThresholds`. Activated doctor
+   * sets per-biomarker-category staleness thresholds.
+   *
+   * **Critical ordering (each step is load-bearing):**
+   *   1. Activation gate (SELECT professionals). Missing →
+   *      PRECONDITION_FAILED. Defense-in-depth above the RSC's
+   *      placeholder card.
+   *   2. Zod refine already rejected duplicate-by-category at the
+   *      boundary; AC4 step 2 is satisfied by the input schema.
+   *   3. Unknown-category cross-check vs `loinc_ref` distinct
+   *      categories. Any input category not present → BAD_REQUEST
+   *      (lists the unknown values — no PII).
+   *   4. Transactional UPSERT batch via `onConflictDoUpdate`.
+   *   5. Audit row inside the same tx (`staleness_threshold.updated`,
+   *      NOT in `ACCESS_LOG_EVENT_KINDS`).
+   *
+   * **Empty array = no-op** (AC4 deletion-semantics): no rows
+   * deleted, returns `updatedCount: 0`. Reserve a deletion path for
+   * a future "reset to default" story.
+   *
+   * Session-only (`professionalSessionProcedure`) — no share-token in
+   * context; surface lives at `/profissional/configuracoes/limiares`.
+   */
+  updateStalenessThresholds: professionalSessionProcedure
+    .input(updateStalenessThresholdsInputSchema)
+    .output(updateStalenessThresholdsOutputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const doctorUserId = ctx.session.user.id;
+
+      // Step 1 — activation gate.
+      const activatedRows = await ctx.db
+        .select({ userId: Professionals.userId })
+        .from(Professionals)
+        .where(eq(Professionals.userId, doctorUserId))
+        .limit(1);
+      if (activatedRows.length === 0) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "DOCTOR_NOT_ACTIVATED",
+        });
+      }
+
+      // Step 3 — unknown-category cross-check. Only runs when there
+      // are entries to validate (empty array = no-op short-circuit).
+      if (input.thresholds.length > 0) {
+        const inputCategories = input.thresholds.map(
+          (t) => t.biomarkerCategory,
+        );
+        const knownRows = await ctx.db.execute<{ category: string }>(sql`
+          SELECT DISTINCT category
+          FROM loinc_ref
+          WHERE category = ANY(${inputCategories}::text[])
+        `);
+        const known = new Set(
+          (knownRows as unknown as { category: string }[]).map(
+            (r) => r.category,
+          ),
+        );
+        const unknown = inputCategories.filter((c) => !known.has(c));
+        if (unknown.length > 0) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `STALENESS_THRESHOLD_UNKNOWN_CATEGORIES:${unknown.join(",")}`,
+          });
+        }
+      }
+
+      // Step 4 — UPSERT batch + Step 5 — audit, atomic.
+      return ctx.db.transaction(async (tx) => {
+        let updatedCount = 0;
+        if (input.thresholds.length > 0) {
+          const rows = input.thresholds.map((entry) => ({
+            professionalUserId: doctorUserId,
+            biomarkerCategory: entry.biomarkerCategory,
+            thresholdDays: entry.thresholdDays,
+          }));
+          const inserted = await tx
+            .insert(StalenessThresholds)
+            .values(rows)
+            .onConflictDoUpdate({
+              target: [
+                StalenessThresholds.professionalUserId,
+                StalenessThresholds.biomarkerCategory,
+              ],
+              set: {
+                thresholdDays: sql`EXCLUDED.threshold_days`,
+                updatedAt: sql`now()`,
+              },
+            })
+            .returning({
+              category: StalenessThresholds.biomarkerCategory,
+            });
+          updatedCount = inserted.length;
+        }
+
+        // Audit emits even on empty-array no-op (intent captured).
+        await writeAuditLog(tx, {
+          actorId: doctorUserId,
+          actorType: "doctor",
+          event: STALENESS_THRESHOLD_UPDATED_AUDIT,
+          resourceId: doctorUserId,
+          resourceType: "professional",
+          metadata: {
+            categories: input.thresholds.map((t) => t.biomarkerCategory),
+          },
+        });
+
+        return { updatedCount };
+      });
+    }),
+
+  /**
+   * Story 6.5 AC7 — `listStalenessThresholds`. Renders the settings
+   * page's per-category form. LEFT JOIN distinct `loinc_ref.category`
+   * with the doctor's rows; absent rows surface as
+   * `(thresholdDays = STALENESS_DEFAULT_DAYS, isDefault = true)`.
+   *
+   * Activation gate same as the update mutation.
+   */
+  listStalenessThresholds: professionalSessionProcedure
+    .input(listStalenessThresholdsInputSchema)
+    .output(listStalenessThresholdsOutputSchema)
+    .query(async ({ ctx }) => {
+      const doctorUserId = ctx.session.user.id;
+
+      const activatedRows = await ctx.db
+        .select({ userId: Professionals.userId })
+        .from(Professionals)
+        .where(eq(Professionals.userId, doctorUserId))
+        .limit(1);
+      if (activatedRows.length === 0) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "DOCTOR_NOT_ACTIVATED",
+        });
+      }
+
+      // LEFT JOIN — keep the server-side merge so the form's local
+      // state is a simple array. The doctor-scoped SELECT on
+      // `staleness_thresholds` is RLS-gated to own rows.
+      const rows = await ctx.db.execute<{
+        category: string;
+        threshold_days: number | null;
+      }>(sql`
+        SELECT
+          cats.category AS category,
+          st.threshold_days AS threshold_days
+        FROM (SELECT DISTINCT category FROM loinc_ref) cats
+        LEFT JOIN staleness_thresholds st
+          ON st.biomarker_category = cats.category
+          AND st.professional_user_id = ${doctorUserId}::uuid
+        ORDER BY cats.category ASC
+      `);
+
+      const categories = (
+        rows as unknown as { category: string; threshold_days: number | null }[]
+      ).map((r) => ({
+        biomarkerCategory: r.category,
+        labelPtBr: biomarkerCategoryLabelPtBr(r.category),
+        thresholdDays: r.threshold_days ?? STALENESS_DEFAULT_DAYS,
+        isDefault: r.threshold_days === null,
+      }));
+
+      return {
+        categories,
+        defaultDays: STALENESS_DEFAULT_DAYS,
       };
     }),
 } satisfies TRPCRouterRecord;

@@ -25,11 +25,13 @@ import {
   Professionals,
   ShareTokenBiomarkers,
   ShareTokens,
+  StalenessThresholds,
 } from "@healthtracker/db/schema";
 import {
   ACCESS_LOG_EVENT_KINDS,
   activateProfessionalAccountInputSchema,
   activateProfessionalAccountOutputSchema,
+  ageInDays,
   configureBiomarkersInputSchema,
   CONVERSATION_STARTER_FAILED_PT_BR,
   CONVERSATION_STARTER_PATIENT_FIRSTNAME_FALLBACK_PT_BR,
@@ -69,6 +71,7 @@ import {
   SHARING_AUDIT_PENDING_INVITE_CREATED,
   SHARING_AUDIT_TOKEN_CREATED,
   SHARING_AUDIT_TOKEN_REVOKED,
+  STALENESS_DEFAULT_DAYS,
 } from "@healthtracker/validators";
 
 import type { AuditDb } from "../audit";
@@ -1470,6 +1473,107 @@ export const sharingRouter = {
       // mutation, fired once on the client's rising-edge ready
       // transition. This resolver is read-only.
 
+      // Story 6.5 AC5 — compute per-card staleness flags when ready.
+      // Cache-payload JSONB is intentionally NOT extended (would
+      // require regen of every cached row + worker prompt drift);
+      // staleness rides as a parallel array on the resolver output.
+      //
+      // T4.3 — `staleness_thresholds` RLS is gated on
+      // `app.current_doctor_user_id`, which `doctorProcedure` already
+      // binds from the verified Supabase session (Story 6.3). The
+      // `observations` lookup rides on the share-token GUC
+      // (`app.current_share_token_id`) — the doctor's RLS access to
+      // patient observations was proven by Story 6.2.
+      //
+      // T4.4 — infra failure on either SELECT degrades to
+      // `biomarkerStaleness: undefined` (no chips this call) rather
+      // than break the resolver. Narrow-catch programmer errors.
+      let biomarkerStaleness:
+        | { isStale: boolean; thresholdDays: number }[]
+        | undefined;
+      if (cacheStatus === "ready" && payload !== null) {
+        try {
+          const categories = Array.from(
+            new Set(
+              payload.biomarkerCards
+                .map((c) => c.category)
+                .filter(
+                  (c): c is string => typeof c === "string" && c.length > 0,
+                ),
+            ),
+          );
+
+          const thresholdRows = await ctx.db
+            .select({
+              category: StalenessThresholds.biomarkerCategory,
+              days: StalenessThresholds.thresholdDays,
+            })
+            .from(StalenessThresholds)
+            .where(
+              eq(StalenessThresholds.professionalUserId, ctx.session.user.id),
+            );
+          const thresholdMap = new Map(
+            thresholdRows.map((r) => [r.category, r.days]),
+          );
+
+          let latestMap = new Map<string, Date>();
+          if (categories.length > 0) {
+            const latestRows = await ctx.db.execute<{
+              biomarker_category: string;
+              latest_collected_at: Date | string;
+            }>(sql`
+              SELECT lr.category AS biomarker_category,
+                     MAX(o.collected_at) AS latest_collected_at
+              FROM observations o
+              JOIN loinc_ref lr ON lr.loinc_code = o.loinc_code
+              WHERE o.patient_id = ${tokenRow.patientId}::uuid
+                AND o.deleted_at IS NULL
+                AND lr.category = ANY(${categories}::text[])
+              GROUP BY lr.category
+            `);
+            latestMap = new Map(
+              (
+                latestRows as unknown as {
+                  biomarker_category: string;
+                  latest_collected_at: Date | string;
+                }[]
+              ).map((r) => [
+                r.biomarker_category,
+                r.latest_collected_at instanceof Date
+                  ? r.latest_collected_at
+                  : new Date(r.latest_collected_at),
+              ]),
+            );
+          }
+
+          const now = new Date();
+          biomarkerStaleness = payload.biomarkerCards.map((card) => {
+            const thresholdDays =
+              thresholdMap.get(card.category) ?? STALENESS_DEFAULT_DAYS;
+            if (card.currentValue === null) {
+              return { isStale: false, thresholdDays };
+            }
+            const latest = latestMap.get(card.category);
+            const isStale =
+              latest !== undefined && ageInDays(now, latest) > thresholdDays;
+            return { isStale, thresholdDays };
+          });
+        } catch (err) {
+          if (
+            err instanceof TypeError ||
+            err instanceof ReferenceError ||
+            err instanceof SyntaxError
+          ) {
+            throw err;
+          }
+          console.warn(
+            "[sharing.getConversationStarter] staleness compute failed — omitting biomarkerStaleness",
+            err,
+          );
+          biomarkerStaleness = undefined;
+        }
+      }
+
       return {
         cacheStatus,
         payload,
@@ -1477,6 +1581,7 @@ export const sharingRouter = {
         sharedAt: tokenRow.createdAt,
         expiresAt: tokenRow.expiresAt,
         failureReason,
+        biomarkerStaleness,
       };
     }),
 

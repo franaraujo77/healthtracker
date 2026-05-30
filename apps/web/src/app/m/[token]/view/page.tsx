@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { TRPCError } from "@trpc/server";
 
@@ -7,7 +8,11 @@ import type { RouterOutputs } from "@healthtracker/api";
 import { appRouter, createTRPCContext } from "@healthtracker/api";
 import { createSupabaseServerClient } from "@healthtracker/auth/server";
 import { BiomarkerCard, ConversationStarterPrompt } from "@healthtracker/ui";
-import { UUID_SHAPE_REGEX } from "@healthtracker/validators";
+import {
+  PROFESSIONAL_STALENESS_THRESHOLDS_ROUTE,
+  STALENESS_THRESHOLDS_LINK_PT_BR,
+  UUID_SHAPE_REGEX,
+} from "@healthtracker/validators";
 
 import { ConversationStarterPolling } from "./ConversationStarterPolling";
 import { InvitePatientButton } from "./InvitePatientButton";
@@ -167,6 +172,7 @@ export default async function DoctorReportView({
   }
 
   const { prompts, biomarkerCards } = report.payload;
+  const stalenessByIdx = report.biomarkerStaleness;
 
   return (
     <ReportLayout patientFirstName={patientFirstName}>
@@ -218,6 +224,7 @@ export default async function DoctorReportView({
               </div>
             );
           }
+          const staleness = stalenessByIdx?.[idx];
           return (
             <BiomarkerCard
               key={`card-${idx}`}
@@ -227,6 +234,8 @@ export default async function DoctorReportView({
               referenceRangeLow={null}
               referenceRangeHigh={null}
               state="cold-start"
+              isStale={staleness?.isStale ?? false}
+              stalenessThresholdDays={staleness?.thresholdDays}
             />
           );
         })}
@@ -258,6 +267,25 @@ export default async function DoctorReportView({
          */
         <InvitePatientButton shareTokenId={shareTokenId} />
       )}
+      {/*
+        Story 6.5 AC1 / AC12 — Tier-3 settings link, only when activated.
+        Placed under the InvitePatientButton (NOT next to it) per
+        UX-DR20 (single Tier-1 action at report close).
+      */}
+      {activationStatus.activated ? (
+        <div style={{ marginTop: 12, textAlign: "center" }}>
+          <Link
+            href={PROFESSIONAL_STALENESS_THRESHOLDS_ROUTE}
+            style={{
+              fontSize: 13,
+              color: "#6b7280",
+              textDecoration: "underline",
+            }}
+          >
+            {STALENESS_THRESHOLDS_LINK_PT_BR}
+          </Link>
+        </div>
+      ) : null}
     </ReportLayout>
   );
 }

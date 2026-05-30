@@ -10,5 +10,6 @@ export * from "./patient_invites";
 export * from "./professionals";
 export * from "./push_tokens";
 export * from "./sharing";
+export * from "./staleness_thresholds";
 export * from "./uploads";
 export * from "./users";

@@ -9,6 +9,8 @@ import {
   BIOMARKER_PERSONAL_BASELINE_NARRATION_PT_BR,
   BIOMARKER_REFERENCE_LABEL_PT_BR,
   BIOMARKER_REFERENCE_UNAVAILABLE_PT_BR,
+  BIOMARKER_RESULT_STALE_A11Y_PT_BR,
+  BIOMARKER_RESULT_STALE_LABEL_PT_BR,
   BIOMARKER_WATCHING_LABEL_PT_BR,
   BIOMARKER_WITHIN_RANGE_LABEL_PT_BR,
   formatBrazilianDecimal,
@@ -68,6 +70,21 @@ export interface BiomarkerCardProps {
   /** Story 3.3 — personal baseline metadata for the narration. */
   personalBaselineMean?: number;
   personalBaselineStddev?: number;
+  /**
+   * Story 6.5 — when `true`, render a "Resultado antigo" chip in
+   * addition to any deviation chip. Orthogonal to `state`. Pair with
+   * `stalenessThresholdDays` to compose the a11y narration.
+   *
+   * `undefined` MUST behave identically to pre-6.5 (no chip, no a11y
+   * change) — patient surfaces (Início, Histórico) never pass it.
+   */
+  isStale?: boolean;
+  /**
+   * Story 6.5 — doctor's configured threshold (or
+   * `STALENESS_DEFAULT_DAYS`) used for the a11y narration. REQUIRED
+   * when `isStale === true`; otherwise ignored.
+   */
+  stalenessThresholdDays?: number;
 }
 
 /** Pure helper — exported for tests / future consumers. */
@@ -111,12 +128,15 @@ function buildAccessibilityLabel(
   unitUcum: string,
   state: BiomarkerCardState,
   zScore: number | null | undefined,
+  isStale?: boolean,
+  stalenessThresholdDays?: number,
 ): string {
   const valuePart = `${formatBrazilianDecimal(valueNumeric)} ${unitUcum}`;
   // Story 3.3 — personal-baseline narration takes precedence over
   // population-range narration when the caller supplied a finite z
   // (AC3). `zScore === null` falls through to the existing within-
   // band / cold-start path.
+  let base: string;
   if (
     typeof zScore === "number" &&
     Number.isFinite(zScore) &&
@@ -127,23 +147,31 @@ function buildAccessibilityLabel(
       zScore,
       direction,
     });
-    return `${biomarkerName}, ${valuePart}, ${narration}.`;
+    base = `${biomarkerName}, ${valuePart}, ${narration}.`;
+  } else {
+    let narration: string;
+    switch (state) {
+      case "watching":
+      case "notable":
+        narration = BIOMARKER_OUT_OF_RANGE_LABEL_PT_BR;
+        break;
+      case "within-band":
+        narration = BIOMARKER_WITHIN_RANGE_LABEL_PT_BR;
+        break;
+      case "cold-start":
+      default:
+        narration = BIOMARKER_REFERENCE_UNAVAILABLE_PT_BR;
+        break;
+    }
+    base = `${biomarkerName}, ${valuePart}, ${narration}`;
   }
-  let narration: string;
-  switch (state) {
-    case "watching":
-    case "notable":
-      narration = BIOMARKER_OUT_OF_RANGE_LABEL_PT_BR;
-      break;
-    case "within-band":
-      narration = BIOMARKER_WITHIN_RANGE_LABEL_PT_BR;
-      break;
-    case "cold-start":
-    default:
-      narration = BIOMARKER_REFERENCE_UNAVAILABLE_PT_BR;
-      break;
+  // Story 6.5 — orthogonal staleness narration appended after the
+  // existing deviation/within-band narration. `isStale === undefined`
+  // produces no change (patient-surface invariant).
+  if (isStale === true && typeof stalenessThresholdDays === "number") {
+    return `${base} ${BIOMARKER_RESULT_STALE_A11Y_PT_BR(stalenessThresholdDays)}`;
   }
-  return `${biomarkerName}, ${valuePart}, ${narration}`;
+  return base;
 }
 
 export function BiomarkerCard({
@@ -158,6 +186,8 @@ export function BiomarkerCard({
   zScore,
   personalBaselineMean: _personalBaselineMean,
   personalBaselineStddev: _personalBaselineStddev,
+  isStale,
+  stalenessThresholdDays,
 }: BiomarkerCardProps) {
   // State resolution priority:
   //   1. explicit `state` prop (test / caller override),
@@ -184,6 +214,8 @@ export function BiomarkerCard({
     unitUcum,
     resolvedState,
     zScore,
+    isStale,
+    stalenessThresholdDays,
   );
   // Story 3.3 — chip copy maps:
   //   watching → "acompanhando"
@@ -242,6 +274,34 @@ export function BiomarkerCard({
         <Text fontFamily="$body" fontSize={12} color="$textSecondary">
           {`${BIOMARKER_REFERENCE_LABEL_PT_BR}: ${rangeText} ${unitUcum}`}
         </Text>
+      ) : null}
+      {isStale === true ? (
+        // Story 6.5 — orthogonal "Resultado antigo" chip. Tamagui
+        // tokens only (R1-M3 from Story 6.3): muted info, NOT amber.
+        // Distinct from the deviation chip so the doctor sees both
+        // signals when a value is BOTH deviant AND stale.
+        <XStack
+          alignSelf="flex-start"
+          gap="$1"
+          paddingHorizontal="$2"
+          paddingVertical="$1"
+          borderRadius="$chip"
+          backgroundColor="$textSecondary"
+          borderWidth={1}
+          borderColor="$border"
+          alignItems="center"
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+        >
+          <Text
+            fontFamily="$body"
+            fontSize={12}
+            fontWeight="600"
+            color="$textPrimary"
+          >
+            {BIOMARKER_RESULT_STALE_LABEL_PT_BR}
+          </Text>
+        </XStack>
       ) : null}
       {isDeviation ? (
         <XStack

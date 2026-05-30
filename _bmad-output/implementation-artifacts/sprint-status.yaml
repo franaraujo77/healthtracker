@@ -1,5 +1,5 @@
 # generated: 2026-05-15
-# last_updated: 2026-05-29
+# last_updated: 2026-05-30 (story 6.5 → review)
 # project: healthtracker
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-05-15
-last_updated: 2026-05-29
+last_updated: 2026-05-30
 # Stale-status cleanup: Story 3.5 (baseline migration) merged via PR #18
 # weeks ago (commit 56bedef); flipping `3-5-...: review → done` and
 # `epic-3: in-progress → done`. All 5 Epic 3 stories now done +
@@ -569,7 +569,75 @@ development_status:
   6-2-doctor-authenticates-via-magic-link-and-views-the-conversation-starter-report: review
   6-3-doctor-activates-a-professional-account-from-the-conversation-starter-view: review
   6-4-doctor-invites-a-patient-to-create-a-health-tracker-account: review
-  6-5-doctor-configures-biomarker-staleness-thresholds-for-their-professional-view: backlog
+  6-5-doctor-configures-biomarker-staleness-thresholds-for-their-professional-view: review
+  # Story 6.5 implementation complete → review. Stacked on
+  # worktree-story-6-2 / PR #57 (6.2+6.3+6.4 already in review). FR31
+  # doctor-side preference surface delivered. NEW `staleness_thresholds`
+  # table (composite PK, no synthetic id) shipped via Drizzle schema +
+  # `custom_rls_staleness_thresholds.sql` (no `supabase/migrations/*` —
+  # deferred to Story 6.6 per Epic 6 consolidated-migration pattern).
+  # NEW `accountRouter.updateStalenessThresholds` +
+  # `listStalenessThresholds` under a NEW `professionalSessionProcedure`
+  # (session-only doctor procedure that binds
+  # `app.current_doctor_user_id` without requiring an `x-share-token`
+  # header — the `/profissional/*` settings subtree has no token in
+  # context). The original spec named `doctorProcedure`; that procedure
+  # requires `x-share-token`, so a session-only sibling was the
+  # cleanest resolution. Activation gate (SELECT professionals)
+  # + Zod refine for duplicate-by-category + unknown-category
+  # cross-check vs `loinc_ref` + UPSERT batch via onConflictDoUpdate
+  # + audit row inside same tx — all in `account.ts`. Empty-array =
+  # no-op (NOT delete-all). `getConversationStarter` extended with
+  # the OPTIONAL `biomarkerStaleness` parallel array; cache payload
+  # JSONB unchanged. BiomarkerCard gained OPTIONAL `isStale` +
+  # `stalenessThresholdDays` props — chip uses `$textSecondary` +
+  # `$border` Tamagui tokens (NOT amber); patient surfaces unchanged
+  # when `isStale === undefined`. NEW
+  # `/profissional/configuracoes/limiares` RSC + client form
+  # (per-row numeric input + amber-not-red inline validation + global
+  # save). Tier-3 link added under InvitePatientButton on the view
+  # page when activated. 7-identity RLS matrix landed at
+  # `staleness_thresholds.rls.test.ts` (10 cases inc.
+  # UNRELATED_DOCTOR, INSERT WITH CHECK, cross-tenant UPDATE 0-rows,
+  # DELETE-policy-absent). API unit tests: Zod boundary + ageInDays
+  # exhaustive boundary + AC2 label fallback. CLAUDE.md "Doctor
+  # staleness thresholds (Story 6.5)" section + Story 6.6 migration
+  # checklist appended. typecheck 17/17; lint 15/15; api test:unit
+  # 330/330. Deviation from spec: UI snapshot tests (T6.4 / T8.3)
+  # not added — `@healthtracker/ui` package has no test script
+  # wired in this repo (other UI components also lack tests); patient
+  # surface regression risk is mitigated by the `isStale === undefined`
+  # short-circuit in `buildAccessibilityLabel` + the chip render
+  # branch. Code-review may flag.
+  # Story 6.5 spec created → ready-for-dev. Stacks on 6.2+6.3+6.4 / PR #57.
+  # FR31 doctor-side preference surface. ADRs locked: (a) NEW
+  # `staleness_thresholds` table with composite PK
+  # (professional_user_id, biomarker_category) — no synthetic id;
+  # mirrors share_token_biomarkers pattern from Story 5.1. (b) Absent
+  # row → STALENESS_DEFAULT_DAYS=180 applied at READ time only; defaults
+  # NEVER persisted (avoids row-bloat). (c) Staleness flag computed
+  # server-side at getConversationStarter resolver boundary, propagated
+  # via NEW optional `biomarkerStaleness` parallel array on the output
+  # schema. The conversation_starter_cache.payload JSONB is UNCHANGED —
+  # avoids regenerating every cached row + worker prompt drift. (d)
+  # BiomarkerCard gains OPTIONAL `isStale` + `stalenessThresholdDays`
+  # props — orthogonal to existing `state` (notable AND stale is a
+  # valid distinct visual; both chips render). Patient surfaces
+  # unchanged (regression test mandatory). (e) NEW
+  # accountRouter.updateStalenessThresholds + listStalenessThresholds
+  # under doctorProcedure. UPSERT batch with onConflictDoUpdate inside
+  # tx + audit row same tx. Empty array = no-op (not delete-all —
+  # safety against form-reset bugs). (f) Unknown-category cross-check
+  # against `SELECT DISTINCT category FROM loinc_ref` (mirrors Story 5.1
+  # R1 widening; category set is data-seeded, not a closed Zod enum).
+  # (g) NEW `staleness_threshold.updated` audit kind — NOT in
+  # ACCESS_LOG_EVENT_KINDS (doctor preference, patient cannot
+  # access-log). (h) NEW web route /profissional/configuracoes/limiares
+  # (first /profissional/* surface) with TanStack Form. Tier-3 link from
+  # the Conversation Starter view (NOT Tier-1 — UX-DR20 reserves Tier-1
+  # for InvitePatientButton from Story 6.4). (i) 7-identity RLS matrix
+  # (Story 6.4 introduction) reaffirmed. (j) Migration deferred to
+  # Story 6.6. No new env vars; no new HMAC secrets.
   epic-6-retrospective: optional
 
   # Epic 7: Patient Adds Personal Context to Their Record

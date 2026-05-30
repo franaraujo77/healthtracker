@@ -954,6 +954,26 @@ export type ConversationStarterPayloadValidated = z.infer<
   typeof conversationStarterPayloadSchema
 >;
 
+/**
+ * Story 6.5 AC5 / AC6 — staleness flag per biomarker card.
+ * Parallel array (indexed identically to `payload.biomarkerCards`)
+ * carrying per-card `isStale` + the resolved `thresholdDays` (the
+ * doctor's configured value or `STALENESS_DEFAULT_DAYS` fallback).
+ *
+ * **Why a parallel array, not extending each card:** the card shape
+ * is shared with the LLM worker's emit + the `conversation_starter_
+ * cache.payload` JSONB. Adding fields would require schema sync
+ * with the worker AND a forward-compat read path for pre-6.5 cached
+ * rows. A parallel array sidesteps both: the cache row is unchanged;
+ * staleness is computed by the resolver only.
+ *
+ * Absent for `cacheStatus !== "ready"` (no payload to align with).
+ */
+export const conversationStarterBiomarkerStalenessEntrySchema = z.object({
+  isStale: z.boolean(),
+  thresholdDays: z.number().int(),
+});
+
 /** AC6 — resolver output shape. */
 export const getConversationStarterOutputSchema = z.object({
   cacheStatus: conversationStarterCacheStatusSchema,
@@ -962,6 +982,14 @@ export const getConversationStarterOutputSchema = z.object({
   sharedAt: z.date(),
   expiresAt: z.date().nullable(),
   failureReason: z.string().nullable(),
+  /**
+   * Story 6.5 — present only when `cacheStatus === "ready"`. Length
+   * equals `payload.biomarkerCards.length`. Index-aligned with the
+   * cards array.
+   */
+  biomarkerStaleness: z
+    .array(conversationStarterBiomarkerStalenessEntrySchema)
+    .optional(),
 });
 export type GetConversationStarterOutput = z.infer<
   typeof getConversationStarterOutputSchema
