@@ -43,8 +43,17 @@ function getStorageClient(): ReturnType<typeof createClient> {
     );
   }
   if (!key) {
+    // Mirrors the SHARE_TOKEN_HMAC_SECRET gate in
+    // `packages/api/src/sharing.ts`: the variable is server-only and
+    // missing it in production is a deploy-config bug, not an
+    // application bug. The web app's env-schema gate
+    // (`apps/web/src/env.ts`) catches this on first request after
+    // deploy with a clearer trace; this throw is the last-line
+    // defense for code paths that bypass env.ts (e.g. the
+    // `services/llm` and `services/extraction` workers, which read
+    // `process.env` directly).
     throw new Error(
-      "SUPABASE_SERVICE_ROLE_KEY required for storage signed-URL operations",
+      "SUPABASE_SERVICE_ROLE_KEY is required for storage signed-URL operations (Story 1.5 / NFR-S6) — set it in the Vercel/Railway server environment; see `.env.example` for context",
     );
   }
   cachedClient = createClient(url, key, {
