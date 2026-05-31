@@ -13,6 +13,30 @@ export const env = createEnv({
     DATABASE_URL: z.url().optional(),
     CORS_ORIGIN: z.string().default("http://localhost:3000"),
     SENTRY_DSN: z.string().optional(),
+    // Story 1.5 + Story 5.5 — Supabase service-role key used for
+    // signed-URL creation (lab uploads + record exports) and for
+    // Storage admin operations (the `voice_memos` existence probe
+    // from Story 7.4). The key MUST be server-only and is NEVER
+    // bundled into the client. NFR-S6 boot gate: required outside
+    // `development` / `test`; missing in production fails the
+    // env-schema validation on first request (middleware.ts imports
+    // `env`, so the assertion runs before any route handler does).
+    // Mirrors the SHARE_TOKEN_HMAC_SECRET gate documented in
+    // `packages/api/src/sharing.ts`.
+    SUPABASE_SERVICE_ROLE_KEY: z
+      .string()
+      .optional()
+      .refine(
+        (val) => {
+          const nodeEnv = process.env.NODE_ENV;
+          if (nodeEnv === "development" || nodeEnv === "test") return true;
+          return typeof val === "string" && val.length > 0;
+        },
+        {
+          message:
+            "SUPABASE_SERVICE_ROLE_KEY is required outside development/test (Story 1.5 / NFR-S6) — set it in the Vercel/Railway environment",
+        },
+      ),
   },
   client: {
     NEXT_PUBLIC_SUPABASE_URL: z.url(),
