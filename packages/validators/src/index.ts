@@ -365,6 +365,36 @@ export function isDuplicateEmailError(error: SignUpErrorLike): boolean {
   );
 }
 
+/**
+ * Supabase Auth's email-enumeration protection: when `signUp` is called
+ * with an email that already exists, the API returns a 200 with a fake
+ * user object whose `identities` array is empty AND no session — to
+ * prevent attackers from probing whether an email is registered.
+ *
+ * The fake response is indistinguishable from a genuine "verification
+ * email sent" success unless we inspect `identities.length`. If we
+ * route the user to the verification-notice copy in this case, they
+ * wait forever for an email that never arrives.
+ *
+ * Reference: https://github.com/supabase/auth/pull/1517 (the PR that
+ * shipped this behavior; documented but easy to miss).
+ *
+ * Pass the `data` portion of `await supabase.auth.signUp(...)`'s
+ * destructured response. Returns `true` only on the silent-duplicate
+ * shape (no session AND a user object AND empty identities).
+ */
+export interface SignUpDataLike {
+  user: { identities?: { provider?: string }[] | null } | null;
+  session: unknown;
+}
+
+export function isSilentDuplicateEmailSignUp(data: SignUpDataLike): boolean {
+  if (data.session) return false;
+  if (!data.user) return false;
+  const identities = data.user.identities;
+  return Array.isArray(identities) && identities.length === 0;
+}
+
 // =============================================================================
 // Story 1.2 — LGPD consent at onboarding
 // =============================================================================
