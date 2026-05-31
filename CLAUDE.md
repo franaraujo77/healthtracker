@@ -69,9 +69,24 @@ For multi-step tasks, state a brief plan:
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
+### 5. Never Destroy Without Explicit Approval
+
+**Discovering "this is impossible" or "this is unfixable" is not authorization to act unilaterally — it is exactly the moment to stop, explain, and let the user decide.**
+
+When a workflow hits a wall (a PR can't be rebased, a fix is structurally impossible, a dependency is locked by an upstream constraint, a migration would corrupt data, etc.):
+
+- **Stop.** Do not close PRs, delete branches, revert commits, drop tables, force-push, or take any irreversible action — even when the action seems obviously correct from a purely technical standpoint.
+- **Explain the finding.** Lay out what you discovered, why it blocks the original plan, and what the trade-offs are. Cite specific evidence (file:line, dep chain, error message).
+- **List options.** Always offer 2–3 alternatives, including "do nothing" when applicable. Mark which one you'd recommend and why, but do NOT pre-select.
+- **Wait for the call.** The user decides. Their answer may surprise you — they may have context you don't (long-term roadmap, stakeholder commitments, alternative workarounds).
+
+The asymmetry is load-bearing: a reversible delay costs a few minutes of round-trip; an irreversible action you took unilaterally can cost hours of recovery, lost work, or broken trust. When in doubt, pause and ask.
+
+This applies even — _especially_ — when you've found the "obvious" answer. The obviousness is the failure mode: it's how an agent rationalizes skipping the confirmation step. "It was obviously impossible, so I closed it" is the exact pattern this rule exists to prevent.
+
 ---
 
-**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, fewer "I went ahead and X" surprises, and clarifying questions come before implementation rather than after mistakes.
 
 ## Commands
 
