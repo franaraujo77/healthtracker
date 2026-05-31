@@ -34,7 +34,7 @@ catalog:
   zod: ^4.4.3
   vite: 8.0.14
   vitest: ^3.2.0
-  "@sentry/nextjs": ^10.53.1
+  "@sentry/nextjs": ^10.55.0
   "@sentry/react-native": ^8.11.1
 
 catalogs:
