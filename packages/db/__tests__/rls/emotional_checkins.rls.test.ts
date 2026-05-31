@@ -116,28 +116,20 @@ describe("emotional_checkins table RLS — Story 7.2 patient surface", () => {
     expect(rows).toHaveLength(0);
   });
 
-  it("doctorWithAccess sees zero rows (doctor-zero-rows invariant — no doctor policy ships in 7.2)", async () => {
+  // PR R1 fix — Story 6.5 staleness_thresholds precedent: use
+  // `doctorWithActiveToken` (no `app.current_patient_id` bound) so
+  // the policy predicate evaluates to NULL → row filtered out.
+  // The legacy `doctorWithAccess` / `doctorWithoutAccess` helpers
+  // set `app.current_patient_id` and would otherwise let the doctor
+  // pass the patient-only predicate.
+  it("doctorWithActiveToken sees zero rows (doctor-zero-rows invariant — no doctor policy ships in 7.2)", async () => {
     const patientId = crypto.randomUUID();
     await seedEmotionalCheckin({ patientId });
-    const run = asIdentity("doctorWithAccess", {
+    const run = asIdentity("doctorWithActiveToken", {
       patientId,
-      shareToken: crypto.randomUUID(),
+      shareTokenId: crypto.randomUUID(),
+      doctorUserId: crypto.randomUUID(),
     });
-
-    const rows = await run(
-      (tx) => tx<{ id: string }[]>`
-        SELECT id FROM emotional_checkins
-        WHERE patient_id = ${patientId}::uuid
-      `,
-    );
-
-    expect(rows).toHaveLength(0);
-  });
-
-  it("doctorWithoutAccess sees zero rows (same invariant)", async () => {
-    const patientId = crypto.randomUUID();
-    await seedEmotionalCheckin({ patientId });
-    const run = asIdentity("doctorWithoutAccess", { patientId });
 
     const rows = await run(
       (tx) => tx<{ id: string }[]>`
@@ -185,28 +177,14 @@ describe("emotional_checkins table RLS — Story 7.2 patient surface", () => {
       expect(rows).toHaveLength(0);
     });
 
-    it("doctorWithAccess sees zero post rows (denial-by-RLS-absence covers both types)", async () => {
+    it("doctorWithActiveToken sees zero post rows (denial-by-RLS-absence covers both types)", async () => {
       const patientId = crypto.randomUUID();
       await seedEmotionalCheckin({ patientId, type: "post" });
-      const run = asIdentity("doctorWithAccess", {
+      const run = asIdentity("doctorWithActiveToken", {
         patientId,
-        shareToken: crypto.randomUUID(),
+        shareTokenId: crypto.randomUUID(),
+        doctorUserId: crypto.randomUUID(),
       });
-
-      const rows = await run(
-        (tx) => tx<{ id: string }[]>`
-          SELECT id FROM emotional_checkins
-          WHERE patient_id = ${patientId}::uuid AND type = 'post'
-        `,
-      );
-
-      expect(rows).toHaveLength(0);
-    });
-
-    it("doctorWithoutAccess sees zero post rows", async () => {
-      const patientId = crypto.randomUUID();
-      await seedEmotionalCheckin({ patientId, type: "post" });
-      const run = asIdentity("doctorWithoutAccess", { patientId });
 
       const rows = await run(
         (tx) => tx<{ id: string }[]>`

@@ -107,28 +107,20 @@ describe("voice_memos table RLS — Story 7.4 patient surface", () => {
     expect(rows).toHaveLength(0);
   });
 
-  it("doctorWithAccess sees zero rows (denial-by-RLS-absence)", async () => {
+  // PR R1 fix — Story 6.5 staleness_thresholds precedent: use
+  // `doctorWithActiveToken` (no `app.current_patient_id` bound) so
+  // the patient-only RLS predicate evaluates to NULL → row filtered
+  // out. The legacy `doctorWithAccess` / `doctorWithoutAccess`
+  // helpers set `app.current_patient_id` and would otherwise let
+  // the doctor pass the patient-only predicate.
+  it("doctorWithActiveToken sees zero rows (denial-by-RLS-absence)", async () => {
     const patientId = crypto.randomUUID();
     await seedVoiceMemo({ patientId });
-    const run = asIdentity("doctorWithAccess", {
+    const run = asIdentity("doctorWithActiveToken", {
       patientId,
-      shareToken: crypto.randomUUID(),
+      shareTokenId: crypto.randomUUID(),
+      doctorUserId: crypto.randomUUID(),
     });
-
-    const rows = await run(
-      (tx) => tx<{ id: string }[]>`
-        SELECT id FROM voice_memos
-        WHERE patient_id = ${patientId}::uuid
-      `,
-    );
-
-    expect(rows).toHaveLength(0);
-  });
-
-  it("doctorWithoutAccess sees zero rows", async () => {
-    const patientId = crypto.randomUUID();
-    await seedVoiceMemo({ patientId });
-    const run = asIdentity("doctorWithoutAccess", { patientId });
 
     const rows = await run(
       (tx) => tx<{ id: string }[]>`

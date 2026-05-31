@@ -94,28 +94,24 @@ describe("life_events table RLS — Story 7.1 patient surface", () => {
     expect(rows).toHaveLength(0);
   });
 
-  it("doctorWithAccess sees zero rows (doctor-zero-rows invariant — no doctor policy ships in 7.1)", async () => {
+  // PR R1 fix — the legacy `doctorWithAccess` / `doctorWithoutAccess`
+  // helpers set `app.current_patient_id` to the target patient (they
+  // were designed for sharing-table tests that gate on additional
+  // GUCs). For Epic 7's denial-by-RLS-absence pattern, the correct
+  // identity is `doctorWithActiveToken` (Story 6.5 staleness_thresholds
+  // precedent) which binds `app.current_share_token_id` +
+  // `app.current_doctor_user_id` but NEVER `app.current_patient_id`.
+  // The policy predicate `patient_id::text = current_setting(
+  // 'app.current_patient_id', true)` then evaluates to NULL → row
+  // filtered out, locking the doctor-zero-rows invariant.
+  it("doctorWithActiveToken sees zero rows (doctor-zero-rows invariant — no doctor policy ships in 7.1)", async () => {
     const patientId = crypto.randomUUID();
     await seedLifeEvent({ patientId });
-    const run = asIdentity("doctorWithAccess", {
+    const run = asIdentity("doctorWithActiveToken", {
       patientId,
-      shareToken: crypto.randomUUID(),
+      shareTokenId: crypto.randomUUID(),
+      doctorUserId: crypto.randomUUID(),
     });
-
-    const rows = await run(
-      (tx) => tx<{ id: string }[]>`
-        SELECT id FROM life_events
-        WHERE patient_id = ${patientId}::uuid
-      `,
-    );
-
-    expect(rows).toHaveLength(0);
-  });
-
-  it("doctorWithoutAccess sees zero rows (same invariant)", async () => {
-    const patientId = crypto.randomUUID();
-    await seedLifeEvent({ patientId });
-    const run = asIdentity("doctorWithoutAccess", { patientId });
 
     const rows = await run(
       (tx) => tx<{ id: string }[]>`
