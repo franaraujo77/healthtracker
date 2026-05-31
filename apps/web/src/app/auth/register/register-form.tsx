@@ -12,6 +12,7 @@ import {
   DUPLICATE_EMAIL_MESSAGE_PT_BR,
   GENERIC_REGISTRATION_ERROR_MESSAGE_PT_BR,
   isDuplicateEmailError,
+  isSilentDuplicateEmailSignUp,
   normalizeEmail,
   PASSWORD_HELPER_TEXT_PT_BR,
   RegisterSchema,
@@ -85,12 +86,20 @@ export function RegisterForm(props: RegisterFormProps = {}) {
         return;
       }
       if (!data.session) {
-        // Email-confirmation enabled in Supabase — signUp returned no
-        // session. Routing to /onboarding/consent here would dead-end on
-        // UNAUTHORIZED because every consent.grant requires a session.
-        // Surface the verification notice in the *notice* slot — it's an
-        // informational success-path message, not an error. Routing the
-        // user into /onboarding/consent now would dead-end on UNAUTHORIZED.
+        // Supabase email-enumeration protection: an already-registered
+        // email returns a fake-success response (no session, fake user
+        // object with empty `identities` array, no email sent). If we
+        // don't detect this, the patient waits forever for a
+        // verification email that never arrives. See
+        // `isSilentDuplicateEmailSignUp` for context.
+        if (isSilentDuplicateEmailSignUp(data)) {
+          setServerError(DUPLICATE_EMAIL_MESSAGE_PT_BR);
+          return;
+        }
+        // Genuine first-time signup with email-confirmation enabled —
+        // surface the verification notice in the *notice* slot (it's an
+        // informational success-path message, not an error). Routing
+        // into /onboarding/consent here would dead-end on UNAUTHORIZED;
         // /auth/callback will call initializeProfile and route into
         // consent after the patient clicks the verification link.
         setServerNotice(VERIFY_EMAIL_MESSAGE_PT_BR);

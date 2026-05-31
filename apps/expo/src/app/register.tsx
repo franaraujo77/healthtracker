@@ -10,6 +10,7 @@ import {
   DUPLICATE_EMAIL_MESSAGE_PT_BR,
   GENERIC_REGISTRATION_ERROR_MESSAGE_PT_BR,
   isDuplicateEmailError,
+  isSilentDuplicateEmailSignUp,
   normalizeEmail,
   PASSWORD_HELPER_TEXT_PT_BR,
   RegisterSchema,
@@ -69,10 +70,20 @@ export default function Register() {
         return;
       }
       if (!data.session) {
-        // Email-confirmation enabled — signUp returned no session. Use
-        // the *notice* slot (this is success-path information, not an
-        // error). Routing into consent now would dead-end on UNAUTHORIZED.
-        // The deep-link handler in app/_layout.tsx will call
+        // Supabase email-enumeration protection: an already-registered
+        // email returns a fake-success response (no session, fake user
+        // object with empty `identities` array, no email sent). If we
+        // don't detect this, the patient waits forever for a
+        // verification email that never arrives. See
+        // `isSilentDuplicateEmailSignUp` for context.
+        if (isSilentDuplicateEmailSignUp(data)) {
+          setServerError(DUPLICATE_EMAIL_MESSAGE_PT_BR);
+          return;
+        }
+        // Genuine first-time signup with email-confirmation enabled.
+        // Use the *notice* slot (success-path info, not an error).
+        // Routing into consent now would dead-end on UNAUTHORIZED;
+        // the deep-link handler in app/_layout.tsx will call
         // initializeProfile and route into consent after verification.
         setServerNotice(VERIFY_EMAIL_MESSAGE_PT_BR);
         return;
