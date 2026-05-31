@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { RefreshControl, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import * as FileSystem from "expo-file-system";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Input, Text, YStack } from "tamagui";
 
 import type { EmotionalCheckinState } from "@healthtracker/validators";
-import { EmotionalCheckInSheet } from "@healthtracker/ui";
+import { EmotionalCheckInSheet, VoiceMemoRecorder } from "@healthtracker/ui";
 import {
   EMOTIONAL_CHECKIN_POST_CTA_PT_BR,
   formatBrazilianDecimal,
@@ -22,8 +23,14 @@ import {
   UPLOAD_DETAIL_VALUE_INVALID_PT_BR,
   UPLOAD_DETAIL_WAITING_TEAM_PT_BR,
   UPLOAD_STATUS_LABELS_PT_BR,
+  VOICE_MEMO_CTA_PT_BR,
+  VOICE_MEMO_SAVE_ERROR_PT_BR,
+  VOICE_MEMOS_STORAGE_BUCKET,
+  voiceMemoStoragePath,
 } from "@healthtracker/validators";
 
+import { VoiceMemoRecorderSlot } from "~/components/VoiceMemoRecorderSlot";
+import { supabase } from "~/lib/supabase";
 import { trpc } from "~/utils/api";
 
 const BACKGROUND_PRIMARY = "#F9F7F4";
@@ -210,6 +217,112 @@ export default function UploadDetailScreen() {
     setPostCheckInSheetOpen(next);
   }
 
+  // Story 7.4 — voice memo (AC1, AC2, AC4).
+  const [voiceMemoSheetOpen, setVoiceMemoSheetOpen] = useState(false);
+  const [voiceMemoResetSignal, setVoiceMemoResetSignal] = useState(0);
+  const [voiceMemoError, setVoiceMemoError] = useState<string | null>(null);
+  const showVoiceMemoCta = Boolean(
+    query.data?.status !== undefined &&
+    query.data.status !== "failed" &&
+    query.data.hasVoiceMemo === false &&
+    !preCheckInSheetOpen &&
+    !postCheckInSheetOpen,
+  );
+
+  const attachVoiceMemoMutation = useMutation(
+    trpc.voiceMemos.attachToUpload.mutationOptions(),
+  );
+
+  async function uploadVoiceMemoToStorage(
+    uri: string,
+    patientId: string,
+  ): Promise<string> {
+    // R1-H2 — voiceMemoId is the uploadId so a retry-after-success
+    // overwrites the same Storage object via `upsert: true`. Avoids
+    // the orphan-on-retry vector (second upload with a fresh UUID
+    // would leave the first object orphaned).
+    const storagePath = voiceMemoStoragePath(patientId, uploadId);
+    // R1-C1 — React Native / Hermes does NOT polyfill Node's
+    // `Buffer`. Use `fetch(uri).blob()` instead — Supabase JS SDK
+    // accepts Blob natively on RN. The base64 round-trip is also
+    // avoided (smaller memory footprint).
+    const response = await fetch(uri);
+    const audioBlob = await response.blob();
+    const { error } = await supabase.storage
+      .from(VOICE_MEMOS_STORAGE_BUCKET)
+      .upload(storagePath, audioBlob, {
+        contentType: "audio/m4a",
+        upsert: true,
+      });
+    if (error !== null) {
+      throw new Error(error.message);
+    }
+    return storagePath;
+  }
+
+  async function handleVoiceMemoSubmit(recording: {
+    uri: string;
+    durationMs: number;
+  }) {
+    setVoiceMemoError(null);
+    let uploadedStoragePath: string | null = null;
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user === null) {
+        throw new Error("Sign-in required");
+      }
+      uploadedStoragePath = await uploadVoiceMemoToStorage(
+        recording.uri,
+        user.id,
+      );
+      await attachVoiceMemoMutation.mutateAsync({
+        uploadId,
+        storagePath: uploadedStoragePath,
+        durationMs: recording.durationMs,
+      });
+      // Cleanup the local file after successful upload.
+      await FileSystem.deleteAsync(recording.uri, { idempotent: true });
+      invalidateUploadDetail();
+      setVoiceMemoSheetOpen(false);
+      setVoiceMemoResetSignal((n) => n + 1);
+    } catch {
+      // R1-H1 — Storage cleanup on resolver failure. If the audio
+      // landed in Storage but the attach mutation rejected, remove
+      // the orphan so the patient's private bucket doesn't accrete
+      // untracked files.
+      if (uploadedStoragePath !== null) {
+        try {
+          await supabase.storage
+            .from(VOICE_MEMOS_STORAGE_BUCKET)
+            .remove([uploadedStoragePath]);
+        } catch {
+          // Swallow — best-effort cleanup; the orphan can be swept
+          // later by a future reconciler.
+        }
+      }
+      // R1-M3 — also delete the local file URI so an auth-expiry
+      // error path doesn't leak temp files.
+      try {
+        await FileSystem.deleteAsync(recording.uri, { idempotent: true });
+      } catch {
+        // Swallow.
+      }
+      setVoiceMemoError(VOICE_MEMO_SAVE_ERROR_PT_BR);
+    }
+  }
+
+  function handleVoiceMemoSkip() {
+    setVoiceMemoSheetOpen(false);
+    setVoiceMemoResetSignal((n) => n + 1);
+  }
+
+  function handleVoiceMemoOpenChange(next: boolean) {
+    setVoiceMemoSheetOpen(next);
+    if (!next) setVoiceMemoResetSignal((n) => n + 1);
+  }
+
   function invalidateUploadDetail() {
     void queryClient.invalidateQueries({
       queryKey: trpc.uploads.getUploadDetail.queryKey({ uploadId }),
@@ -312,6 +425,19 @@ export default function UploadDetailScreen() {
                   {EMOTIONAL_CHECKIN_POST_CTA_PT_BR}
                 </Button>
               ) : null}
+              {showVoiceMemoCta ? (
+                <Button
+                  onPress={() => setVoiceMemoSheetOpen(true)}
+                  accessibilityRole="button"
+                >
+                  {VOICE_MEMO_CTA_PT_BR}
+                </Button>
+              ) : null}
+              {voiceMemoError !== null ? (
+                <Text color="$errorRed" fontSize="$2">
+                  {voiceMemoError}
+                </Text>
+              ) : null}
             </>
           ) : null}
         </YStack>
@@ -330,6 +456,19 @@ export default function UploadDetailScreen() {
         onSubmit={handlePostCheckInSubmit}
         onSkip={handlePostCheckInSkip}
         isSubmitting={recordPostCheckInMutation.isPending}
+      />
+      <VoiceMemoRecorder
+        open={voiceMemoSheetOpen}
+        onOpenChange={handleVoiceMemoOpenChange}
+        onSubmit={(rec) => void handleVoiceMemoSubmit(rec)}
+        onSkip={handleVoiceMemoSkip}
+        isSaving={attachVoiceMemoMutation.isPending}
+        renderRecorder={({ onRecordingComplete }) => (
+          <VoiceMemoRecorderSlot
+            onRecordingComplete={onRecordingComplete}
+            resetSignal={voiceMemoResetSignal}
+          />
+        )}
       />
     </SafeAreaView>
   );

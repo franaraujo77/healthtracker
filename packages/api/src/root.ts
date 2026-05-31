@@ -8,6 +8,7 @@ import { notificationsRouter } from "./router/notifications";
 import { observationsRouter } from "./router/observations";
 import { sharingRouter } from "./router/sharing";
 import { uploadsRouter } from "./router/uploads";
+import { voiceMemosRouter } from "./router/voice-memos";
 import { createTRPCRouter } from "./trpc";
 
 export const appRouter = createTRPCRouter({
@@ -21,6 +22,7 @@ export const appRouter = createTRPCRouter({
   observations: observationsRouter,
   sharing: sharingRouter,
   uploads: uploadsRouter,
+  voiceMemos: voiceMemosRouter,
 });
 
 // export type definition of API

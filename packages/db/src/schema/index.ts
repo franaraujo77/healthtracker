@@ -15,3 +15,4 @@ export * from "./sharing";
 export * from "./staleness_thresholds";
 export * from "./uploads";
 export * from "./users";
+export * from "./voice_memos";

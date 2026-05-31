@@ -33,6 +33,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       // per UX-DR20.
       NSPhotoLibraryUsageDescription:
         "Permita o acesso à sua biblioteca de fotos para enviar resultados de exames.",
+      // Story 7.4 FR51 — required when the app calls
+      // `expo-audio`'s record() API for the voice memo flow. pt-BR
+      // per UX-DR20.
+      NSMicrophoneUsageDescription:
+        "Permita o acesso ao microfone para gravar um memo de voz junto do seu exame.",
       // Story 2.2 FR2 — required when the app calls
       // `ImagePicker.launchCameraAsync` for direct camera capture
       // (AC2). pt-BR per UX-DR20; names the action so App Store
@@ -48,6 +53,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       backgroundColor: "#1F104A",
     },
     edgeToEdgeEnabled: true,
+    // Story 7.4 FR51 — required for `expo-audio` recording on Android.
+    permissions: ["android.permission.RECORD_AUDIO"],
   },
   // extra: {
   //   eas: {
@@ -84,6 +91,16 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       },
     ],
     "expo-document-picker",
+    [
+      // Story 7.4 FR51 — config-plugin form duplicates the
+      // `infoPlist.NSMicrophoneUsageDescription` so a future Expo
+      // Prebuild reshape can't drop it. pt-BR per UX-DR20.
+      "expo-audio",
+      {
+        microphonePermission:
+          "Permita o acesso ao microfone para gravar um memo de voz junto do seu exame.",
+      },
+    ],
     [
       // Story 2.5 / F135 — push notifications. iOS APNs entitlements
       // and Android FCM are wired by the config plugin; the runtime

@@ -6,6 +6,7 @@ import {
   ExtractionReviewQueue,
   Observations,
   Uploads,
+  VoiceMemos,
 } from "@healthtracker/db/schema";
 import {
   parseBrazilianDecimal,
@@ -54,6 +55,7 @@ export async function getUploadDetailForPatient(
   isFirstView: boolean;
   hasPreEmotionalCheckIn: boolean;
   hasPostEmotionalCheckIn: boolean;
+  hasVoiceMemo: boolean;
   lowConfidenceFields: {
     id: string;
     biomarkerName: string;
@@ -155,6 +157,18 @@ export async function getUploadDetailForPatient(
       ),
     );
 
+  // Story 7.4 — voice memo existence probe. Gates the "Adicionar
+  // memo de voz" CTA.
+  const [voiceMemoExists] = await database
+    .select({ c: sql<number>`count(*)::int` })
+    .from(VoiceMemos)
+    .where(
+      and(
+        eq(VoiceMemos.uploadId, uploadId),
+        eq(VoiceMemos.patientId, patientId),
+      ),
+    );
+
   return {
     id: uploadRow.id,
     status: uploadRow.status,
@@ -165,6 +179,7 @@ export async function getUploadDetailForPatient(
     isFirstView: uploadRow.viewedAt === null,
     hasPreEmotionalCheckIn: (preCheckInExists?.c ?? 0) > 0,
     hasPostEmotionalCheckIn: (postCheckInExists?.c ?? 0) > 0,
+    hasVoiceMemo: (voiceMemoExists?.c ?? 0) > 0,
     lowConfidenceFields: lowConfidenceRows,
     hasOperatorOnlyRows,
     publishedObservationCount: obsCountRow?.c ?? 0,
