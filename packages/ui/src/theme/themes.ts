@@ -33,6 +33,7 @@ export const lightTheme = {
   accessLogExpired: pick("accessLogExpired", "light"),
   accessLogRevoked: pick("accessLogRevoked", "light"),
   accessLogNeutral: pick("accessLogNeutral", "light"),
+  lifeEventMarker: pick("lifeEventMarker", "light"),
 } as const;
 
 export const darkTheme = {
@@ -65,4 +66,5 @@ export const darkTheme = {
   accessLogExpired: pick("accessLogExpired", "dark"),
   accessLogRevoked: pick("accessLogRevoked", "dark"),
   accessLogNeutral: pick("accessLogNeutral", "dark"),
+  lifeEventMarker: pick("lifeEventMarker", "dark"),
 } as const;

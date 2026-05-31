@@ -64,6 +64,14 @@ export const Uploads = pgTable(
     status: uploadStatusEnum("status").notNull().default("queued"),
     processingStartedAt: t.timestamp({ mode: "date", withTimezone: true }),
     processingCompletedAt: t.timestamp({ mode: "date", withTimezone: true }),
+    // Story 7.2 — first-view marker. NULL = patient has never opened
+    // the detail screen for this upload. Set to `now()` by the
+    // `uploads.markUploadViewed` mutation when the patient opens (or
+    // skips) the pre-results emotional check-in sheet. The
+    // `WHERE viewed_at IS NULL` guard in the UPDATE makes second
+    // calls idempotent; AC12. No audit write on the mark (render
+    // path is high-frequency).
+    viewedAt: t.timestamp({ mode: "date", withTimezone: true }),
     metadata: t.jsonb().$type<Record<string, unknown>>().notNull().default({}),
     // Epic 2 retro F141 — most-common lab name across this upload's
     // published observations, populated by the extraction worker at

@@ -55,6 +55,14 @@ export const colorTokens = {
   accessLogExpired: { light: "#F3EFE7", dark: "#3C3836" },
   accessLogRevoked: { light: "#EDE4DA", dark: "#4A4036" },
   accessLogNeutral: { light: "#F0EFEC", dark: "#2E2A26" },
+
+  // Story 7.1 — life-event timeline marker. Neutral teal-grey vertical
+  // line painted over the Fingerprint chart (AC3). Intentionally
+  // distinct from `primaryTeal` (the chart's own line/scatter colour)
+  // so a marker reads as annotation, not data. NOT a background; do
+  // not use as `backgroundColor` (mirrors Story 6.5 R1 lesson — never
+  // reach for `$textSecondary` as a background; contrast fails).
+  lifeEventMarker: { light: "#5F8A8A", dark: "#9FBABA" },
 } as const;
 
 export const fontSizeTokens = {

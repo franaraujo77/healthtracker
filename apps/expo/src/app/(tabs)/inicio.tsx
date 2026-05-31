@@ -1,15 +1,21 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { AccessibilityInfo } from "react-native";
+import type { DateTimePickerEvent } from "@react-native-community/datetimepicker";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AccessibilityInfo, Platform, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, Stack, useLocalSearchParams } from "expo-router";
-import { useQuery } from "@tanstack/react-query";
+import DateTimePicker from "@react-native-community/datetimepicker";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Text, YStack } from "tamagui";
 
-import type { FingerprintChartBaselineBiomarker } from "@healthtracker/ui/fingerprint-chart-baseline";
+import type {
+  FingerprintChartBaselineBiomarker,
+  FingerprintLifeEventMarker,
+} from "@healthtracker/ui/fingerprint-chart-baseline";
 import {
   BiomarkerCard,
   EmptyStateRecord,
   ExtractionPulse,
+  LifeEventSheet,
 } from "@healthtracker/ui";
 import { FingerprintChart } from "@healthtracker/ui/fingerprint-chart";
 import { UploadSourceSheet } from "@healthtracker/ui/upload-source-sheet";
@@ -23,6 +29,7 @@ import {
   FINGERPRINT_PARTIAL_EMPTY_CTA_PT_BR,
   FINGERPRINT_PARTIAL_EMPTY_HEADLINE_PT_BR,
   formatCachedUpdatedAtPtBr,
+  formatCollectedAtPtBr,
   HISTORICO_OFFLINE_QUEUED_HINT_PT_BR,
   INICIO_ADD_MEASUREMENT_CTA_PT_BR,
   INICIO_CTA_DRAW_ONE_PT_BR,
@@ -32,7 +39,11 @@ import {
   INICIO_HEADLINE_DRAW_ONE_PT_BR,
   INICIO_HEADLINE_PT_BR,
   INICIO_OFFLINE_UPLOAD_DISABLED_PT_BR,
+  LIFE_EVENT_CTA_PT_BR,
+  LIFE_EVENT_SAVE_ERROR_PT_BR,
+  LIFE_EVENT_SAVED_TOAST_PT_BR,
   MANUAL_BIA_ROUTE,
+  todayInSaoPauloIso,
   UPLOAD_ALLOWED_MIME_TYPES,
   UPLOAD_STATUS_LABELS_PT_BR,
 } from "@healthtracker/validators";
@@ -43,9 +54,45 @@ import { useNetInfoExternal } from "~/hooks/use-net-info";
 import { useOfflineQueue } from "~/hooks/use-offline-queue";
 import { trpc } from "~/utils/api";
 
+// Story 7.5 — the native date picker dependency lives in apps/expo,
+// NOT packages/ui. `@react-native-community/datetimepicker` exposes
+// native modules only; importing it from packages/ui (which is
+// bundled by Next.js for the web app) would break `next build`. The
+// `LifeEventSheet` `renderDateField` slot prop is the architectural
+// seam that keeps the shared component web-safe.
+
 // SafeAreaView is native and can't read Tamagui tokens — mirror
 // colorTokens.backgroundPrimary.light.
 const BACKGROUND_PRIMARY = "#F9F7F4";
+
+/**
+ * Story 7.5 — parse a `yyyy-mm-dd` wire-format string as a local
+ * calendar date. NEVER `new Date(iso)` directly because that parses
+ * as UTC midnight, which shifts to the previous calendar day in
+ * Brazilian timezones (Story 3.1 R3-P246 hazard). Pads to noon
+ * locally to defend against DST edges.
+ */
+function isoStringToLocalDate(iso: string): Date {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!match) return new Date();
+  const y = Number(match[1]);
+  const m = Number(match[2]) - 1;
+  const d = Number(match[3]);
+  return new Date(y, m, d, 12, 0, 0);
+}
+
+/**
+ * Story 7.5 — emit `yyyy-mm-dd` from a `Date` using LOCAL calendar
+ * parts. The picker hands the consumer a `Date` whose absolute
+ * timestamp is meaningless; the date the user picked is the local
+ * `getFullYear / getMonth / getDate` triplet.
+ */
+function localDateToIsoString(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 
 const PDF_ONLY_ACCEPT = [UPLOAD_ALLOWED_MIME_TYPES[0]] as const;
 const ELAPSED_TICK_MS = 1000;
@@ -77,6 +124,94 @@ export default function Inicio() {
   const [sheetOpen, setSheetOpen] = useState(
     params.source === "post_onboarding_photo",
   );
+  // Story 7.1 — life-event Tier-2 sheet state. Visible only on the
+  // `baseline-established` branch (one Fingerprint = one place to
+  // contextualise). The save error is rendered inline below the CTA.
+  const [lifeEventSheetOpen, setLifeEventSheetOpen] = useState(false);
+  const [lifeEventError, setLifeEventError] = useState<string | null>(null);
+  const [lifeEventToast, setLifeEventToast] = useState<string | null>(null);
+  // Story 7.5 — Android picker visibility (iOS uses inline always-on).
+  const [androidPickerVisible, setAndroidPickerVisible] = useState(false);
+
+  // Story 7.5 — render-prop for the LifeEventSheet's date field. iOS
+  // shows the inline calendar always-visible; Android wraps a
+  // Pressable that opens the system calendar dialog. Both branches
+  // convert the picker's `Date` to ISO `yyyy-mm-dd` using local
+  // calendar parts (NEVER `.toISOString().slice(0,10)` — the UTC
+  // shift is the Story 7.1 R3-P246 / Epic 6 carry-forward hazard).
+  const renderLifeEventDateField = useCallback(
+    ({
+      value,
+      onChange,
+      maxDateIso,
+    }: {
+      value: string;
+      onChange: (isoDate: string) => void;
+      maxDateIso: string;
+    }) => {
+      // Interpret the wire-format ISO + max as local-calendar dates.
+      // The picker compares calendar dates, not absolute timestamps.
+      const valueDate = isoStringToLocalDate(value);
+      const maxDate = isoStringToLocalDate(maxDateIso);
+
+      function handleDateChange(
+        event: DateTimePickerEvent,
+        selected?: Date,
+      ): void {
+        // Android one-shot modal: dismiss either way.
+        if (Platform.OS === "android") {
+          setAndroidPickerVisible(false);
+        }
+        // 'dismissed' on Android means user cancelled; 'set' on both
+        // platforms means a selection was made.
+        if (event.type !== "set" || !selected) return;
+        onChange(localDateToIsoString(selected));
+      }
+
+      if (Platform.OS === "ios") {
+        return (
+          <DateTimePicker
+            mode="date"
+            display="inline"
+            value={valueDate}
+            maximumDate={maxDate}
+            onChange={handleDateChange}
+          />
+        );
+      }
+      // Android — Pressable that surfaces the formatted date and
+      // opens the system calendar modal on tap.
+      return (
+        <>
+          <Pressable
+            onPress={() => setAndroidPickerVisible(true)}
+            accessibilityRole="button"
+            accessibilityLabel={formatCollectedAtPtBr(value)}
+          >
+            <Text
+              fontFamily="$body"
+              fontSize="$4"
+              color="$textPrimary"
+              padding="$3"
+            >
+              {formatCollectedAtPtBr(value)}
+            </Text>
+          </Pressable>
+          {androidPickerVisible ? (
+            <DateTimePicker
+              mode="date"
+              display="default"
+              value={valueDate}
+              maximumDate={maxDate}
+              onChange={handleDateChange}
+            />
+          ) : null}
+        </>
+      );
+    },
+    [androidPickerVisible],
+  );
+  const queryClient = useQueryClient();
   const [reducedMotion, setReducedMotion] = useState(false);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const {
@@ -420,6 +555,80 @@ export default function Inicio() {
     baselineKeys,
   ]);
 
+  // Story 7.1 — life-event window. Derive the visible Fingerprint
+  // window from the merged baseline chart data (chronological history
+  // across every biomarker). When the patient has at least one
+  // historical sample we pad the window to "today" so just-saved
+  // events are immediately visible as markers (AC3).
+  const lifeEventWindow = useMemo(() => {
+    let min: string | null = null;
+    let max: string | null = null;
+    for (const b of baselineChartBiomarkers) {
+      for (const h of b.history) {
+        if (min === null || h.collectedAt < min) min = h.collectedAt;
+        if (max === null || h.collectedAt > max) max = h.collectedAt;
+      }
+    }
+    if (min === null || max === null) return null;
+    // R1-followup LOW #4 — use São Paulo "today" instead of the
+    // device local clock so devices set to a non-Brazil timezone
+    // don't see a one-day window drift. The server refine
+    // (`todayInSaoPauloIso` in the validator) is the auth boundary;
+    // matching the client here is just consistency.
+    const today = todayInSaoPauloIso();
+    return { fromDate: min, toDate: max > today ? max : today };
+  }, [baselineChartBiomarkers]);
+
+  // The tRPC adapter requires a concrete input even when the query is
+  // disabled (the queryKey carries the input). Pass the sentinel
+  // window when none is derivable yet — `enabled` short-circuits the
+  // network call and the resolver is never reached.
+  const SENTINEL_WINDOW = {
+    fromDate: "1970-01-01",
+    toDate: "1970-01-01",
+  } as const;
+  const lifeEventsQuery = useQuery(
+    trpc.lifeEvents.listInWindow.queryOptions(
+      lifeEventWindow ?? SENTINEL_WINDOW,
+      {
+        staleTime: 0,
+        refetchOnWindowFocus: true,
+        enabled: lifeEventWindow !== null,
+      },
+    ),
+  );
+
+  const lifeEventMarkers: FingerprintLifeEventMarker[] = useMemo(() => {
+    const events = lifeEventsQuery.data?.events ?? [];
+    // R1-followup LOW #1 — PII discipline: only ship id + eventDate
+    // to the chart layer. `description` stays in the React Query
+    // cache for the future sheet/editor surface, but never reaches
+    // the marker prop or render tree.
+    return events.map((e) => ({
+      id: e.id,
+      eventDate: e.eventDate,
+    }));
+  }, [lifeEventsQuery.data]);
+
+  const createLifeEventMutation = useMutation(
+    trpc.lifeEvents.createLifeEvent.mutationOptions({
+      onSuccess: () => {
+        setLifeEventError(null);
+        setLifeEventToast(LIFE_EVENT_SAVED_TOAST_PT_BR);
+        setLifeEventSheetOpen(false);
+        // Refetch markers — the new row may or may not fall inside the
+        // current chart window; the query refetch is cheap and
+        // mirrors the existing Fingerprint cache-invalidation pattern.
+        void queryClient.invalidateQueries({
+          queryKey: [["lifeEvents", "listInWindow"]],
+        });
+      },
+      onError: () => {
+        setLifeEventError(LIFE_EVENT_SAVE_ERROR_PT_BR);
+      },
+    }),
+  );
+
   // Story 3.2 Task 3.7 — error surfaces a console.warn only (no red
   // banner). Use a ref so we don't spam the log on every re-render.
   const warnedErrorRef = useRef<unknown>(null);
@@ -602,8 +811,41 @@ export default function Inicio() {
                   state="baseline-established"
                   baselines={baselineChartBiomarkers}
                   reducedMotion={reducedMotion}
+                  lifeEvents={lifeEventMarkers}
                 />
                 <YStack gap="$2" paddingHorizontal="$3" paddingBottom="$3">
+                  {/* Story 7.1 — Tier-2 "Adicionar evento de vida" CTA. */}
+                  <Button
+                    disabled={isOffline || createLifeEventMutation.isPending}
+                    onPress={() => {
+                      if (isOffline) return;
+                      setLifeEventError(null);
+                      setLifeEventToast(null);
+                      setLifeEventSheetOpen(true);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={LIFE_EVENT_CTA_PT_BR}
+                  >
+                    {LIFE_EVENT_CTA_PT_BR}
+                  </Button>
+                  {lifeEventError ? (
+                    <Text
+                      fontSize="$2"
+                      color="$biomarkerDeviation"
+                      accessibilityRole="text"
+                    >
+                      {lifeEventError}
+                    </Text>
+                  ) : null}
+                  {lifeEventToast ? (
+                    <Text
+                      fontSize="$2"
+                      color="$textSecondary"
+                      accessibilityRole="text"
+                    >
+                      {lifeEventToast}
+                    </Text>
+                  ) : null}
                   {baselineCards.map((c) => (
                     <BiomarkerCard
                       key={c.key}
@@ -691,6 +933,24 @@ export default function Inicio() {
             </YStack>
           </>
         )}
+        <LifeEventSheet
+          open={lifeEventSheetOpen}
+          onOpenChange={(open) => {
+            setLifeEventSheetOpen(open);
+            if (!open) {
+              setLifeEventError(null);
+              // R1-M1 — Android picker visibility is screen-scoped;
+              // closing the sheet without picking must dismiss the
+              // system modal so a later re-open starts clean.
+              setAndroidPickerVisible(false);
+            }
+          }}
+          saving={createLifeEventMutation.isPending}
+          onSubmit={(values) => {
+            createLifeEventMutation.mutate(values);
+          }}
+          renderDateField={renderLifeEventDateField}
+        />
         <UploadSourceSheet
           open={sheetOpen}
           onOpenChange={setSheetOpen}

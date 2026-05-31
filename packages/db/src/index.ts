@@ -4,4 +4,16 @@ export { alias, PgDialect } from "drizzle-orm/pg-core";
 // resolvers and middleware. Re-exported from the db package so consumers
 // don't need their own `drizzle-orm` dependency. Add to this list only
 // when a real consumer needs the operator.
-export { and, asc, desc, eq, gt, inArray, isNull, or } from "drizzle-orm";
+export {
+  and,
+  asc,
+  between,
+  desc,
+  eq,
+  gt,
+  gte,
+  inArray,
+  isNull,
+  lte,
+  or,
+} from "drizzle-orm";

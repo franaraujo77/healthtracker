@@ -1,8 +1,10 @@
 export * from "./account";
 export * from "./audit";
 export * from "./consent";
+export * from "./emotional_checkins";
 export * from "./extraction_review_queue";
 export * from "./letters";
+export * from "./life_events";
 export * from "./loinc_ref";
 export * from "./notification_preferences";
 export * from "./observations";
@@ -13,3 +15,4 @@ export * from "./sharing";
 export * from "./staleness_thresholds";
 export * from "./uploads";
 export * from "./users";
+export * from "./voice_memos";
