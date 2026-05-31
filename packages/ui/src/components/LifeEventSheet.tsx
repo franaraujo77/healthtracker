@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { Sheet, Text, XStack, YStack } from "tamagui";
 
@@ -16,6 +17,7 @@ import {
   LIFE_EVENT_PRIVACY_HINT_PT_BR,
   LIFE_EVENT_SAVE_PT_BR,
   LIFE_EVENT_SHEET_TITLE_PT_BR,
+  todayInSaoPauloIso,
 } from "@healthtracker/validators";
 
 import { Button } from "../button";
@@ -66,18 +68,43 @@ export interface LifeEventSheetProps {
   saving?: boolean;
   /** Optional initial `yyyy-mm-dd` date prefill (defaults to today). */
   initialEventDate?: string;
+  /**
+   * Story 7.5 — optional render-prop slot for the date field. When
+   * provided, the consumer owns the date input UI (e.g. the Expo
+   * `@react-native-community/datetimepicker`); when omitted, the
+   * sheet falls back to the Story 7.1 free-text `dd/mm/aaaa` / ISO
+   * input (web-safe — the native picker dep is mobile-only).
+   *
+   * The slot's `onChange` MUST emit ISO `yyyy-mm-dd` so the sheet's
+   * internal validation and the tRPC mutation wire format work
+   * uniformly across mobile and web. `maxDateIso` is the picker's
+   * upper bound (São Paulo today, recomputed every render — a
+   * long-lived sheet across midnight gets the new max naturally).
+   */
+  renderDateField?: (props: {
+    value: string;
+    onChange: (isoDate: string) => void;
+    maxDateIso: string;
+  }) => ReactNode;
 }
 
-function todayLocalIso(): string {
-  // Local-time `yyyy-mm-dd`. The server-side São Paulo refine
-  // (`todayInSaoPauloIso`) is the source of truth for the
-  // retroactive-only AC6 boundary — this local-clock default is
-  // just a usability prefill.
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+/**
+ * Default initial date for the sheet. Story 7.5 R1-AC1 fix: prefer
+ * `todayInSaoPauloIso()` so the prefill matches the server-side refine
+ * AND the picker `maxDateIso` (which also uses São Paulo today). The
+ * old `todayLocalIso` used the device clock, which could diverge for
+ * a patient traveling outside BRT.
+ *
+ * If `initialEventDate` is passed but is NOT a real ISO `yyyy-mm-dd`
+ * string, `parseLifeEventDateInput` normalises it (or falls back to
+ * São Paulo today). This is the R1-H1 contract guard — a consumer
+ * that accidentally passes `dd/mm/aaaa` no longer leaks the format
+ * into the picker.
+ */
+function resolveInitialEventDate(initial: string | undefined): string {
+  if (initial === undefined) return todayInSaoPauloIso();
+  const normalised = parseLifeEventDateInput(initial);
+  return normalised ?? todayInSaoPauloIso();
 }
 
 /**
@@ -134,10 +161,11 @@ export function LifeEventSheet({
   onSubmit,
   saving,
   initialEventDate,
+  renderDateField,
 }: LifeEventSheetProps) {
   const [description, setDescription] = useState("");
   const [eventDate, setEventDate] = useState(
-    initialEventDate ?? todayLocalIso(),
+    resolveInitialEventDate(initialEventDate),
   );
   const [category, setCategory] = useState<LifeEventCategory | null>(null);
   // R1-followup LOW #3 — focus management on sheet open. Tamagui
@@ -160,7 +188,7 @@ export function LifeEventSheet({
     if (!next) {
       setDescription("");
       setCategory(null);
-      setEventDate(initialEventDate ?? todayLocalIso());
+      setEventDate(resolveInitialEventDate(initialEventDate));
     }
     onOpenChange(next);
   }
@@ -226,16 +254,27 @@ export function LifeEventSheet({
           <Text fontFamily="$body" fontSize="$3" color="$textSecondary">
             {LIFE_EVENT_DATE_LABEL_PT_BR}
           </Text>
-          <Input
-            value={eventDate}
-            onChangeText={setEventDate}
-            placeholder="DD/MM/AAAA"
-            accessibilityLabel={LIFE_EVENT_DATE_LABEL_PT_BR}
-            accessibilityHint="Use o formato dia/mês/ano, por exemplo 31/12/2025."
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="numbers-and-punctuation"
-          />
+          {renderDateField !== undefined ? (
+            // Story 7.5 — consumer-owned date field (e.g. Expo native
+            // picker). Slot's `onChange` is guaranteed to emit ISO
+            // `yyyy-mm-dd` (AC6 contract).
+            renderDateField({
+              value: eventDate,
+              onChange: setEventDate,
+              maxDateIso: todayInSaoPauloIso(),
+            })
+          ) : (
+            <Input
+              value={eventDate}
+              onChangeText={setEventDate}
+              placeholder="DD/MM/AAAA"
+              accessibilityLabel={LIFE_EVENT_DATE_LABEL_PT_BR}
+              accessibilityHint="Use o formato dia/mês/ano, por exemplo 31/12/2025."
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="numbers-and-punctuation"
+            />
+          )}
         </YStack>
 
         <YStack gap="$2">

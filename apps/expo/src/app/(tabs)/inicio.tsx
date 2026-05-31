@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { AccessibilityInfo } from "react-native";
+import type { DateTimePickerEvent } from "@react-native-community/datetimepicker";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AccessibilityInfo, Platform, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, Stack, useLocalSearchParams } from "expo-router";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Text, YStack } from "tamagui";
 
@@ -27,6 +29,7 @@ import {
   FINGERPRINT_PARTIAL_EMPTY_CTA_PT_BR,
   FINGERPRINT_PARTIAL_EMPTY_HEADLINE_PT_BR,
   formatCachedUpdatedAtPtBr,
+  formatCollectedAtPtBr,
   HISTORICO_OFFLINE_QUEUED_HINT_PT_BR,
   INICIO_ADD_MEASUREMENT_CTA_PT_BR,
   INICIO_CTA_DRAW_ONE_PT_BR,
@@ -51,9 +54,45 @@ import { useNetInfoExternal } from "~/hooks/use-net-info";
 import { useOfflineQueue } from "~/hooks/use-offline-queue";
 import { trpc } from "~/utils/api";
 
+// Story 7.5 — the native date picker dependency lives in apps/expo,
+// NOT packages/ui. `@react-native-community/datetimepicker` exposes
+// native modules only; importing it from packages/ui (which is
+// bundled by Next.js for the web app) would break `next build`. The
+// `LifeEventSheet` `renderDateField` slot prop is the architectural
+// seam that keeps the shared component web-safe.
+
 // SafeAreaView is native and can't read Tamagui tokens — mirror
 // colorTokens.backgroundPrimary.light.
 const BACKGROUND_PRIMARY = "#F9F7F4";
+
+/**
+ * Story 7.5 — parse a `yyyy-mm-dd` wire-format string as a local
+ * calendar date. NEVER `new Date(iso)` directly because that parses
+ * as UTC midnight, which shifts to the previous calendar day in
+ * Brazilian timezones (Story 3.1 R3-P246 hazard). Pads to noon
+ * locally to defend against DST edges.
+ */
+function isoStringToLocalDate(iso: string): Date {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!match) return new Date();
+  const y = Number(match[1]);
+  const m = Number(match[2]) - 1;
+  const d = Number(match[3]);
+  return new Date(y, m, d, 12, 0, 0);
+}
+
+/**
+ * Story 7.5 — emit `yyyy-mm-dd` from a `Date` using LOCAL calendar
+ * parts. The picker hands the consumer a `Date` whose absolute
+ * timestamp is meaningless; the date the user picked is the local
+ * `getFullYear / getMonth / getDate` triplet.
+ */
+function localDateToIsoString(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 
 const PDF_ONLY_ACCEPT = [UPLOAD_ALLOWED_MIME_TYPES[0]] as const;
 const ELAPSED_TICK_MS = 1000;
@@ -91,6 +130,87 @@ export default function Inicio() {
   const [lifeEventSheetOpen, setLifeEventSheetOpen] = useState(false);
   const [lifeEventError, setLifeEventError] = useState<string | null>(null);
   const [lifeEventToast, setLifeEventToast] = useState<string | null>(null);
+  // Story 7.5 — Android picker visibility (iOS uses inline always-on).
+  const [androidPickerVisible, setAndroidPickerVisible] = useState(false);
+
+  // Story 7.5 — render-prop for the LifeEventSheet's date field. iOS
+  // shows the inline calendar always-visible; Android wraps a
+  // Pressable that opens the system calendar dialog. Both branches
+  // convert the picker's `Date` to ISO `yyyy-mm-dd` using local
+  // calendar parts (NEVER `.toISOString().slice(0,10)` — the UTC
+  // shift is the Story 7.1 R3-P246 / Epic 6 carry-forward hazard).
+  const renderLifeEventDateField = useCallback(
+    ({
+      value,
+      onChange,
+      maxDateIso,
+    }: {
+      value: string;
+      onChange: (isoDate: string) => void;
+      maxDateIso: string;
+    }) => {
+      // Interpret the wire-format ISO + max as local-calendar dates.
+      // The picker compares calendar dates, not absolute timestamps.
+      const valueDate = isoStringToLocalDate(value);
+      const maxDate = isoStringToLocalDate(maxDateIso);
+
+      function handleDateChange(
+        event: DateTimePickerEvent,
+        selected?: Date,
+      ): void {
+        // Android one-shot modal: dismiss either way.
+        if (Platform.OS === "android") {
+          setAndroidPickerVisible(false);
+        }
+        // 'dismissed' on Android means user cancelled; 'set' on both
+        // platforms means a selection was made.
+        if (event.type !== "set" || !selected) return;
+        onChange(localDateToIsoString(selected));
+      }
+
+      if (Platform.OS === "ios") {
+        return (
+          <DateTimePicker
+            mode="date"
+            display="inline"
+            value={valueDate}
+            maximumDate={maxDate}
+            onChange={handleDateChange}
+          />
+        );
+      }
+      // Android — Pressable that surfaces the formatted date and
+      // opens the system calendar modal on tap.
+      return (
+        <>
+          <Pressable
+            onPress={() => setAndroidPickerVisible(true)}
+            accessibilityRole="button"
+            accessibilityLabel={formatCollectedAtPtBr(value)}
+          >
+            <Text
+              fontFamily="$body"
+              fontSize="$4"
+              color="$textPrimary"
+              padding="$3"
+            >
+              {formatCollectedAtPtBr(value)}
+            </Text>
+          </Pressable>
+          {androidPickerVisible ? (
+            <DateTimePicker
+              mode="date"
+              display="default"
+              value={valueDate}
+              maximumDate={maxDate}
+              onChange={handleDateChange}
+            />
+          ) : null}
+        </>
+      );
+    },
+    [androidPickerVisible],
+  );
   const queryClient = useQueryClient();
   const [reducedMotion, setReducedMotion] = useState(false);
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -817,12 +937,19 @@ export default function Inicio() {
           open={lifeEventSheetOpen}
           onOpenChange={(open) => {
             setLifeEventSheetOpen(open);
-            if (!open) setLifeEventError(null);
+            if (!open) {
+              setLifeEventError(null);
+              // R1-M1 — Android picker visibility is screen-scoped;
+              // closing the sheet without picking must dismiss the
+              // system modal so a later re-open starts clean.
+              setAndroidPickerVisible(false);
+            }
           }}
           saving={createLifeEventMutation.isPending}
           onSubmit={(values) => {
             createLifeEventMutation.mutate(values);
           }}
+          renderDateField={renderLifeEventDateField}
         />
         <UploadSourceSheet
           open={sheetOpen}
