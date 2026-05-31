@@ -1,5 +1,5 @@
 # generated: 2026-05-15
-# last_updated: 2026-05-30 (Story 7.2 spec authored; ready-for-dev)
+# last_updated: 2026-05-31 (Epic 7 closed after PR #59 merge)
 # Epic 6 retrospective complete (2026-05-30; doc-driven background session,
 # no party-mode dialogue). Doc: epic-6-retro-2026-05-30.md. Headline lessons:
 # (1) Stacked-story PR pattern scaled to 5 stories on PR #57 because per-story
@@ -881,8 +881,8 @@ development_status:
   epic-6-retrospective: done
 
   # Epic 7: Patient Adds Personal Context to Their Record
-  epic-7: in-progress
-  7-1-patient-adds-a-life-event-to-their-fingerprint-timeline: review
+  epic-7: done
+  7-1-patient-adds-a-life-event-to-their-fingerprint-timeline: done
   7-2-patient-captures-emotional-check-in-before-results-appear-growth: done
   7-3-patient-captures-emotional-check-in-after-reviewing-results-growth: done
   7-4-patient-records-a-voice-memo-at-the-time-of-upload-vision: done
