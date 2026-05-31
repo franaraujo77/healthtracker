@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
+import * as Linking from "expo-linking";
 import { Stack, useRouter } from "expo-router";
 import { useMutation } from "@tanstack/react-query";
 import { Text, YStack } from "tamagui";
@@ -57,9 +58,18 @@ export default function Register() {
 
     setSubmitting(true);
     try {
+      // Story 1.1 follow-up — pass `emailRedirectTo` pointing at the
+      // Expo deep-link scheme (`healthtracker://auth/callback`) so
+      // Supabase's verification link round-trips back into the app.
+      // The `Linking.url` event handler in `_layout.tsx` exchanges
+      // the code for a session. Without this, Supabase falls back to
+      // the project's Site URL (a web URL) and the patient never
+      // gets a session in the mobile app. Mirrors the
+      // DoctorMagicLinkForm pattern (Story 6.1 AC2).
       const { data, error } = await supabase.auth.signUp({
         email: normalizeEmail(parsed.data.email),
         password: parsed.data.password,
+        options: { emailRedirectTo: Linking.createURL("/auth/callback") },
       });
       if (error) {
         setServerError(

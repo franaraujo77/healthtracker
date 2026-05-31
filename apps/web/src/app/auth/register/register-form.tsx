@@ -72,9 +72,21 @@ export function RegisterForm(props: RegisterFormProps = {}) {
       // schema's parsed output — so we apply the canonical normalization
       // here, at the Supabase boundary, to match the Expo client exactly.
       const supabase = createSupabaseClient();
+      // Story 1.1 follow-up — pass `emailRedirectTo` so Supabase's
+      // verification link round-trips through our `/auth/callback`
+      // route (which exchanges the code for a session ON OUR DOMAIN,
+      // then calls initializeProfile and routes into onboarding).
+      // Without this, Supabase falls back to the project's Site URL,
+      // which lands the patient on `/` after verify with NO session
+      // cookie on our domain — root redirects them back to
+      // `/auth/register` and they're stuck. Mirrors the
+      // `DoctorMagicLinkForm` pattern (Story 6.1 AC2).
+      const origin =
+        typeof window !== "undefined" ? window.location.origin : "";
       const { data, error } = await supabase.auth.signUp({
         email: normalizeEmail(value.email),
         password: value.password,
+        options: { emailRedirectTo: `${origin}/auth/callback` },
       });
 
       if (error) {
