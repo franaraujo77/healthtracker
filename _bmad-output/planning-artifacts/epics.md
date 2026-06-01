@@ -304,6 +304,12 @@ A patient can add life events to their Fingerprint timeline, capture their emoti
 An operator can view a queue of low-confidence extraction results (anonymised), confirm or reject individual field values, and see results published to the patient's record — so the confidence gate operates at scale.
 **FRs covered:** FR38–FR41
 
+### Epic 9: Real AWS Textract Extraction Backend
+
+Replace the stubbed `awsTextractAdapter` with a production AWS Textract integration so uploaded lab documents are actually OCR'd into biomarker fields in production — closing the follow-up deferred in Story 2.3, which currently leaves every production upload throwing `NOT_IMPLEMENTED`, exhausting pg-boss retries, and dead-lettering to `failed` with zero observations written.
+**FRs covered:** FR1–FR3 (production fulfilment of the extraction pipeline)
+**Requirements covered:** NFR-S8 (data residency — sa-east-1), NFR-S7, LGPD Art. 33 (DPA-gated processing)
+
 ---
 
 ## Stories
@@ -1851,6 +1857,112 @@ An operator can view a queue of low-confidence extraction results (anonymised), 
 **Then** index DDL uses `CONCURRENTLY` per the CLAUDE.md ops note and the rollout plan is documented in the PR.
 
 **Requirements:** AR6, AR10, AR14, NFR-S7
+
+---
+
+### Epic 9: Real AWS Textract Extraction Backend
+
+Replace the stubbed `awsTextractAdapter` (`services/extraction/src/textract/aws-adapter.ts` — currently `Promise.reject(NOT_IMPLEMENTED)`) with a production AWS Textract integration. Until this epic ships, every production upload calls an adapter that throws on first dispatch, retries to the queue limit (`extraction.document` `retryLimit: 3`), logs `"resuming after prior worker crash"` on each retry, then routes to `extraction.dead_letter` → `markUploadFailed` → the upload reaches `failed` with zero observations written. This closes the follow-up deferred in Story 2.3 (architecture.md L84: the CI mock stays per NFR-S8; live integration is a runtime-only concern).
+
+The fixture-driven `mockTextractAdapterFromFixtures` remains the CI/dev adapter — this epic does **not** change adapter selection in CI, only the production `EXTRACTION_ADAPTER=aws` branch. No net-new database schema is introduced (Textract output flows through the existing `RawExtractedField` → `dispatchExtractedFields` → `observations` / review-queue path), so there is intentionally **no** "Author incremental Supabase migration" story in this epic.
+
+---
+
+#### Story 9.1: Implement the real AWS Textract adapter
+
+**As a** platform engineer,
+**I want** `awsTextractAdapter.extract()` to call AWS Textract `AnalyzeDocument` and map the response into `RawExtractedField[]`,
+**So that** uploaded lab PDFs and images produce biomarker fields in production instead of throwing `NOT_IMPLEMENTED`.
+
+**Acceptance Criteria:**
+
+**Given** `EXTRACTION_ADAPTER=aws` and a valid lab-document byte payload,
+**When** `extract({ bytes, mimeType, storagePath })` runs,
+**Then** it calls Textract `AnalyzeDocument` with `FeatureTypes: ['FORMS', 'TABLES']` and returns `RawExtractedField[]` with `biomarkerName`, `valueText`, `unitText`, and `confidence` populated — matching the contract `dispatchExtractedFields` already consumes from the mock adapter.
+
+**Given** a Textract response containing `KEY_VALUE_SET` and `TABLE` blocks,
+**When** the response is mapped,
+**Then** each field's `confidence` is the Textract block confidence normalised to the `0–1` range the confidence gate expects, and Brazilian decimal separators (`14,2`) are preserved as-is in `valueText` (normalisation stays the dispatch layer's job).
+
+**Given** the `@aws-sdk/client-textract` dependency is added to `services/extraction`,
+**When** the worker builds and boots under the `tsx` runtime,
+**Then** there is no ESM `.js`→`.ts` resolution regression (the deploy constraint fixed in #70/#71) and `pnpm typecheck` passes.
+
+**Given** a recorded Textract `AnalyzeDocument` JSON fixture (no live AWS call in CI per NFR-S8),
+**When** the mapping unit tests run,
+**Then** the `RawExtractedField[]` output is asserted field-by-field, including a multi-table report and a low-confidence field that must route to the review queue.
+
+**Requirements:** FR1, FR2, FR3, NFR-S8
+
+---
+
+#### Story 9.2: Production credentials, region pinning, and DPA gating
+
+**As a** platform engineer,
+**I want** the AWS adapter gated on `sa-east-1` + DPA-signed credentials with fail-loud boot behaviour,
+**So that** patient documents are processed only in-region under a signed data-processing agreement (LGPD Art. 33), and a misconfigured deploy fails at boot rather than silently dead-lettering uploads.
+
+**Acceptance Criteria:**
+
+**Given** `EXTRACTION_ADAPTER=aws`,
+**When** the worker boots without resolvable AWS credentials (`AWS_REGION` / `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` or an equivalent task role),
+**Then** it throws a clear deploy-config error at boot — mirroring the `SUPABASE_SERVICE_ROLE_KEY` NFR-S6 boot gate — not at first job dispatch.
+
+**Given** the adapter constructs the Textract client,
+**When** it is configured,
+**Then** the region is pinned to `sa-east-1` (NFR-S8 data residency) and any other region value fails the boot gate.
+
+**Given** LGPD Art. 33,
+**When** AWS Textract is enabled in production,
+**Then** the DPA prerequisite and every required env var are documented in `docs/env-vars.md`, and the credentials path references the signed-DPA AWS account.
+
+**Requirements:** NFR-S8, NFR-S6, NFR-S7, LGPD Art. 33
+
+---
+
+#### Story 9.3: Harden the consumer's `extract()` failure path
+
+**As a** platform engineer,
+**I want** `textractAdapter.extract()` failures wrapped so a throw dead-letters the upload with a patient-visible reason instead of looping,
+**So that** an adapter or Textract outage produces a clean `failed` state with a notification, not the noisy retry-resume loop that surfaced this epic.
+
+**Acceptance Criteria:**
+
+**Given** `extract()` throws (Textract 4xx/5xx, mapping error, or a permanent adapter fault),
+**When** `handleDocumentJob` runs (`services/extraction/src/consumers/document.ts` — the currently-unguarded call at the `deps.textractAdapter.extract(...)` line),
+**Then** the throw is caught, the upload is dead-lettered via `applyDeadLetter` with a reason (e.g. `extraction_unavailable`), and `emitNotificationEvent` fires the `failed` push — all inside one `sql.begin` transaction (mirroring the storage-download catch already present in the same file).
+
+**Given** the new catch block,
+**When** a programmer error (`TypeError` / `ReferenceError` / `SyntaxError`) is thrown,
+**Then** it is re-thrown unhandled (narrow catch per the CLAUDE.md code-review discipline) so pg-boss surfaces the regression rather than swallowing it.
+
+**Given** a transient Textract error (throttling / 5xx),
+**When** it is distinguishable from a permanent fault by the SDK error shape,
+**Then** the existing pg-boss retry policy is allowed to run before dead-lettering, and the transient-vs-permanent decision is documented in the consumer.
+
+**Requirements:** FR4, NFR-S7, AR14
+
+---
+
+#### Story 9.4: Re-enqueue uploads stuck in `failed` from the stub era
+
+**As an** operator,
+**I want** a one-shot re-enqueue of uploads that reached `failed` solely because the stub adapter was active,
+**So that** patients who uploaded before this epic shipped don't have to manually re-upload.
+
+> Optional / conditional — schedule only if the count of stub-era `failed` uploads at launch is non-trivial. A single test upload can simply be re-uploaded.
+
+**Acceptance Criteria:**
+
+**Given** uploads in `failed` whose dead-letter metadata `reason` indicates a stub-era fault (`NOT_IMPLEMENTED` / `no_fixture` / `no_readable_text` produced before `EXTRACTION_ADAPTER=aws` went live),
+**When** the re-enqueue script runs,
+**Then** each matching upload is reset to `queued` and a fresh `extraction.document` job is enqueued via the existing outbox pattern (no orphan job, no double-enqueue).
+
+**Given** an upload that failed for a genuine post-launch reason (e.g. a real `no_readable_text` after Textract actually ran),
+**When** the script runs,
+**Then** it is **not** re-enqueued — the filter targets only stub-era failure signatures.
+
+**Requirements:** FR1, AR14
 
 ---
 
