@@ -7,8 +7,8 @@
     "node": "^22.21.0"
   },
   "scripts": {
-    "dev": "node --experimental-strip-types --watch src/index.ts",
-    "start": "node --experimental-strip-types src/index.ts",
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
     "test:unit": "vitest run"
@@ -22,6 +22,7 @@
     "pg-boss": "12.18.2",
     "postgres": "catalog:",
     "react": "catalog:react19",
+    "tsx": "^4.22.4",
     "zod": "catalog:"
   },
   "devDependencies": {

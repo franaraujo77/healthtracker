@@ -7,8 +7,8 @@
     "node": "^22.21.0"
   },
   "scripts": {
-    "dev": "node --experimental-strip-types --watch src/index.ts",
-    "start": "node --experimental-strip-types src/index.ts",
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
     "test:unit": "vitest run"
@@ -17,7 +17,8 @@
     "@healthtracker/types": "workspace:*",
     "@supabase/supabase-js": "catalog:",
     "pg-boss": "12.18.2",
-    "postgres": "catalog:"
+    "postgres": "catalog:",
+    "tsx": "^4.22.4"
   },
   "devDependencies": {
     "@healthtracker/api": "workspace:*",
