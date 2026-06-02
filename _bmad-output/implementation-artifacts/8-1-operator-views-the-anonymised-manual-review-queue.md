@@ -315,3 +315,26 @@ claude-opus-4-8 (BMad bmad-create-story + bmad-dev-story workflows)
 - `.env.example` (add `OPERATOR_USER_IDS`)
 - `turbo.json` (declare `OPERATOR_USER_IDS` in globalEnv)
 - `CLAUDE.md` (Operator role (Epic 8) stanza)
+
+## Senior Developer Review (AI)
+
+**Reviewed:** 2026-06-02 · **Outcome:** Changes Requested → Addressed · **Method:** 3-layer adversarial (Blind Hunter, Edge Case Hunter, Acceptance Auditor), all run at session model capability.
+
+The Blind Hunter and Edge Case Hunter **independently converged** on one real correctness bug (HIGH); the Acceptance Auditor confirmed all 11 ACs are substantively implemented. Three findings patched, four dismissed with rationale.
+
+### Action Items
+
+- [x] **HIGH — `listOperatorReviewQueue` GROUP BY split one upload into multiple list rows.** The query grouped by `(upload_id, patient_id, lab_name)`, but `lab_name` is denormalised per-field and a single upload's `loinc_unresolved` fields can carry differing/NULL lab names (the multi-lab-PDF case the worker tallies). Result: duplicate list rows per `uploadId` with partial `flaggedFieldCount` + duplicate React `key`s — violates AC1's "one item per upload." **Fix:** group by `(upload_id, patient_id)` only; collapse `lab_name`/`collected_at_text` via `min()`. (`packages/api/src/operator-review.ts`)
+- [x] **MEDIUM — detail page returned a 500 on a non-UUID `uploadId`.** `/operador/fila/abc` fails `z.uuid()` → `BAD_REQUEST`, which the `FORBIDDEN`-only catch let bubble to the Next.js error boundary. **Fix:** catch `BAD_REQUEST` and render the empty/not-found state. (`apps/web/src/app/operador/fila/[uploadId]/page.tsx`)
+- [x] **LOW — `loinc_code` selected in the detail projection but never rendered.** Dropped from `OperatorQueueField` + both queries (dead boundary data; null by definition for `loinc_unresolved` rows). (`packages/api/src/operator-review.ts`)
+
+### Dismissed (with rationale)
+
+- **`MIN(collected_at_text)` is a lexicographic, not chronological, "earliest" over free-form text.** Cosmetic label only (ordering uses `MIN(created_at)`); one upload's fields share the same draw date in practice; free-form unparsed text has no well-defined chronological min without parsing. Out of scope.
+- **`formatOperatorCollectedAt` is bespoke rather than reusing `formatCollectedAtPtBr` (Task 5.3).** Justified — the shared helper does not handle the free-form/NULL `collected_at_text` shape; the bespoke formatter passes ISO through pt-BR, free-form as-is, NULL → "—".
+- **Extra `OPERATOR_QUEUE_SUBHEADING_PT_BR` copy not in Task 5.1's list.** Correctly placed in validators (greppable-copy satisfied); a harmless additive subheading.
+- **`DOCTOR_WITH_TOKEN` RLS identity binds a random share-token id, not the owning patient's.** Assertion (0 rows) is valid and the regression lock holds — there is no doctor policy on the table at all, so a patient-bound token would not change the outcome. Every identity in the docstring has a real `it()` + real assertion (CLAUDE.md RLS-completeness satisfied).
+
+### Post-patch gates
+
+`pnpm -w typecheck` 17/17 · `pnpm -w lint` 15/15 · `pnpm -w format` clean · api unit tests 9/9 (operator helpers + validators copy). DB-live items (db:push, psql apply, RLS integration run, manual run-through) remain deferred to dev/CI per the Epic 6/7 carry-forward.

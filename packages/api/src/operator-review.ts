@@ -41,7 +41,6 @@ export interface OperatorQueueField {
   /** Original textual value from the source — for these rows this IS the raw OCR output. */
   valueText: string;
   unitText: string | null;
-  loincCode: string | null;
   collectedAtText: string | null;
   labName: string | null;
   confidenceScore: number;
@@ -67,11 +66,18 @@ function coerceConfidence(value: string | null | undefined): number {
 export async function listOperatorReviewQueue(
   database: AuditDb,
 ): Promise<OperatorQueueListItem[]> {
+  // Group by (upload_id, patient_id) ONLY — NOT lab_name. `lab_name` is
+  // denormalised per-field, and a single upload's fields can legitimately
+  // carry different (or NULL) lab names (a multi-lab PDF; the worker even
+  // tallies distinct lab names). Grouping by it would split one upload
+  // into several list rows with partial counts + duplicate React keys,
+  // breaking AC1's "one item per upload". `lab_name`/`collected_at_text`
+  // are collapsed via `min()` to one deterministic value per upload.
   const rows = await database
     .select({
       uploadId: ExtractionReviewQueue.uploadId,
       patientId: ExtractionReviewQueue.patientId,
-      labName: ExtractionReviewQueue.labName,
+      labName: sql<string | null>`min(${ExtractionReviewQueue.labName})`,
       collectedAtText: sql<
         string | null
       >`min(${ExtractionReviewQueue.collectedAtText})`,
@@ -79,11 +85,7 @@ export async function listOperatorReviewQueue(
     })
     .from(ExtractionReviewQueue)
     .where(eq(ExtractionReviewQueue.reason, "loinc_unresolved"))
-    .groupBy(
-      ExtractionReviewQueue.uploadId,
-      ExtractionReviewQueue.patientId,
-      ExtractionReviewQueue.labName,
-    )
+    .groupBy(ExtractionReviewQueue.uploadId, ExtractionReviewQueue.patientId)
     .orderBy(asc(sql`min(${ExtractionReviewQueue.createdAt})`));
 
   return rows.map((row) => ({
@@ -109,7 +111,6 @@ export async function getOperatorQueueItem(
       biomarkerName: ExtractionReviewQueue.biomarkerName,
       valueText: ExtractionReviewQueue.valueText,
       unitText: ExtractionReviewQueue.unitText,
-      loincCode: ExtractionReviewQueue.loincCode,
       collectedAtText: ExtractionReviewQueue.collectedAtText,
       labName: ExtractionReviewQueue.labName,
       confidenceScore: ExtractionReviewQueue.confidenceScore,
@@ -128,7 +129,6 @@ export async function getOperatorQueueItem(
     biomarkerName: row.biomarkerName,
     valueText: row.valueText,
     unitText: row.unitText,
-    loincCode: row.loincCode,
     collectedAtText: row.collectedAtText,
     labName: row.labName,
     confidenceScore: coerceConfidence(row.confidenceScore),

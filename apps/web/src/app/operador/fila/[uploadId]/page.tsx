@@ -71,7 +71,14 @@ export default async function OperadorFilaDetailPage({
     if (err instanceof TRPCError && err.code === "FORBIDDEN") {
       return <AccessDeniedCard />;
     }
-    throw err;
+    // A hand-typed non-UUID segment (e.g. /operador/fila/abc) fails the
+    // `z.uuid()` input schema → BAD_REQUEST. Render the empty/not-found
+    // state rather than letting it bubble to a 500 error page.
+    if (err instanceof TRPCError && err.code === "BAD_REQUEST") {
+      fields = [];
+    } else {
+      throw err;
+    }
   }
 
   return (
