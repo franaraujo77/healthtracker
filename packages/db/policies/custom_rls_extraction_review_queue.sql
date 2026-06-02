@@ -18,6 +18,13 @@
 --     `app.current_user_role = 'operator'` GUC bound by
 --     `operatorProcedure`. NOTHING else — no UPDATE/INSERT/DELETE
 --     (the confirm/reject write policy lands in Story 8.2).
+--   - Story 8.2 (confirm/reject) adds NO operator UPDATE/INSERT policy
+--     here or on `observations`/`uploads`. The operator WRITE path
+--     escalates to `SET LOCAL ROLE postgres` inside the
+--     `operatorProcedure` transaction (see `operator-resolve.ts`),
+--     paired with `SET LOCAL ROLE NONE` in a `finally`. The
+--     `OPERATOR_USER_IDS` allowlist gate is the trust boundary; RLS
+--     stays read-only for the operator role.
 --   - The operator NEVER gets a policy on `users` or `uploads`; the
 --     review queue is anonymised because the operator can only read
 --     this table, and this table carries no name/email/contact data

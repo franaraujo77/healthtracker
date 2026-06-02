@@ -47,7 +47,11 @@ export interface ObservationView {
   referenceRangeHigh: number | null;
   labName: string | null;
   collectedAt: string; // ISO yyyy-mm-dd
-  source: "extracted" | "manual_bia" | "patient_corrected";
+  source:
+    | "extracted"
+    | "manual_bia"
+    | "patient_corrected"
+    | "operator_confirmed";
   confidenceScore: number;
 }
 

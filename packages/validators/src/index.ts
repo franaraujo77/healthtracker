@@ -235,8 +235,15 @@ export const NOTIFICATION_KIND_TO_PREFERENCE = {
   // Story 4.1 — the LLM letter consumer fires this kind on
   // `letters.status='complete'` transition; gated on `lettersReady`.
   letter_ready: "lettersReady",
+  // Story 8.2 — operator finalized an upload with rejected fields; the
+  // patient must enter those manually. Action-needed → `reviewRequired`.
+  manual_entry_required: "reviewRequired",
 } as const satisfies Record<
-  "complete" | "pending_review" | "failed" | "letter_ready",
+  | "complete"
+  | "pending_review"
+  | "failed"
+  | "letter_ready"
+  | "manual_entry_required",
   keyof NotificationPreferencesInput
 >;
 export type NotificationKindForPreferences =

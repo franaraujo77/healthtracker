@@ -23,6 +23,68 @@ export type GetOperatorQueueItemInput = z.infer<
   typeof getOperatorQueueItemInputSchema
 >;
 
+// --- Story 8.2 — confirm/reject ---
+
+/** Closed set of operator rejection reasons (DB `rejection_reason_enum`). */
+export const OPERATOR_REJECTION_REASONS = [
+  "decimal_separator",
+  "illegible",
+  "wrong_unit",
+] as const;
+
+export type OperatorRejectionReason =
+  (typeof OPERATOR_REJECTION_REASONS)[number];
+
+/** pt-BR labels for the reject reason picker (source of truth). */
+export const OPERATOR_REJECTION_REASON_LABELS_PT_BR: Record<
+  OperatorRejectionReason,
+  string
+> = {
+  decimal_separator: "Separador decimal incorreto",
+  illegible: "Valor ilegível",
+  wrong_unit: "Unidade incorreta",
+};
+
+/** `operator.confirmField` input. */
+export const confirmReviewFieldAsOperatorInputSchema = z
+  .object({ reviewQueueId: z.uuid() })
+  .strict();
+
+/** `operator.rejectField` input. */
+export const rejectReviewFieldAsOperatorInputSchema = z
+  .object({
+    reviewQueueId: z.uuid(),
+    rejectionReason: z.enum(OPERATOR_REJECTION_REASONS),
+  })
+  .strict();
+
+export type ConfirmReviewFieldAsOperatorInput = z.infer<
+  typeof confirmReviewFieldAsOperatorInputSchema
+>;
+export type RejectReviewFieldAsOperatorInput = z.infer<
+  typeof rejectReviewFieldAsOperatorInputSchema
+>;
+
+/**
+ * Story 8.2 — operator action audit kinds. Deliberately NOT added to
+ * `ACCESS_LOG_EVENT_KINDS` (`sharing.ts`): operator confirm/reject is
+ * operational telemetry, not a patient-access event. A regression test
+ * locks each absence.
+ */
+export const EXTRACTION_FIELD_OPERATOR_CONFIRMED =
+  "extraction_field.operator_confirmed" as const;
+export const EXTRACTION_FIELD_OPERATOR_REJECTED =
+  "extraction_field.operator_rejected" as const;
+
+// --- Story 8.2 — confirm/reject UI copy ---
+export const OPERATOR_CONFIRM_CTA_PT_BR = "Confirmar";
+export const OPERATOR_REJECT_CTA_PT_BR = "Rejeitar";
+export const OPERATOR_REJECT_REASON_PROMPT_PT_BR = "Motivo da rejeição";
+export const OPERATOR_REJECT_CONFIRM_CTA_PT_BR = "Confirmar rejeição";
+export const OPERATOR_REJECT_CANCEL_CTA_PT_BR = "Cancelar";
+export const OPERATOR_ACTION_ERROR_PT_BR =
+  "Não foi possível concluir a ação. Tente novamente.";
+
 // --- List view copy ---
 export const OPERATOR_QUEUE_HEADING_PT_BR = "Fila de revisão manual";
 export const OPERATOR_QUEUE_SUBHEADING_PT_BR =

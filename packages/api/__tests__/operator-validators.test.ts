@@ -1,13 +1,18 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ACCESS_LOG_EVENT_KINDS,
+  EXTRACTION_FIELD_OPERATOR_CONFIRMED,
+  EXTRACTION_FIELD_OPERATOR_REJECTED,
   formatConfidencePct,
   formatOperatorCollectedAt,
   getOperatorQueueItemInputSchema,
   OPERATOR_QUEUE_EMPTY_PT_BR,
+  OPERATOR_REJECTION_REASON_LABELS_PT_BR,
   OPERATOR_REVIEW_QUEUE_ROUTE,
   operatorQueueFlaggedFieldsLabelPtBr,
   operatorQueueItemRoute,
+  rejectReviewFieldAsOperatorInputSchema,
 } from "@healthtracker/validators";
 
 /**
@@ -61,6 +66,44 @@ describe("operator validators — Story 8.1", () => {
     expect(
       getOperatorQueueItemInputSchema.safeParse({
         uploadId: "123e4567-e89b-42d3-a456-426614174000",
+      }).success,
+    ).toBe(true);
+  });
+
+  // --- Story 8.2 ---
+
+  it("excludes operator action audit kinds from the patient Access Log (AC11)", () => {
+    expect(ACCESS_LOG_EVENT_KINDS).not.toContain(
+      EXTRACTION_FIELD_OPERATOR_CONFIRMED,
+    );
+    expect(ACCESS_LOG_EVENT_KINDS).not.toContain(
+      EXTRACTION_FIELD_OPERATOR_REJECTED,
+    );
+  });
+
+  it("maps the three rejection reasons to pt-BR labels", () => {
+    expect(OPERATOR_REJECTION_REASON_LABELS_PT_BR.decimal_separator).toBe(
+      "Separador decimal incorreto",
+    );
+    expect(OPERATOR_REJECTION_REASON_LABELS_PT_BR.illegible).toBe(
+      "Valor ilegível",
+    );
+    expect(OPERATOR_REJECTION_REASON_LABELS_PT_BR.wrong_unit).toBe(
+      "Unidade incorreta",
+    );
+  });
+
+  it("rejects an unknown rejection reason (.strict + enum)", () => {
+    expect(
+      rejectReviewFieldAsOperatorInputSchema.safeParse({
+        reviewQueueId: "123e4567-e89b-42d3-a456-426614174000",
+        rejectionReason: "made_up",
+      }).success,
+    ).toBe(false);
+    expect(
+      rejectReviewFieldAsOperatorInputSchema.safeParse({
+        reviewQueueId: "123e4567-e89b-42d3-a456-426614174000",
+        rejectionReason: "illegible",
       }).success,
     ).toBe(true);
   });

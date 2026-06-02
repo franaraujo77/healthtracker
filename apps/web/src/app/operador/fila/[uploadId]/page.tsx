@@ -19,6 +19,8 @@ import {
   OPERATOR_REVIEW_QUEUE_ROUTE,
 } from "@healthtracker/validators";
 
+import { OperatorFieldActions } from "./OperatorFieldActions";
+
 /**
  * Story 8.1 AC2/AC11 — `/operador/fila/[uploadId]`, the operator
  * detail view: every `loinc_unresolved` flagged field for one upload,
@@ -121,6 +123,7 @@ export default async function OperadorFilaDetailPage({
                 {OPERATOR_DETAIL_CONFIDENCE_LABEL_PT_BR}:{" "}
                 {formatConfidencePct(field.confidenceScore)}
               </div>
+              <OperatorFieldActions reviewQueueId={field.id} />
             </li>
           ))}
         </ul>

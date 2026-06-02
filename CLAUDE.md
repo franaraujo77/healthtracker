@@ -179,7 +179,15 @@ The **operator** is the third RLS principal after patient and doctor — interna
 - **Story 8.1 is read-only — no audit, no mutation.** FR41 (audit of operator confirm/reject) and the operator WRITE policy land in Story 8.2. Operator-side events are NOT in `ACCESS_LOG_EVENT_KINDS`.
 - The operator dashboard is **web-only** (`/operador/*`, the first such subtree, sibling to `/profissional/*`): RSC + server-caller, pt-BR copy in `packages/validators/src/operator.ts`, `FORBIDDEN` → "Acesso restrito a operadores" card.
 
-**Epic 8.3 migration checklist (deferred SQL):** net-new column `extraction_review_queue.lab_name`; net-new RLS policy `extraction_review_queue_select_operator`. No table/enum for the role (env allowlist).
+### Story 8.2 — operator confirm/reject (the WRITE surface)
+
+- **Operator writes escalate; they do NOT get write RLS policies.** Confirm/reject must INSERT `observations`, UPDATE `uploads`, and count BOTH review reasons — none of which the operator RLS principal can do. So `operatorRouter.confirmField`/`.rejectField` escalate to `SET LOCAL ROLE postgres` inside the `operatorProcedure` transaction, paired with `SET LOCAL ROLE NONE` in a `finally` (the `activateProfessionalAccount` precedent; "privilege escalation must reset in same tx scope"). The `OPERATOR_USER_IDS` allowlist gate is the trust boundary. The reset is regression-tested on the throw path (`operator-escalation.test.ts`). The escalation also lets finalization count the patient's `low_confidence` rows, so an upload only completes when BOTH parties are done.
+- **Confirm publishes with `loinc_code = NULL`** (`source = 'operator_confirmed'`, confidence 1.0) — the operator blesses the value, does not map a LOINC. These observations land in the raw record but don't join LOINC-keyed trends (accepted). Reject sets `extraction_review_queue.rejection_reason` (enum `decimal_separator`/`illegible`/`wrong_unit`) and writes NO observation.
+- **New `manual_entry_required` notification kind** fires at finalization when ≥1 field was rejected (else `complete`). Added to BOTH `NotificationKind` types (api `notifications.ts` + worker `consumers/notifications.ts` COPY/preference switch) and the validators `NOTIFICATION_KIND_TO_PREFERENCE` (→ `reviewRequired`).
+- **Audit kinds `extraction_field.operator_confirmed`/`_rejected`** use `actorType: 'operator'` (free-text column, no enum change), `actorId` = operator uid (anonymised — a UUID, not a name). Deliberately NOT in `ACCESS_LOG_EVENT_KINDS` (regression-locked).
+- Letters are NOT enqueued on operator-finalized uploads (the operator lacks the patient's consent/session context) — documented limitation.
+
+**Epic 8.3 migration checklist (deferred SQL):** net-new column `extraction_review_queue.lab_name` (8.1); net-new RLS policy `extraction_review_queue_select_operator` (8.1); enum `rejection_reason_enum`, columns `extraction_review_queue.rejection_reason` + `.resolved_by_operator_id`, `observation_source_enum += 'operator_confirmed'` (8.2). No table/enum for the role (env allowlist).
 
 ## FK cascade rule (LGPD account deletion)
 

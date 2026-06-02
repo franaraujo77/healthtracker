@@ -23,6 +23,16 @@ export const reviewReasonEnum = pgEnum("review_reason_enum", [
   "loinc_unresolved",
 ]);
 
+/**
+ * Story 8.2 — closed set of operator rejection reasons. pt-BR labels live
+ * in `packages/validators/src/operator.ts` (greppable-copy discipline).
+ */
+export const rejectionReasonEnum = pgEnum("rejection_reason_enum", [
+  "decimal_separator",
+  "illegible",
+  "wrong_unit",
+]);
+
 export const ExtractionReviewQueue = pgTable(
   "extraction_review_queue",
   (t) => ({
@@ -63,6 +73,21 @@ export const ExtractionReviewQueue = pgTable(
     resolvedAt: t.timestamp({ mode: "date", withTimezone: true }),
     /** Story 2.4 — patient who resolved the row (null if operator-resolved or unresolved). */
     resolvedByPatientId: t.uuid(),
+    /**
+     * Story 8.2 — operator who resolved the row (confirm OR reject); null
+     * if patient-resolved or unresolved. Bare uuid, NO FK (mirrors
+     * `resolvedByPatientId`): the operator's account deletion must not
+     * cascade-delete the patient's review row — a bare uuid sidesteps the
+     * FK-cascade rule entirely.
+     */
+    resolvedByOperatorId: t.uuid(),
+    /**
+     * Story 8.2 — set when an OPERATOR rejects the field. `rejection_reason
+     * IS NOT NULL` is the discriminator for a rejected row; a resolved row
+     * with `rejection_reason IS NULL` + `resolved_by_operator_id IS NOT
+     * NULL` is operator-confirmed (published to `observations`).
+     */
+    rejectionReason: rejectionReasonEnum("rejection_reason"),
     /**
      * Story 2.4 — when the patient EDITED the extracted value, the
      * original textual value + the patient's numeric override are

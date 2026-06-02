@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from "@healthtracker/db";
+import { and, asc, eq, isNull, sql } from "@healthtracker/db";
 import { ExtractionReviewQueue } from "@healthtracker/db/schema";
 
 import type { AuditDb } from "./audit";
@@ -84,7 +84,14 @@ export async function listOperatorReviewQueue(
       flaggedFieldCount: sql<number>`count(*)::int`,
     })
     .from(ExtractionReviewQueue)
-    .where(eq(ExtractionReviewQueue.reason, "loinc_unresolved"))
+    // Story 8.2 — exclude rows an operator has already resolved
+    // (confirmed/rejected) so they leave the queue view.
+    .where(
+      and(
+        eq(ExtractionReviewQueue.reason, "loinc_unresolved"),
+        isNull(ExtractionReviewQueue.resolvedAt),
+      ),
+    )
     .groupBy(ExtractionReviewQueue.uploadId, ExtractionReviewQueue.patientId)
     .orderBy(asc(sql`min(${ExtractionReviewQueue.createdAt})`));
 
@@ -120,6 +127,8 @@ export async function getOperatorQueueItem(
       and(
         eq(ExtractionReviewQueue.uploadId, uploadId),
         eq(ExtractionReviewQueue.reason, "loinc_unresolved"),
+        // Story 8.2 — drop already-resolved fields from the detail view.
+        isNull(ExtractionReviewQueue.resolvedAt),
       ),
     )
     .orderBy(asc(ExtractionReviewQueue.createdAt));
