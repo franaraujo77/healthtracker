@@ -156,9 +156,20 @@ async function finalizeUploadIfResolved(
     to: "complete",
     metadata: { completedBy: "operator_review_finalized" },
   });
-  // Either we transitioned, or a concurrent finalizer already did.
-  const isComplete =
-    transition.updated || transition.currentStatus === "complete";
+  // On an optimistic-lock miss `applyUploadTransition` returns
+  // `currentStatus: null` (not 'complete'), so re-read the status to tell
+  // "a concurrent finalizer already completed it" apart from "still
+  // blocked" — mirrors the patient path (`uploads-review.ts`). Without
+  // this re-read the losing finalizer would skip the notification.
+  let isComplete = transition.updated;
+  if (!isComplete) {
+    const [post] = await database
+      .select({ status: Uploads.status })
+      .from(Uploads)
+      .where(eq(Uploads.id, uploadId))
+      .limit(1);
+    isComplete = post?.status === "complete";
+  }
   if (!isComplete) return "pending_review";
 
   // Choose the notification kind: any rejected field on this upload →
@@ -222,6 +233,27 @@ export async function confirmReviewFieldAsOperator(
   }
   const collectedAt = await resolveCollectedAt(database, row);
 
+  // CLAIM the row FIRST via the optimistic `resolved_at IS NULL` guard.
+  // This is the atomic gate against a double-confirm race: a second
+  // concurrent confirm matches 0 rows here and aborts BEFORE publishing.
+  // (Publishing first would duplicate — a null-LOINC observation never
+  // dedups on the `(patient_id, upload_id, loinc_code, collected_at)`
+  // partial index, NULL ≠ NULL.) The whole resolver runs in one tx, so
+  // claim + publish + audit + finalize commit or roll back together.
+  const claimed = await database
+    .update(ExtractionReviewQueue)
+    .set({ resolvedAt: new Date(), resolvedByOperatorId: operatorId })
+    .where(
+      and(
+        eq(ExtractionReviewQueue.id, row.id),
+        isNull(ExtractionReviewQueue.resolvedAt),
+      ),
+    )
+    .returning({ id: ExtractionReviewQueue.id });
+  if (claimed.length === 0) {
+    throw new TRPCError({ code: "CONFLICT", message: "ALREADY_RESOLVED" });
+  }
+
   const inserted = await writeObservation(database, {
     patientId: row.patientId,
     uploadId: row.uploadId,
@@ -244,16 +276,6 @@ export async function confirmReviewFieldAsOperator(
       message: "OBSERVATION_INSERT_FAILED",
     });
   }
-
-  await database
-    .update(ExtractionReviewQueue)
-    .set({ resolvedAt: new Date(), resolvedByOperatorId: operatorId })
-    .where(
-      and(
-        eq(ExtractionReviewQueue.id, row.id),
-        isNull(ExtractionReviewQueue.resolvedAt),
-      ),
-    );
 
   await writeAuditLog(database, {
     actorId: operatorId,
@@ -289,7 +311,9 @@ export async function rejectReviewFieldAsOperator(
 ): Promise<OperatorResolveResult> {
   const row = await fetchUnresolvedRow(database, input.reviewQueueId);
 
-  await database
+  // Claim with the optimistic `resolved_at IS NULL` guard; a concurrent
+  // resolve matches 0 rows → CONFLICT (no double audit/finalize).
+  const claimed = await database
     .update(ExtractionReviewQueue)
     .set({
       resolvedAt: new Date(),
@@ -301,7 +325,11 @@ export async function rejectReviewFieldAsOperator(
         eq(ExtractionReviewQueue.id, row.id),
         isNull(ExtractionReviewQueue.resolvedAt),
       ),
-    );
+    )
+    .returning({ id: ExtractionReviewQueue.id });
+  if (claimed.length === 0) {
+    throw new TRPCError({ code: "CONFLICT", message: "ALREADY_RESOLVED" });
+  }
 
   await writeAuditLog(database, {
     actorId: operatorId,

@@ -272,4 +272,25 @@ claude-opus-4-8 (BMad bmad-create-story + bmad-dev-story workflows)
 - `apps/web/src/app/operador/fila/[uploadId]/page.tsx` (mount OperatorFieldActions)
 - `CLAUDE.md` (Story 8.2 operator-write stanza)
 
-**NO `apps/expo` changes; NO `supabase/migrations/*.sql`** (Story 8.3).
+**NO `apps/expo` changes; NO `supabase/migrations/*.sql`** (Story 8.3 migration).
+
+## Senior Developer Review (AI)
+
+**Reviewed:** 2026-06-02 · **Outcome:** Changes Requested → Addressed · **Method:** 3-layer adversarial (Blind Hunter, Edge Case Hunter, Acceptance Auditor). The escalation/`finally`-reset security core was independently verified correct and well-tested by all three. Two HIGH correctness bugs converged across layers; both patched.
+
+### Action Items
+
+- [x] **HIGH — confirm path published the observation BEFORE the optimistic claim UPDATE, ignoring its rowcount → a double-confirm race wrote duplicate null-LOINC observations** (null-LOINC never dedups on the partial unique index). **Fix:** the guarded `resolved_at IS NULL` UPDATE now runs FIRST with `.returning()`; a 0-row claim throws `CONFLICT` and the resolver aborts before `writeObservation`. Same claim-first guard applied to reject. New test: "aborts WITHOUT publishing when the claim UPDATE loses the race". (`packages/api/src/operator-resolve.ts`)
+- [x] **HIGH — dead `transition.currentStatus === "complete"` branch in `finalizeUploadIfResolved`.** `applyUploadTransition` returns `currentStatus: null` on an optimistic-lock miss (verified `upload-transitions.ts:174`), so a concurrent finalizer's loser returned `pending_review` and skipped the completion notification. **Fix:** re-SELECT `uploads.status` on a transition miss to distinguish "already completed concurrently" from "still blocked" — mirrors the patient path. (`packages/api/src/operator-resolve.ts`)
+- [x] **LOW — Task 7.4 negative RLS test was missing from the diff.** Added an assertion that an operator INSERT into `extraction_review_queue` WITHOUT escalation is denied by RLS (proves no write policy leaked). (`packages/db/__tests__/rls/extraction-review-queue-operator.rls.test.ts`)
+
+### Dismissed (with rationale)
+
+- **AC8 "distinct singleton (uploadId, kind)" claim is imprecise** — the `writeAuditLogIfNew` dedup is keyed `(resource_id, event)` (event-only), so there is exactly ONE finalization notification per upload and its kind reflects the final committed rejected-count (computed after the claim+transition). The outcome is correct; only the AC's wording about the key was off. No code change.
+- **Greppable-copy: notification body hardcoded in the worker COPY map** — the worker hardcodes ALL kinds' titles/bodies; it's a separate service that does not import `@healthtracker/validators` notification copy. Sourcing only the new kind from validators would be inconsistent + dead. Matches the established pattern.
+- **`UNIT_UNRESOLVED` uses `PRECONDITION_FAILED` (spec said `BAD_REQUEST`)** — matches the patient-path precedent; kept for consistency.
+- **Notification preference asymmetry / no parsed-value preview / no-unit fields only rejectable** — intentional (reviewRequired is the right gate; preview + unit-entry are out of the epic's scope; reject is the escape hatch).
+
+### Post-patch gates
+
+`pnpm -w typecheck` 17/17 · `pnpm -w lint` 15/15 · `pnpm -w format` clean · api unit **395 pass** (incl. the new race test) · worker **62 pass**. DB-live items remain deferred to dev/CI.

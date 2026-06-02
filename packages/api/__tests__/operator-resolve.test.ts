@@ -47,10 +47,12 @@ const ROW = {
  * call (thenable builder → works for both `.limit()` and bare count
  * queries) and whose `.update()` resolves.
  */
-function makeDb(resultSets: unknown[][]) {
+function makeDb(resultSets: unknown[][], claimRows: unknown[] = [{ id: "r" }]) {
   const queue = [...resultSets];
   const update = vi.fn(() => ({
-    set: () => ({ where: () => Promise.resolve(undefined) }),
+    set: () => ({
+      where: () => ({ returning: () => Promise.resolve(claimRows) }),
+    }),
   }));
   const select = vi.fn(() => {
     const result = queue.shift() ?? [];
@@ -129,6 +131,18 @@ describe("confirmReviewFieldAsOperator", () => {
 
   it("throws CONFLICT when the row is already resolved", async () => {
     const db = makeDb([[{ ...ROW, resolvedAt: new Date() }]]);
+    await expect(
+      confirmReviewFieldAsOperator(db, OPERATOR_ID, {
+        reviewQueueId: REVIEW_ID,
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(writeObservation).not.toHaveBeenCalled();
+  });
+
+  it("aborts WITHOUT publishing when the claim UPDATE loses the race (0 rows)", async () => {
+    // Unresolved at fetch, but a concurrent confirm flips it first → the
+    // guarded claim UPDATE matches 0 rows. Must NOT publish a duplicate.
+    const db = makeDb([[ROW]], []);
     await expect(
       confirmReviewFieldAsOperator(db, OPERATOR_ID, {
         reviewQueueId: REVIEW_ID,

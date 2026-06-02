@@ -150,6 +150,25 @@ describe("extraction_review_queue operator RLS — Story 8.1 / 5-identity matrix
     expect(rows).toHaveLength(0);
   });
 
+  it("OPERATOR INSERT is denied without escalation (no operator write policy — Story 8.2)", async () => {
+    // Story 8.2 operator writes go through SET LOCAL ROLE postgres, NOT an
+    // RLS policy. Under the plain operator role an INSERT must be rejected
+    // by RLS (no INSERT policy) — proves no write policy leaked.
+    const { patientId } = await seedQueue();
+    const run = asIdentity("operator", { patientId });
+    await expect(
+      run(
+        (tx) => tx`
+          INSERT INTO extraction_review_queue
+            (patient_id, upload_id, biomarker_name, value_text,
+             confidence_score, reason)
+          VALUES (${patientId}::uuid, ${crypto.randomUUID()}::uuid,
+                  'X', '1', '0.5', 'loinc_unresolved')
+        `,
+      ),
+    ).rejects.toThrow();
+  });
+
   it("OPERATOR DELETE affects ZERO rows (no operator delete policy)", async () => {
     const { patientId } = await seedQueue();
     const run = asIdentity("operator", { patientId });
