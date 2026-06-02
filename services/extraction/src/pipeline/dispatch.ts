@@ -153,7 +153,7 @@ export async function dispatchExtractedFields(
           { id: string }[]
         >`INSERT INTO extraction_review_queue
           (patient_id, upload_id, biomarker_name, value_text, unit_text,
-           loinc_code, collected_at_text, confidence_score, reason)
+           loinc_code, collected_at_text, lab_name, confidence_score, reason)
           VALUES (
             ${input.patientId}::uuid,
             ${input.uploadId}::uuid,
@@ -162,6 +162,7 @@ export async function dispatchExtractedFields(
             ${normalizeWhitespace(field.unitText)},
             ${loinc?.loincCode ?? null},
             ${normalizeWhitespace(field.collectedAtText)},
+            ${normalizeWhitespace(field.labName)},
             ${String(effectiveConfidence)}::numeric,
             ${reason}::review_reason_enum
           )

@@ -169,13 +169,25 @@ The doctor/patient sharing surface is the security core. Durable invariants:
 - **HMAC domain separation is load-bearing.** `SHARE_TOKEN_HMAC_SECRET` is reused across surfaces with a domain prefix on the signing input — `signPatientInviteToken(raw) = HMAC(secret, "patient_invite:" + raw)`. This is what stops a `share_tokens.id` signature replaying as a `patient_invites.id` signature. Any refactor that drops the prefix is a vulnerability. Regression: `signShareToken(raw) !== signPatientInviteToken(raw)`.
 - **`pending_invites` (patient→doctor) and `patient_invites` (doctor→patient) are deliberate sibling tables, not one shared table** — opposite FK directions, different RLS principals, different lifecycles. The duplication is intentional (sharing one would force rewriting four RLS policies + a ShareLock-prone partial-index shift).
 
+## Operator role (Epic 8)
+
+The **operator** is the third RLS principal after patient and doctor — internal Health Tracker staff who triage the anonymised manual review queue. Durable invariants (Story 8.1):
+
+- **`operatorProcedure` binds `app.current_user_role = 'operator'`** (and `app.current_operator_id` for Story 8.2's audit `actor_id`). Provisioning is an **env allowlist** — `OPERATOR_USER_IDS` (comma-separated `auth.uid()`s), parsed per-request inside the middleware, NOT an `operators` table or a `users.role` column. Missing/empty is **fail-closed** (nobody is an operator), so it is deliberately **not** NFR-S6 boot-gated. An authenticated non-operator gets `FORBIDDEN` (not `UNAUTHORIZED`, not `PRECONDITION_FAILED` — there is nothing to "activate").
+- **The anonymisation boundary is RLS, never an app-layer column list (NFR-S7 / AR5).** The operator has **no** RLS policy on `users` or `uploads` and therefore reads **zero rows** of either (denial-by-RLS-absence). The operator reads **only** `extraction_review_queue`, which carries no name/email/contact data. `lab_name` is **denormalised onto `extraction_review_queue`** (Story 8.1) precisely so no `uploads` join — and thus no `uploads.original_filename` PII leak — is ever needed. The worker (`services/extraction/src/pipeline/dispatch.ts`) populates it at `loinc_unresolved` insert time. Locked by `extraction-review-queue-operator.rls.test.ts`.
+- **Review-reason split is load-bearing.** Operators SELECT `reason = 'loinc_unresolved'` rows ONLY; patients SELECT their own `reason = 'low_confidence'` rows ONLY (Story 2.4). The two SELECT policies are OR-combined on the shared table; neither widens the other. The operator RLS matrix asserts the operator sees `loinc_unresolved` and 0 rows of `low_confidence`/`users`/`uploads`, and that patients/doctors still see 0 `loinc_unresolved` rows.
+- **Story 8.1 is read-only — no audit, no mutation.** FR41 (audit of operator confirm/reject) and the operator WRITE policy land in Story 8.2. Operator-side events are NOT in `ACCESS_LOG_EVENT_KINDS`.
+- The operator dashboard is **web-only** (`/operador/*`, the first such subtree, sibling to `/profissional/*`): RSC + server-caller, pt-BR copy in `packages/validators/src/operator.ts`, `FORBIDDEN` → "Acesso restrito a operadores" card.
+
+**Epic 8.3 migration checklist (deferred SQL):** net-new column `extraction_review_queue.lab_name`; net-new RLS policy `extraction_review_queue_select_operator`. No table/enum for the role (env allowlist).
+
 ## FK cascade rule (LGPD account deletion)
 
 Every NEW FK to `users(id)` MUST use `onDelete: 'cascade'` or account deletion leaves orphan rows. Document any exception in this section alongside a regression test. Current exceptions:
 
 - `audit_log` — pseudonymize-only (append-only ledger, NFR-S4). Deletion UPDATEs `actor_id`/`resource_id` to a deterministic uuid from `sha256(patient_id || ACCOUNT_DELETION_SALT)` and regex-scrubs metadata. Salt rotation invalidates linkability across the boundary (accepted).
 - `account_deletion_requests.patient_id` — intentionally FK-less; the ledger row outlives the user.
-- `pending_invites.resolved_user_id` (Story 6.3) and `patient_invites.resolved_user_id` (Story 6.4) — `onDelete: 'set null'`. These rows encode the *other party's* authored intent/telemetry; a third party's account deletion must orphan the linkage, not delete the row. Locked by `*_resolved_user_id_fk.rls.test.ts`.
+- `pending_invites.resolved_user_id` (Story 6.3) and `patient_invites.resolved_user_id` (Story 6.4) — `onDelete: 'set null'`. These rows encode the _other party's_ authored intent/telemetry; a third party's account deletion must orphan the linkage, not delete the row. Locked by `*_resolved_user_id_fk.rls.test.ts`.
 
 When adding a patient-scoped Storage bucket, add it to `PATIENT_STORAGE_BUCKETS` in `services/llm/src/account-deletion.ts` (currently `lab_uploads`, `exports`) or it won't be cleaned at deletion.
 

@@ -12,6 +12,7 @@ export * from "./staleness";
 export * from "./life-events";
 export * from "./emotional-checkins";
 export * from "./voice-memos";
+export * from "./operator";
 
 /**
  * Story 2.4 — pt-BR copy + route constants for the upload detail

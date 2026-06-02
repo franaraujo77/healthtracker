@@ -10,6 +10,8 @@ export interface ReviewQueueEntryInsert {
   valueText: string;
   unitText?: string;
   loincCode?: string;
+  /** Story 8.1 — denormalised lab name; keeps the operator queue off `uploads`. */
+  labName?: string;
   confidenceScore: number;
   reason: "low_confidence" | "loinc_unresolved";
 }
@@ -51,6 +53,7 @@ export async function writeReviewQueueEntry(
       valueText: entry.valueText,
       unitText: entry.unitText ?? null,
       loincCode: entry.loincCode ?? null,
+      labName: entry.labName ?? null,
       confidenceScore: String(entry.confidenceScore),
       reason: entry.reason,
     })

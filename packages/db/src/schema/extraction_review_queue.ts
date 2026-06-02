@@ -13,8 +13,10 @@ import { Users } from "./users";
  * `reason = 'loinc_unresolved'` remains operator-only (Story 8.1).
  *
  * RLS: see `custom_rls_extraction_review_queue.sql`. Patients SELECT
- * + UPDATE their own `low_confidence` rows; service-role retains full
- * access; doctors / anon have no access.
+ * + UPDATE their own `low_confidence` rows; the Story 8.1 operator role
+ * SELECTs `loinc_unresolved` rows (anonymised — `lab_name` below removes
+ * the need to join `uploads`); service-role retains full access; doctors
+ * / anon have no access.
  */
 export const reviewReasonEnum = pgEnum("review_reason_enum", [
   "low_confidence",
@@ -36,6 +38,15 @@ export const ExtractionReviewQueue = pgTable(
     valueText: t.text().notNull(),
     unitText: t.text(),
     loincCode: t.text(),
+    /**
+     * Story 8.1 — denormalised lab name (from the field's source) so the
+     * operator review queue can render the lab without ever joining
+     * `uploads` (whose `original_filename` can carry patient PII). The
+     * operator RLS principal has zero read access to `uploads`/`users`;
+     * this column keeps the anonymisation boundary at the RLS layer.
+     * NULL for rows written before Story 8.1.
+     */
+    labName: t.text(),
     /**
      * Story 2.4 — the original `collected_at` text from the source
      * (the worker carries it through unparsed so the patient confirm

@@ -6,6 +6,7 @@ import { letterRouter } from "./router/letter";
 import { lifeEventsRouter } from "./router/life-events";
 import { notificationsRouter } from "./router/notifications";
 import { observationsRouter } from "./router/observations";
+import { operatorRouter } from "./router/operator";
 import { sharingRouter } from "./router/sharing";
 import { uploadsRouter } from "./router/uploads";
 import { voiceMemosRouter } from "./router/voice-memos";
@@ -20,6 +21,7 @@ export const appRouter = createTRPCRouter({
   lifeEvents: lifeEventsRouter,
   notifications: notificationsRouter,
   observations: observationsRouter,
+  operator: operatorRouter,
   sharing: sharingRouter,
   uploads: uploadsRouter,
   voiceMemos: voiceMemosRouter,

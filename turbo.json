@@ -84,7 +84,8 @@
     "EXPO_PUBLIC_LLM_SERVICE_URL",
     "SHARE_TOKEN_HMAC_SECRET",
     "WEB_APP_URL",
-    "ACCOUNT_DELETION_SALT"
+    "ACCOUNT_DELETION_SALT",
+    "OPERATOR_USER_IDS"
   ],
   "globalPassThroughEnv": [
     "NODE_ENV",
