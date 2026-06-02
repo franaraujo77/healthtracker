@@ -187,7 +187,7 @@ The **operator** is the third RLS principal after patient and doctor — interna
 - **Audit kinds `extraction_field.operator_confirmed`/`_rejected`** use `actorType: 'operator'` (free-text column, no enum change), `actorId` = operator uid (anonymised — a UUID, not a name). Deliberately NOT in `ACCESS_LOG_EVENT_KINDS` (regression-locked).
 - Letters are NOT enqueued on operator-finalized uploads (the operator lacks the patient's consent/session context) — documented limitation.
 
-**Epic 8.3 migration checklist (deferred SQL):** net-new column `extraction_review_queue.lab_name` (8.1); net-new RLS policy `extraction_review_queue_select_operator` (8.1); enum `rejection_reason_enum`, columns `extraction_review_queue.rejection_reason` + `.resolved_by_operator_id`, `observation_source_enum += 'operator_confirmed'` (8.2). No table/enum for the role (env allowlist).
+**Epic 8 migration (Story 8.3 — shipped):** `supabase/migrations/0010_epic_8_operator_review.sql` consolidates every net-new Epic 8 object: column `extraction_review_queue.lab_name` + RLS policy `extraction_review_queue_select_operator` (8.1); enum `rejection_reason_enum`, columns `extraction_review_queue.rejection_reason` + `.resolved_by_operator_id`, `observation_source_enum += 'operator_confirmed'` (8.2). No table/enum for the role (env allowlist); zero new indexes → no `migrations-postapply/` file (mirrors Epic 7). The `ALTER TYPE … ADD VALUE` is a strict-superset widening, safe non-`CONCURRENTLY`.
 
 ## FK cascade rule (LGPD account deletion)
 
