@@ -229,6 +229,91 @@ describe("handleDocumentJob — dead-letter (all fields < 0.01)", () => {
   });
 });
 
+describe("handleDocumentJob — extract() failure path (Story 9.3)", () => {
+  function rejectingAdapter(err: unknown): TextractAdapter {
+    return { extract: () => Promise.reject(err) };
+  }
+
+  it("dead-letters (no rethrow) on a PERMANENT extract() fault", async () => {
+    const sql = makeSql({
+      transitionRows: [
+        [{ id: UPLOAD_ID, status: "processing" }], // queued → processing
+        [{ id: UPLOAD_ID, status: "failed" }], // dead-letter UPDATE
+      ],
+      loinc: {},
+    });
+    // A plain Error (4xx-style / mapping fault) is permanent → caught,
+    // dead-lettered, failed push fired, NO rethrow. If the catch were
+    // absent this would reject.
+    await expect(
+      handleDocumentJob(
+        {
+          sql,
+          textractAdapter: rejectingAdapter(
+            Object.assign(new Error("InvalidParameterException"), {
+              name: "InvalidParameterException",
+              $metadata: { httpStatusCode: 400 },
+            }),
+          ),
+          downloadStorageObject: mockDownload,
+        },
+        jobPayload(),
+      ),
+    ).resolves.toBeUndefined();
+    // Positively prove the dead-letter path ran (not just "didn't throw"):
+    // emitNotificationEvent writes a notification audit row, and the
+    // metadata carries the new reason.
+    const auditCall = (
+      sql as unknown as { mock: { calls: unknown[][] } }
+    ).mock.calls.find(
+      ([strings]) =>
+        Array.isArray(strings) &&
+        strings.join("?").toLowerCase().includes("insert into audit_log"),
+    );
+    expect(auditCall).toBeDefined();
+    expect(JSON.stringify(auditCall)).toContain("extraction_unavailable");
+  });
+
+  it("re-throws a PROGRAMMER error (TypeError) so pg-boss surfaces it", async () => {
+    const sql = makeSql({
+      transitionRows: [[{ id: UPLOAD_ID, status: "processing" }]],
+      loinc: {},
+    });
+    await expect(
+      handleDocumentJob(
+        {
+          sql,
+          textractAdapter: rejectingAdapter(new TypeError("cannot read X")),
+          downloadStorageObject: mockDownload,
+        },
+        jobPayload(),
+      ),
+    ).rejects.toThrow(/cannot read X/);
+  });
+
+  it("re-throws a TRANSIENT Textract error so pg-boss retries", async () => {
+    const sql = makeSql({
+      transitionRows: [[{ id: UPLOAD_ID, status: "processing" }]],
+      loinc: {},
+    });
+    await expect(
+      handleDocumentJob(
+        {
+          sql,
+          textractAdapter: rejectingAdapter(
+            Object.assign(new Error("throttled"), {
+              name: "ThrottlingException",
+              $retryable: { throttling: true },
+            }),
+          ),
+          downloadStorageObject: mockDownload,
+        },
+        jobPayload(),
+      ),
+    ).rejects.toThrow(/throttled/);
+  });
+});
+
 describe("handleDocumentJob — optimistic-lock miss (R1-P95 + R2-P114)", () => {
   it("R2-P114: throws (so pg-boss retries) when queued→processing misses AND status is missing/null", async () => {
     const sql = makeSql({
