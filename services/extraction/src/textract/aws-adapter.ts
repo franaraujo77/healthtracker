@@ -4,6 +4,7 @@ import {
 } from "@aws-sdk/client-textract";
 
 import type { TextractAdapter } from "./adapter.js";
+import { assertAwsTextractConfig } from "./aws-config.js";
 import { mapAnalyzeDocumentResponse } from "./aws-mapping.js";
 
 /**
@@ -20,12 +21,12 @@ import { mapAnalyzeDocumentResponse } from "./aws-mapping.js";
  *     ≤10 MB. Multi-page lab PDFs need async `StartDocumentAnalysis` + S3
  *     polling — a follow-up story, out of scope for 9.1. (`storagePath`
  *     is kept in the contract for that future async path.)
- *   - Credentials + region are NOT yet boot-gated here. This adapter
- *     reads `AWS_REGION` (default `sa-east-1`) and uses the default SDK
- *     credential chain. **Story 9.2 adds the fail-loud boot gate + the
- *     hard `sa-east-1` pin.** Until then a misconfigured
- *     `EXTRACTION_ADAPTER=aws` deploy throws at first dispatch — the same
- *     blast radius as the previous stub (acceptable until 9.2).
+ *   - Region + credential presence are gated at worker BOOT (Story 9.2,
+ *     `assertAwsTextractConfig` in `index.ts`), so a misconfigured deploy
+ *     crashes loud rather than dead-lettering uploads. `getClient()` below
+ *     re-resolves the pinned `sa-east-1` region from the same gate (single
+ *     source of truth). The default SDK credential chain supplies the
+ *     DPA-signed credentials.
  *   - `extract()` does NOT catch Textract failures; throws propagate to
  *     the consumer's existing retry/dead-letter path. **Story 9.3** wraps
  *     that call site to dead-letter cleanly with a patient-visible reason.
@@ -34,12 +35,10 @@ import { mapAnalyzeDocumentResponse } from "./aws-mapping.js";
 let client: TextractClient | undefined;
 
 function getClient(): TextractClient {
-  // Lazy + memoised so importing the module has no side effect and the
-  // region is read once. Story 9.2 replaces this with a boot-gated,
-  // region-pinned constructor.
-  client ??= new TextractClient({
-    region: process.env.AWS_REGION ?? "sa-east-1",
-  });
+  // Lazy + memoised so importing the module has no side effect. The region
+  // comes from the boot gate (Story 9.2) — pinned to sa-east-1; the worker
+  // would already have crashed at boot if it were misconfigured.
+  client ??= new TextractClient({ region: assertAwsTextractConfig().region });
   return client;
 }
 
