@@ -22,7 +22,9 @@ export type NotificationKind =
   | "complete"
   | "pending_review"
   | "failed"
-  | "letter_ready";
+  | "letter_ready"
+  // Story 8.2 — operator finalized an upload with ≥1 rejected field.
+  | "manual_entry_required";
 
 interface NotificationSendPayload {
   uploadId: string;
@@ -83,6 +85,12 @@ const COPY: Record<NotificationKind, (upload: UploadRow) => NotificationCopy> =
     letter_ready: () => ({
       title: "Sua carta está pronta",
       body: "Sua nova carta personalizada chegou. Toque para abrir.",
+    }),
+    // Story 8.2 — operator finalized an upload with ≥1 rejected field;
+    // the patient needs to enter those value(s) manually.
+    manual_entry_required: (u) => ({
+      title: "Alguns valores precisam ser inseridos manualmente",
+      body: bodyForUpload(u),
     }),
   };
 
@@ -210,6 +218,8 @@ export async function isPreferenceMuted(
     case "failed":
       return row.results_ready === false;
     case "pending_review":
+    case "manual_entry_required":
+      // Story 8.2 — manual-entry prompts are review-required work.
       return row.review_required === false;
     case "letter_ready":
       // Story 4.1 — folded into `letters_ready`. Independent toggle

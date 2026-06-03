@@ -23,7 +23,13 @@ export type IdentityType =
   // Story 5.2 — doctor principal bound to a token whose `expires_at`
   // is NULL (the "Sem prazo" branch). MUST SELECT successfully under
   // the updated `(IS NULL OR > now())` RLS predicate.
-  | "doctorWithNoExpiryToken";
+  | "doctorWithNoExpiryToken"
+  // Story 8.1 — operator principal: binds `app.current_user_role =
+  // 'operator'` (and optionally `app.current_operator_id`). No
+  // patient/doctor GUC, so patient/doctor RLS predicates can't match —
+  // the operator only sees `extraction_review_queue` rows whose policy
+  // keys on the role GUC, and zero rows of `users` / `uploads`.
+  | "operator";
 
 export interface IdentityOptions {
   patientId: string;
@@ -39,6 +45,8 @@ export interface IdentityOptions {
    * `professionals` RLS policy (activation is `auth.uid()`-scoped).
    */
   doctorUserId?: string;
+  /** Story 8.1 — operator's Supabase uid, bound to `app.current_operator_id`. */
+  operatorId?: string;
 }
 
 function getDbUrl(): string {
@@ -197,6 +205,20 @@ async function applyClaims(
       if (opts.doctorUserId) {
         await setLocal(tx, "app.current_doctor_user_id", opts.doctorUserId);
       }
+      break;
+
+    // Story 8.1 — operator principal. Only the role GUC is bound (the
+    // operator `extraction_review_queue` SELECT policy keys on it);
+    // `app.current_operator_id` is bound for completeness / Story 8.2.
+    // NO patient/doctor GUC — that is exactly why the operator gets
+    // zero rows of `users`/`uploads` (denial-by-RLS-absence).
+    case "operator":
+      await setLocal(tx, "app.current_user_role", "operator");
+      await setLocal(
+        tx,
+        "app.current_operator_id",
+        opts.operatorId ?? crypto.randomUUID(),
+      );
       break;
   }
 }

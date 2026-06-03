@@ -37,6 +37,14 @@ export const env = createEnv({
             "SUPABASE_SERVICE_ROLE_KEY is required outside development/test (Story 1.5 / NFR-S6) — set it in the Vercel/Railway environment",
         },
       ),
+    // Story 8.1 — comma-separated Supabase auth.uid()s granted the Epic 8
+    // operator review-queue role (`operatorProcedure`). NOT boot-gated:
+    // unlike the service-role key, a missing/empty value is fail-CLOSED
+    // (nobody is an operator), which is safe — so it does not warrant a
+    // first-request hard fail. `operatorProcedure` reads `process.env`
+    // directly (packages/api must not import this file); declared here so
+    // the var is documented + validated as a string.
+    OPERATOR_USER_IDS: z.string().optional(),
   },
   client: {
     NEXT_PUBLIC_SUPABASE_URL: z.url(),

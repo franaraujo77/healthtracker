@@ -14,7 +14,10 @@ export type AuditDb = Database | Transaction;
 export interface AuditLogEntry {
   /** The `auth.uid()` of whoever performed the action. */
   actorId: string;
-  actorType: "patient" | "doctor" | "system";
+  // Story 8.2 — `"operator"` added for the operator confirm/reject audit
+  // (`extraction_field.operator_*`). `audit_log.actor_type` is free text,
+  // so no DB enum change. These events are NOT in ACCESS_LOG_EVENT_KINDS.
+  actorType: "patient" | "doctor" | "system" | "operator";
   /** Event name in `noun.verb` past-tense form, e.g. `patient.created`. */
   event: string;
   resourceId: string;

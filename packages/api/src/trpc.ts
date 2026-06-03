@@ -197,6 +197,73 @@ export const professionalSessionProcedure = t.procedure
     });
   });
 
+/**
+ * Story 8.1 — `operatorProcedure` (the third RLS principal, after the
+ * patient and doctor roles).
+ *
+ * Operators are internal Health Tracker staff who triage the anonymised
+ * manual review queue (`extraction_review_queue` rows with
+ * `reason = 'loinc_unresolved'`). Provisioning is an ENV ALLOWLIST —
+ * `OPERATOR_USER_IDS` (comma-separated Supabase `auth.uid()`s) — NOT an
+ * `operators` table or a `users.role` column (Story 8.1 decision: env
+ * allowlist is fail-closed and operators are not self-service).
+ *
+ * Gates, in order:
+ *   1. `ctx.session?.user` → else `UNAUTHORIZED` (not signed in at all).
+ *   2. `session.user.id ∈ OPERATOR_USER_IDS` → else `FORBIDDEN` (signed
+ *      in, but not staff). Deliberately NOT `UNAUTHORIZED` (the caller
+ *      IS authenticated) and NOT `PRECONDITION_FAILED` (there is nothing
+ *      to "activate" — contrast `professionalSessionProcedure`).
+ *
+ * Binds `app.current_user_role = 'operator'` (the operator
+ * `extraction_review_queue` SELECT policy keys off this) and
+ * `app.current_operator_id` (reserved for Story 8.2's confirm/reject
+ * audit `actor_id`). Story 8.1 itself is READ-ONLY — no audit, no
+ * mutation.
+ *
+ * The allowlist is parsed INSIDE the middleware (per-request read of
+ * `process.env`), not at module load — a deploy-time env change takes
+ * effect without a cold start, and tests can override it per-case.
+ * `process.env` is read directly here (as `trpc.ts` already does for
+ * `NODE_ENV`); `packages/api` must not import the web app's `env.ts`.
+ */
+export const operatorProcedure = t.procedure
+  .use(timingMiddleware)
+  .use(async ({ ctx, next }) => {
+    if (!ctx.session?.user) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: "OPERATOR_SESSION_REQUIRED",
+      });
+    }
+    const session = ctx.session;
+    const allowlist = new Set(
+      (process.env.OPERATOR_USER_IDS ?? "")
+        .split(",")
+        .map((id) => id.trim())
+        .filter(Boolean),
+    );
+    if (!allowlist.has(session.user.id)) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "NOT_AN_OPERATOR" });
+    }
+    return ctx.db.transaction(async (tx) => {
+      // See protectedProcedure above for why `set_config` is used here
+      // instead of `SET LOCAL = ${value}`.
+      await tx.execute(
+        sql`SELECT set_config('app.current_user_role', ${"operator"}, true)`,
+      );
+      await tx.execute(
+        sql`SELECT set_config('app.current_operator_id', ${session.user.id}, true)`,
+      );
+      return next({
+        ctx: {
+          session: { ...session, user: session.user },
+          db: tx,
+        },
+      });
+    });
+  });
+
 export const doctorProcedure = t.procedure
   .use(timingMiddleware)
   .use(async ({ ctx, next }) => {

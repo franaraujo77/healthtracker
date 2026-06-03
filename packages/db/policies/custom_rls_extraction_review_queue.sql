@@ -10,9 +10,29 @@
 --   - NO INSERT, NO DELETE at the patient layer — the worker writes,
 --     nobody deletes.
 --
--- `loinc_unresolved` rows remain INVISIBLE to patients (the policy
--- predicate filters them out). Story 8.1 will add the operator-role
--- SELECT policy against an anonymized view (architecture.md L29).
+-- `loinc_unresolved` rows remain INVISIBLE to patients (the patient
+-- policy predicate filters them out).
+--
+-- Operator layer (Story 8.1):
+--   - SELECT `loinc_unresolved` rows ONLY, gated on the
+--     `app.current_user_role = 'operator'` GUC bound by
+--     `operatorProcedure`. NOTHING else — no UPDATE/INSERT/DELETE
+--     (the confirm/reject write policy lands in Story 8.2).
+--   - Story 8.2 (confirm/reject) adds NO operator UPDATE/INSERT policy
+--     here or on `observations`/`uploads`. The operator WRITE path
+--     escalates to `SET LOCAL ROLE postgres` inside the
+--     `operatorProcedure` transaction (see `operator-resolve.ts`),
+--     paired with `SET LOCAL ROLE NONE` in a `finally`. The
+--     `OPERATOR_USER_IDS` allowlist gate is the trust boundary; RLS
+--     stays read-only for the operator role.
+--   - The operator NEVER gets a policy on `users` or `uploads`; the
+--     review queue is anonymised because the operator can only read
+--     this table, and this table carries no name/email/contact data
+--     (`lab_name` is denormalised here precisely so no `uploads` join
+--     — and thus no `uploads.original_filename` PII leak — is needed).
+--     The anonymisation boundary is RLS, not an app-layer column list
+--     (AR5 / NFR-S7). Locked by
+--     `extraction-review-queue-operator.rls.test.ts`.
 --
 -- Service-role bypasses RLS — that's what the worker uses.
 --
@@ -42,6 +62,22 @@ CREATE POLICY "extraction_review_queue_update_own_low_confidence"
   WITH CHECK (
     patient_id::text = current_setting('app.current_patient_id', true)
     AND reason = 'low_confidence'
+  );
+
+-- Story 8.1 — operator SELECT policy. RLS policies are OR-combined, so
+-- this widens read to the operator role for `loinc_unresolved` rows
+-- WITHOUT touching the patient's `low_confidence`-only scope above.
+-- The operator connects as the `authenticated` Postgres role (the
+-- table-level GRANT SELECT below already covers it); the GUC predicate
+-- is what restricts the rows.
+DROP POLICY IF EXISTS "extraction_review_queue_select_operator"
+  ON "extraction_review_queue";
+CREATE POLICY "extraction_review_queue_select_operator"
+  ON "extraction_review_queue"
+  FOR SELECT
+  USING (
+    current_setting('app.current_user_role', true) = 'operator'
+    AND reason = 'loinc_unresolved'
   );
 
 -- Column-level GRANT: the `authenticated` role (patient-facing) can

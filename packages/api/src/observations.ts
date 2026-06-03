@@ -50,7 +50,11 @@ export interface ObservationInsert {
   labName?: string;
   collectedAt: Date;
   confidenceScore: number;
-  source: "extracted" | "manual_bia" | "patient_corrected";
+  source:
+    | "extracted"
+    | "manual_bia"
+    | "patient_corrected"
+    | "operator_confirmed";
 }
 
 /**

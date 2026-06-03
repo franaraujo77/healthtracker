@@ -3,7 +3,10 @@ import type postgres from "postgres";
 
 import type { ExtractDocumentPayload, JobPayload } from "@healthtracker/types";
 
-import type { TextractAdapter } from "../textract/adapter.js";
+import type {
+  RawExtractedField,
+  TextractAdapter,
+} from "../textract/adapter.js";
 import { emitNotificationEvent } from "../notifications/emit.js";
 import { emitLetterQueued } from "../notifications/letters-emit.js";
 import { dispatchExtractedFields } from "../pipeline/dispatch.js";
@@ -11,6 +14,10 @@ import {
   applyDeadLetter,
   applyUploadTransition,
 } from "../state-machine/upload-transitions.js";
+import {
+  isProgrammerError,
+  isTransientTextractError,
+} from "../textract/aws-errors.js";
 
 /**
  * Story 2.3 — `extraction.document` consumer.
@@ -157,11 +164,57 @@ export async function handleDocumentJob(
     return;
   }
 
-  const fields = await deps.textractAdapter.extract({
-    bytes,
-    mimeType,
-    storagePath,
-  });
+  // Story 9.3 — wrap extract() so a PERMANENT fault dead-letters cleanly
+  // (with a patient-visible `failed` push) instead of looping to the
+  // pg-boss retry limit. Narrow catch (CLAUDE.md discipline):
+  //   - programmer error (TypeError/etc.) → re-throw (surface the bug)
+  //   - transient (throttle/5xx/timeout)  → re-throw (let pg-boss retry;
+  //                                          it dead-letters after exhaustion)
+  //   - everything else (4xx, mapping, unknown) → permanent → dead-letter.
+  // Mirrors the storage-download catch above (R1-P150 single-tx invariant).
+  let fields: RawExtractedField[];
+  try {
+    fields = await deps.textractAdapter.extract({
+      bytes,
+      mimeType,
+      storagePath,
+    });
+  } catch (err) {
+    if (isProgrammerError(err)) throw err;
+    if (isTransientTextractError(err)) {
+      console.warn(
+        `[extraction.document] uploadId=${uploadId}: transient Textract error; letting pg-boss retry`,
+        err,
+      );
+      throw err;
+    }
+    console.error(
+      `[extraction.document] uploadId=${uploadId}: permanent extraction failure; dead-lettering upload`,
+      err,
+    );
+    await deps.sql.begin(async (tx) => {
+      const dl = await applyDeadLetter(tx, {
+        uploadId,
+        metadata: {
+          reason: "extraction_unavailable",
+          error: err instanceof Error ? err.message : String(err),
+        },
+      });
+      if (!dl.updated) {
+        console.warn(
+          `[extraction.document] uploadId=${uploadId}: dead-letter no-op (row already terminal)`,
+        );
+        return;
+      }
+      await emitNotificationEvent(tx, {
+        uploadId,
+        patientId,
+        kind: "failed",
+        metadata: { reason: "extraction_unavailable" },
+      });
+    });
+    return;
+  }
 
   // R2-P113 + R1-P109 — atomic per-upload: dispatch + audit emission
   // + terminal UPDATE all run in one transaction. Mid-batch error →

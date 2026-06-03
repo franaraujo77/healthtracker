@@ -1,29 +1,55 @@
+import {
+  AnalyzeDocumentCommand,
+  TextractClient,
+} from "@aws-sdk/client-textract";
+
 import type { TextractAdapter } from "./adapter.js";
+import { assertAwsTextractConfig } from "./aws-config.js";
+import { mapAnalyzeDocumentResponse } from "./aws-mapping.js";
 
 /**
- * Story 2.3 — STUB. Real AWS Textract SDK integration is a follow-up
- * story (architecture mandates a CI mock anyway per NFR-S8 +
- * architecture.md L84; live integration is a runtime-only concern).
+ * Story 9.1 — production AWS Textract adapter.
  *
- * Flipping `EXTRACTION_ADAPTER=aws` in production WILL throw
- * `NOT_IMPLEMENTED` at first job dispatch. This is intentional — a
- * misconfigured deploy must fail loud, not silently no-op.
+ * Calls Textract `AnalyzeDocument` with `FeatureTypes: ['FORMS','TABLES']`
+ * on the in-memory document bytes and maps the response into
+ * `RawExtractedField[]` via the pure `mapAnalyzeDocumentResponse` (which
+ * carries all the heuristics + is unit-tested against recorded fixtures —
+ * no live AWS in CI, NFR-S8).
  *
- * Follow-up story will:
- *   1. Add `@aws-sdk/client-textract` as a dep.
- *   2. Implement `AnalyzeDocument` with `FeatureTypes: ['FORMS', 'TABLES']`.
- *   3. Map the Textract response into `RawExtractedField[]`.
- *   4. Configure the SDK for `sa-east-1` (NFR-S8 data residency).
- *   5. Wire a DPA-signed credentials path (LGPD Art. 33).
+ * Limitations (documented):
+ *   - Synchronous `AnalyzeDocument` with `Bytes` is single-page (PDF) and
+ *     ≤10 MB. Multi-page lab PDFs need async `StartDocumentAnalysis` + S3
+ *     polling — a follow-up story, out of scope for 9.1. (`storagePath`
+ *     is kept in the contract for that future async path.)
+ *   - Region + credential presence are gated at worker BOOT (Story 9.2,
+ *     `assertAwsTextractConfig` in `index.ts`), so a misconfigured deploy
+ *     crashes loud rather than dead-lettering uploads. `getClient()` below
+ *     re-resolves the pinned `sa-east-1` region from the same gate (single
+ *     source of truth). The default SDK credential chain supplies the
+ *     DPA-signed credentials.
+ *   - `extract()` does NOT catch Textract failures; throws propagate to
+ *     the consumer's existing retry/dead-letter path. **Story 9.3** wraps
+ *     that call site to dead-letter cleanly with a patient-visible reason.
  */
+
+let client: TextractClient | undefined;
+
+function getClient(): TextractClient {
+  // Lazy + memoised so importing the module has no side effect. The region
+  // comes from the boot gate (Story 9.2) — pinned to sa-east-1; the worker
+  // would already have crashed at boot if it were misconfigured.
+  client ??= new TextractClient({ region: assertAwsTextractConfig().region });
+  return client;
+}
+
 export const awsTextractAdapter: TextractAdapter = {
-  extract() {
-    return Promise.reject(
-      new Error(
-        "[awsTextractAdapter] NOT_IMPLEMENTED — Story 2.3 ships only the mock adapter. " +
-          "Real AWS Textract integration is a follow-up story; do not enable " +
-          "`EXTRACTION_ADAPTER=aws` in production until that ships.",
-      ),
+  async extract({ bytes }) {
+    const response = await getClient().send(
+      new AnalyzeDocumentCommand({
+        Document: { Bytes: bytes },
+        FeatureTypes: ["FORMS", "TABLES"],
+      }),
     );
+    return mapAnalyzeDocumentResponse(response);
   },
 };

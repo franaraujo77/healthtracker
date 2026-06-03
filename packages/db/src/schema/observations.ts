@@ -7,9 +7,10 @@ import { Users } from "./users";
  * Story 2.3 — `observations` schema (replaces the Story 1.5-era stub).
  *
  * Stores LOINC-normalized biomarker measurements per patient. Rows
- * originate from one of three sources (Story 2.3 ships `'extracted'`
+ * originate from one of four sources (Story 2.3 ships `'extracted'`
  * only; Story 2.4 adds `'patient_corrected'`; Story 2.7 adds
- * `'manual_bia'`).
+ * `'manual_bia'`; Story 8.2 adds `'operator_confirmed'` — an operator
+ * blessed a `loinc_unresolved` field, so `loinc_code` stays NULL).
  *
  * Append-only at the patient layer:
  *   - SELECT own (RLS, custom_rls_observations.sql)
@@ -25,6 +26,7 @@ export const observationSourceEnum = pgEnum("observation_source_enum", [
   "extracted",
   "manual_bia",
   "patient_corrected",
+  "operator_confirmed",
 ]);
 
 export const Observations = pgTable(

@@ -13,6 +13,7 @@ import { registerSmokeTestConsumer } from "./consumers/smoke-test.js";
 import { sql } from "./db.js";
 import { markUploadFailed } from "./state-machine/upload-transitions.js";
 import { awsTextractAdapter } from "./textract/aws-adapter.js";
+import { assertAwsTextractConfig } from "./textract/aws-config.js";
 import { mockTextractAdapterFromFixtures } from "./textract/mock-adapter.js";
 
 // Story 2.3 — adapter selection by env var. Default `mock` in
@@ -49,6 +50,13 @@ if (EXTRACTION_ADAPTER === "mock") {
       "handler will mark each upload as failed via markUploadFailed. Register " +
       "fixtures or set EXTRACTION_ADAPTER=aws if you mean to use real Textract.",
   );
+}
+// Story 9.2 — fail-loud AWS config gate. When `aws` is selected, validate
+// the region pin (sa-east-1) + credential presence at BOOT (NFR-S6/NFR-S8),
+// so a misconfigured deploy crashes here instead of dead-lettering every
+// upload at first dispatch. Mirrors the Supabase gate below. Mock is untouched.
+if (EXTRACTION_ADAPTER === "aws") {
+  assertAwsTextractConfig();
 }
 const textractAdapter: TextractAdapter =
   EXTRACTION_ADAPTER === "aws"

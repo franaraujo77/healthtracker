@@ -15,7 +15,14 @@ import type { AuditDb } from "./audit";
  * Expo Push API.
  */
 
-export type NotificationKind = "complete" | "pending_review" | "failed";
+// Story 8.2 — `manual_entry_required` fires when an operator finalizes an
+// upload that had ≥1 rejected field; tells the patient to enter the
+// rejected value(s) manually. Gated on the `reviewRequired` preference.
+export type NotificationKind =
+  | "complete"
+  | "pending_review"
+  | "failed"
+  | "manual_entry_required";
 
 const NOTIFICATION_SEND_RETRY_LIMIT = 5;
 const NOTIFICATION_SEND_RETRY_DELAY = 30;
