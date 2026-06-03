@@ -33,7 +33,7 @@ catalog:
   typescript: ^5.9.3
   zod: ^4.4.3
   vite: 8.0.14
-  vitest: ^3.2.0
+  vitest: ^4.1.0
   "@sentry/nextjs": ^10.55.0
   "@sentry/react-native": ^8.11.1
 
