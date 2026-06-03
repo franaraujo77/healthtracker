@@ -169,17 +169,23 @@ describe("extraction_review_queue operator RLS — Story 8.1 / 5-identity matrix
     ).rejects.toThrow();
   });
 
-  it("OPERATOR DELETE affects ZERO rows (no operator delete policy)", async () => {
+  it("OPERATOR DELETE is denied (no delete grant — REVOKE ALL stripped it)", async () => {
+    // The operator connects as the `authenticated` role, which the policy
+    // file REVOKEs ALL from then re-grants only SELECT + UPDATE(3 cols).
+    // With no DELETE grant, a DELETE is rejected at the GRANT layer (42501)
+    // before RLS row-filtering even runs — a stronger guarantee than
+    // "filtered to zero rows". Mirrors the INSERT denial above.
     const { patientId } = await seedQueue();
     const run = asIdentity("operator", { patientId });
-    const rows = await run(
-      (tx) => tx<{ id: string }[]>`
-        DELETE FROM extraction_review_queue
-        WHERE reason = 'loinc_unresolved'
-        RETURNING id
-      `,
-    );
-    expect(rows).toHaveLength(0);
+    await expect(
+      run(
+        (tx) => tx`
+          DELETE FROM extraction_review_queue
+          WHERE reason = 'loinc_unresolved'
+          RETURNING id
+        `,
+      ),
+    ).rejects.toThrow();
   });
 
   it("OWNING_PATIENT sees own low_confidence row", async () => {
