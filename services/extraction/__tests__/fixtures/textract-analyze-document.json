@@ -1,0 +1,411 @@
+{
+  "$comment": "Story 9.1 — hand-authored synthetic Textract AnalyzeDocument response (FORMS + TABLES). NO real patient data (NFR-S8: no live AWS in CI). Drives aws-mapping.test.ts field-by-field. Covers: document-context FORMS pairs (collection date + lab name, stamped onto every field), a FORMS biomarker pair (Hemoglobina), two TABLE blocks (multi-table), and one low-confidence field (Vitamina D, Confidence 62 -> 0.62 < gate).",
+  "DocumentMetadata": { "Pages": 1 },
+  "Blocks": [
+    {
+      "Id": "page-1",
+      "BlockType": "PAGE",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": [
+            "kvs-key-date",
+            "kvs-val-date",
+            "kvs-key-lab",
+            "kvs-val-lab",
+            "kvs-key-1",
+            "kvs-val-1",
+            "table-1",
+            "table-2"
+          ]
+        }
+      ]
+    },
+
+    {
+      "Id": "kvs-key-date",
+      "BlockType": "KEY_VALUE_SET",
+      "EntityTypes": ["KEY"],
+      "Confidence": 99.5,
+      "Relationships": [
+        { "Type": "CHILD", "Ids": ["w-key-date"] },
+        { "Type": "VALUE", "Ids": ["kvs-val-date"] }
+      ]
+    },
+    {
+      "Id": "w-key-date",
+      "BlockType": "WORD",
+      "Text": "Data da Coleta",
+      "Confidence": 99.5
+    },
+    {
+      "Id": "kvs-val-date",
+      "BlockType": "KEY_VALUE_SET",
+      "EntityTypes": ["VALUE"],
+      "Confidence": 99.0,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-val-date"] }]
+    },
+    {
+      "Id": "w-val-date",
+      "BlockType": "WORD",
+      "Text": "15/03/2024",
+      "Confidence": 99.0
+    },
+
+    {
+      "Id": "kvs-key-lab",
+      "BlockType": "KEY_VALUE_SET",
+      "EntityTypes": ["KEY"],
+      "Confidence": 99.4,
+      "Relationships": [
+        { "Type": "CHILD", "Ids": ["w-key-lab"] },
+        { "Type": "VALUE", "Ids": ["kvs-val-lab"] }
+      ]
+    },
+    {
+      "Id": "w-key-lab",
+      "BlockType": "WORD",
+      "Text": "Laboratório",
+      "Confidence": 99.4
+    },
+    {
+      "Id": "kvs-val-lab",
+      "BlockType": "KEY_VALUE_SET",
+      "EntityTypes": ["VALUE"],
+      "Confidence": 99.2,
+      "Relationships": [
+        { "Type": "CHILD", "Ids": ["w-val-lab-1", "w-val-lab-2"] }
+      ]
+    },
+    {
+      "Id": "w-val-lab-1",
+      "BlockType": "WORD",
+      "Text": "Laboratório",
+      "Confidence": 99.2
+    },
+    {
+      "Id": "w-val-lab-2",
+      "BlockType": "WORD",
+      "Text": "Vida",
+      "Confidence": 99.2
+    },
+
+    {
+      "Id": "kvs-key-1",
+      "BlockType": "KEY_VALUE_SET",
+      "EntityTypes": ["KEY"],
+      "Confidence": 99.1,
+      "Relationships": [
+        { "Type": "CHILD", "Ids": ["w-key-hb"] },
+        { "Type": "VALUE", "Ids": ["kvs-val-1"] }
+      ]
+    },
+    {
+      "Id": "w-key-hb",
+      "BlockType": "WORD",
+      "Text": "Hemoglobina",
+      "Confidence": 99.1
+    },
+    {
+      "Id": "kvs-val-1",
+      "BlockType": "KEY_VALUE_SET",
+      "EntityTypes": ["VALUE"],
+      "Confidence": 90.0,
+      "Relationships": [
+        { "Type": "CHILD", "Ids": ["w-val-hb-num", "w-val-hb-unit"] }
+      ]
+    },
+    {
+      "Id": "w-val-hb-num",
+      "BlockType": "WORD",
+      "Text": "14,2",
+      "Confidence": 90.0
+    },
+    {
+      "Id": "w-val-hb-unit",
+      "BlockType": "WORD",
+      "Text": "g/dL",
+      "Confidence": 90.0
+    },
+
+    {
+      "Id": "table-1",
+      "BlockType": "TABLE",
+      "Confidence": 96.0,
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": [
+            "t1-r1c1",
+            "t1-r1c2",
+            "t1-r1c3",
+            "t1-r2c1",
+            "t1-r2c2",
+            "t1-r2c3",
+            "t1-r3c1",
+            "t1-r3c2",
+            "t1-r3c3"
+          ]
+        }
+      ]
+    },
+    {
+      "Id": "t1-r1c1",
+      "BlockType": "CELL",
+      "RowIndex": 1,
+      "ColumnIndex": 1,
+      "Confidence": 98.0,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-t1-h1"] }]
+    },
+    {
+      "Id": "w-t1-h1",
+      "BlockType": "WORD",
+      "Text": "Exame",
+      "Confidence": 98.0
+    },
+    {
+      "Id": "t1-r1c2",
+      "BlockType": "CELL",
+      "RowIndex": 1,
+      "ColumnIndex": 2,
+      "Confidence": 98.0,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-t1-h2"] }]
+    },
+    {
+      "Id": "w-t1-h2",
+      "BlockType": "WORD",
+      "Text": "Resultado",
+      "Confidence": 98.0
+    },
+    {
+      "Id": "t1-r1c3",
+      "BlockType": "CELL",
+      "RowIndex": 1,
+      "ColumnIndex": 3,
+      "Confidence": 98.0,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-t1-h3"] }]
+    },
+    {
+      "Id": "w-t1-h3",
+      "BlockType": "WORD",
+      "Text": "Unidade",
+      "Confidence": 98.0
+    },
+
+    {
+      "Id": "t1-r2c1",
+      "BlockType": "CELL",
+      "RowIndex": 2,
+      "ColumnIndex": 1,
+      "Confidence": 95.0,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-t1-21"] }]
+    },
+    {
+      "Id": "w-t1-21",
+      "BlockType": "WORD",
+      "Text": "Glicose",
+      "Confidence": 95.0
+    },
+    {
+      "Id": "t1-r2c2",
+      "BlockType": "CELL",
+      "RowIndex": 2,
+      "ColumnIndex": 2,
+      "Confidence": 95.0,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-t1-22"] }]
+    },
+    { "Id": "w-t1-22", "BlockType": "WORD", "Text": "99", "Confidence": 95.0 },
+    {
+      "Id": "t1-r2c3",
+      "BlockType": "CELL",
+      "RowIndex": 2,
+      "ColumnIndex": 3,
+      "Confidence": 95.0,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-t1-23"] }]
+    },
+    {
+      "Id": "w-t1-23",
+      "BlockType": "WORD",
+      "Text": "mg/dL",
+      "Confidence": 95.0
+    },
+
+    {
+      "Id": "t1-r3c1",
+      "BlockType": "CELL",
+      "RowIndex": 3,
+      "ColumnIndex": 1,
+      "Confidence": 88.0,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-t1-31"] }]
+    },
+    {
+      "Id": "w-t1-31",
+      "BlockType": "WORD",
+      "Text": "Colesterol",
+      "Confidence": 88.0
+    },
+    {
+      "Id": "t1-r3c2",
+      "BlockType": "CELL",
+      "RowIndex": 3,
+      "ColumnIndex": 2,
+      "Confidence": 88.0,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-t1-32"] }]
+    },
+    { "Id": "w-t1-32", "BlockType": "WORD", "Text": "180", "Confidence": 88.0 },
+    {
+      "Id": "t1-r3c3",
+      "BlockType": "CELL",
+      "RowIndex": 3,
+      "ColumnIndex": 3,
+      "Confidence": 88.0,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-t1-33"] }]
+    },
+    {
+      "Id": "w-t1-33",
+      "BlockType": "WORD",
+      "Text": "mg/dL",
+      "Confidence": 88.0
+    },
+
+    {
+      "Id": "table-2",
+      "BlockType": "TABLE",
+      "Confidence": 92.0,
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": [
+            "t2-r1c1",
+            "t2-r1c2",
+            "t2-r1c3",
+            "t2-r2c1",
+            "t2-r2c2",
+            "t2-r2c3",
+            "t2-r3c1",
+            "t2-r3c2",
+            "t2-r3c3"
+          ]
+        }
+      ]
+    },
+    {
+      "Id": "t2-r1c1",
+      "BlockType": "CELL",
+      "RowIndex": 1,
+      "ColumnIndex": 1,
+      "Confidence": 97.0,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-t2-h1"] }]
+    },
+    {
+      "Id": "w-t2-h1",
+      "BlockType": "WORD",
+      "Text": "Exame",
+      "Confidence": 97.0
+    },
+    {
+      "Id": "t2-r1c2",
+      "BlockType": "CELL",
+      "RowIndex": 1,
+      "ColumnIndex": 2,
+      "Confidence": 97.0,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-t2-h2"] }]
+    },
+    {
+      "Id": "w-t2-h2",
+      "BlockType": "WORD",
+      "Text": "Resultado",
+      "Confidence": 97.0
+    },
+    {
+      "Id": "t2-r1c3",
+      "BlockType": "CELL",
+      "RowIndex": 1,
+      "ColumnIndex": 3,
+      "Confidence": 97.0,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-t2-h3"] }]
+    },
+    {
+      "Id": "w-t2-h3",
+      "BlockType": "WORD",
+      "Text": "Unidade",
+      "Confidence": 97.0
+    },
+
+    {
+      "Id": "t2-r2c1",
+      "BlockType": "CELL",
+      "RowIndex": 2,
+      "ColumnIndex": 1,
+      "Confidence": 91.0,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-t2-21"] }]
+    },
+    { "Id": "w-t2-21", "BlockType": "WORD", "Text": "TSH", "Confidence": 91.0 },
+    {
+      "Id": "t2-r2c2",
+      "BlockType": "CELL",
+      "RowIndex": 2,
+      "ColumnIndex": 2,
+      "Confidence": 91.0,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-t2-22"] }]
+    },
+    { "Id": "w-t2-22", "BlockType": "WORD", "Text": "2,5", "Confidence": 91.0 },
+    {
+      "Id": "t2-r2c3",
+      "BlockType": "CELL",
+      "RowIndex": 2,
+      "ColumnIndex": 3,
+      "Confidence": 91.0,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-t2-23"] }]
+    },
+    {
+      "Id": "w-t2-23",
+      "BlockType": "WORD",
+      "Text": "uUI/mL",
+      "Confidence": 91.0
+    },
+
+    {
+      "Id": "t2-r3c1",
+      "BlockType": "CELL",
+      "RowIndex": 3,
+      "ColumnIndex": 1,
+      "Confidence": 62.0,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-t2-31"] }]
+    },
+    {
+      "Id": "w-t2-31",
+      "BlockType": "WORD",
+      "Text": "Vitamina D",
+      "Confidence": 62.0
+    },
+    {
+      "Id": "t2-r3c2",
+      "BlockType": "CELL",
+      "RowIndex": 3,
+      "ColumnIndex": 2,
+      "Confidence": 62.0,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-t2-32"] }]
+    },
+    {
+      "Id": "w-t2-32",
+      "BlockType": "WORD",
+      "Text": "22,0",
+      "Confidence": 62.0
+    },
+    {
+      "Id": "t2-r3c3",
+      "BlockType": "CELL",
+      "RowIndex": 3,
+      "ColumnIndex": 3,
+      "Confidence": 62.0,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-t2-33"] }]
+    },
+    {
+      "Id": "w-t2-33",
+      "BlockType": "WORD",
+      "Text": "ng/mL",
+      "Confidence": 62.0
+    }
+  ]
+}

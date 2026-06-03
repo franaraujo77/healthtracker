@@ -14,6 +14,7 @@
     "test:unit": "vitest run"
   },
   "dependencies": {
+    "@aws-sdk/client-textract": "^3.1059.0",
     "@healthtracker/types": "workspace:*",
     "@supabase/supabase-js": "catalog:",
     "pg-boss": "12.18.2",

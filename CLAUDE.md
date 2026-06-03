@@ -189,6 +189,14 @@ The **operator** is the third RLS principal after patient and doctor — interna
 
 **Epic 8 migration (Story 8.3 — shipped):** `supabase/migrations/0010_epic_8_operator_review.sql` consolidates every net-new Epic 8 object: column `extraction_review_queue.lab_name` + RLS policy `extraction_review_queue_select_operator` (8.1); enum `rejection_reason_enum`, columns `extraction_review_queue.rejection_reason` + `.resolved_by_operator_id`, `observation_source_enum += 'operator_confirmed'` (8.2). No table/enum for the role (env allowlist); zero new indexes → no `migrations-postapply/` file (mirrors Epic 7). The `ALTER TYPE … ADD VALUE` is a strict-superset widening, safe non-`CONCURRENTLY`.
 
+## Extraction backend (Epic 9)
+
+The extraction worker (`services/extraction`) picks its Textract adapter via `EXTRACTION_ADAPTER` (`src/index.ts`): `mock` (default — `mockTextractAdapterFromFixtures`, the **CI/dev** adapter; NFR-S8 forbids live AWS in CI) vs `aws` (production).
+
+- **`awsTextractAdapter` (Story 9.1) is implemented** — `extract()` calls Textract `AnalyzeDocument` with `FeatureTypes: ['FORMS','TABLES']` and delegates ALL mapping to the **pure** `services/extraction/src/textract/aws-mapping.ts` (`mapAnalyzeDocumentResponse`). The adapter file is a thin SDK wrapper; the mapping (block-graph traversal + FORMS/TABLES heuristics) is the only non-trivial logic and is unit-tested field-by-field against a recorded JSON fixture (`__tests__/fixtures/textract-analyze-document.json`) — no live AWS call in any test.
+- **Adapter contract is RAW strings.** `RawExtractedField.valueText` keeps the Brazilian decimal comma; parsing/LOINC/UCUM/date normalisation stay in `dispatchExtractedFields`. Textract `Confidence` (0–100) is normalised to `[0,1]` (`clamp01(c/100)`) so the `< 0.85` gate (`CONFIDENCE_GATE_THRESHOLD`, `pipeline/dispatch.ts`) routes low-confidence fields to review.
+- **Deferred to later Epic 9 stories:** the fail-loud AWS creds/region (`sa-east-1`) boot gate + DPA docs (9.2 — 9.1 reads `AWS_REGION` defaulting to `sa-east-1` with the default credential chain, no boot gate yet); the `consumers/document.ts` `extract()` failure-path catch/dead-letter (9.3); stub-era `failed` re-enqueue (9.4). Sync `AnalyzeDocument` `Bytes` is single-page / ≤10 MB; multi-page async `StartDocumentAnalysis` is a future story.
+
 ## FK cascade rule (LGPD account deletion)
 
 Every NEW FK to `users(id)` MUST use `onDelete: 'cascade'` or account deletion leaves orphan rows. Document any exception in this section alongside a regression test. Current exceptions:
