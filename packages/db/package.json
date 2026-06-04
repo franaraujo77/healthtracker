@@ -45,7 +45,7 @@
     "@healthtracker/tsconfig": "workspace:*",
     "@healthtracker/validators": "workspace:*",
     "@supabase/supabase-js": "catalog:",
-    "@testcontainers/postgresql": "^12.0.0",
+    "@testcontainers/postgresql": "^12.0.1",
     "@types/node": "catalog:",
     "@vitest/coverage-v8": "catalog:",
     "drizzle-kit": "^0.31.10",
