@@ -74,6 +74,28 @@ export async function startIntegrationDb(): Promise<IntegrationDb> {
 
   const sql = postgres(url, { max: 4 });
 
+  // Bootstrap the Supabase-provided roles the policy files REVOKE/GRANT
+  // against. A bare `postgres:16-alpine` container has none of these (they
+  // are created by Supabase's local stack / `supabase start`), so applying
+  // any `custom_rls_*.sql` that references `anon` / `authenticated` /
+  // `service_role` fails with `role "anon" does not exist`. Creating them
+  // as NOLOGIN roles (service_role BYPASSRLS, matching Supabase) is enough
+  // for the GRANT/REVOKE statements to succeed. `postgres` already exists
+  // as the container superuser.
+  await sql.unsafe(`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+        CREATE ROLE anon NOLOGIN NOINHERIT;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+        CREATE ROLE authenticated NOLOGIN NOINHERIT;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+        CREATE ROLE service_role NOLOGIN NOINHERIT BYPASSRLS;
+      END IF;
+    END $$;
+  `);
+
   // Apply RLS / Storage policy files (`custom_*.sql`) in the same C-locale
   // glob order CI uses (.github/workflows/ci.yml "Apply custom RLS +
   // Storage policies" step). Without this, the testcontainer lacks any
