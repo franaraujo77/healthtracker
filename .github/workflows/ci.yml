@@ -71,6 +71,25 @@ jobs:
       - name: Test
         run: pnpm test
 
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup
+        uses: ./tooling/github/setup
+
+      - name: Copy env
+        shell: bash
+        run: cp .env.example .env
+
+      # Testcontainers spins an ephemeral Postgres per suite (Docker is
+      # preinstalled on ubuntu-latest). The db package's globalSetup only
+      # rewires DOCKER_HOST for local Rancher/colima/OrbStack sockets, so
+      # it no-ops here and the default /var/run/docker.sock is used.
+      - name: Integration tests (testcontainers)
+        run: pnpm --filter @healthtracker/db test:integration
+
   drizzle-check:
     runs-on: ubuntu-latest
     steps:
