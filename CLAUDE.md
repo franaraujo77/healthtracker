@@ -47,10 +47,12 @@ pnpm db:studio     # open Drizzle Studio UI
 ```bash
 pnpm --filter @healthtracker/db test:unit         # pure-logic, no DB
 pnpm --filter @healthtracker/db test:rls          # requires `supabase start`
-pnpm --filter @healthtracker/db test:integration  # requires Docker (testcontainers)
+pnpm --filter @healthtracker/db test:integration  # needs a container runtime
 ```
 
 `test:integration` launches an ephemeral Postgres 16 container per suite via `@testcontainers/postgresql`, applies the Drizzle schema with `drizzle-kit push --force`, and runs `__tests__/integration/**/*.integration.test.ts`. Use it for cases mocks can't reach — partial-index WHERE clauses, JSONB ops, ON CONFLICT semantics, raw-SQL drift between worker and API. See `packages/db/__tests__/integration/setup.ts`.
+
+**Local container runtime:** the suite auto-detects **Rancher Desktop** (the team's provider), colima, and OrbStack via `vitest.integration.config.ts`'s `globalSetup` — it points `DOCKER_HOST` at the runtime's socket and disables the Ryuk reaper (unreliable on those backends), so `test:integration` runs with no manual env. Docker Desktop / CI (which set `DOCKER_HOST` or expose `/var/run/docker.sock`) are unaffected. The setup also bootstraps the Supabase roles (`anon`/`authenticated`/`service_role`) the `custom_rls_*.sql` policy files GRANT/REVOKE against — a bare `postgres` container has none. (Historically the suite was un-runnable locally on Rancher; this closes that Epic 6 retro action item.)
 
 ### Migration discipline
 
