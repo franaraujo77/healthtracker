@@ -22,6 +22,9 @@ describe("observations partial unique indexes — F162", () => {
 
   beforeAll(async () => {
     db = await startIntegrationDb();
+    // Seed the patient row the observations FK (Story 5.6:
+    // observations.patient_id → users.id) requires.
+    await db.sql`INSERT INTO users (id) VALUES (${PATIENT_A}::uuid)`;
   }, 120_000);
 
   afterAll(async () => {

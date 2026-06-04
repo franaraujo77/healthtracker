@@ -34,6 +34,9 @@ describe("observations record SELECT — Story 3.1", () => {
 
   beforeAll(async () => {
     db = await startIntegrationDb();
+    // Seed the patient rows the observations FK (Story 5.6:
+    // observations.patient_id → users.id) requires.
+    await db.sql`INSERT INTO users (id) VALUES (${PATIENT_A}::uuid), (${PATIENT_B}::uuid)`;
   }, 120_000);
 
   afterAll(async () => {

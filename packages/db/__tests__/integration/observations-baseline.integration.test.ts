@@ -61,6 +61,9 @@ describe("observations baseline aggregate — Story 3.3", () => {
 
   beforeAll(async () => {
     db = await startIntegrationDb();
+    // Seed the patient rows the observations FK (Story 5.6:
+    // observations.patient_id → users.id) requires.
+    await db.sql`INSERT INTO users (id) VALUES (${PATIENT_A}::uuid), (${PATIENT_B}::uuid)`;
   }, 120_000);
 
   afterAll(async () => {
@@ -197,32 +200,49 @@ describe("observations baseline aggregate — Story 3.3", () => {
       const N = isFullScale ? 10_000_000 : 100_000;
       const p95Budget = isFullScale ? 500 : 50;
 
-      // Seed N rows for patient A with 5 distinct biomarkers, dates
-      // distributed across a 5-year window. Use generate_series for
-      // a fast server-side insert.
-      await db.sql`TRUNCATE observations`;
-      await db.sql.unsafe(
-        `
-        INSERT INTO observations
-          (patient_id, upload_id, loinc_code, biomarker_name,
+      // Seed an at-scale, MULTI-PATIENT table: ~N rows spread across many
+      // patients, with PATIENT_A as a small slice. This mirrors production
+      // (many patients) so `patient_id = PATIENT_A` is selective and the
+      // planner uses `observations_patient_collected_idx` — a single-patient
+      // table makes that filter match 100% of rows, so Postgres rationally
+      // Seq Scans and the plan-shape guard below would (correctly) fail.
+      //
+      // Unique upload_id per row avoids colliding on
+      // observations_patient_upload_loinc_date_unique (patient, upload,
+      // loinc, date); upload_id isn't FK'd and the aggregate groups by
+      // (loinc, unit), so randomising it is safe.
+      const NOISE_PATIENTS = 200;
+      const noiseRowsPerPatient = Math.ceil(N / NOISE_PATIENTS);
+      const A_ROWS = 1_000; // PATIENT_A's selective slice (>=2 per biomarker)
+      const ARRAYS = `(SELECT ARRAY['2276-4','718-7','1989-3','2093-3','2085-9'] AS loinc_codes,
+                  ARRAY['Ferritina','Hemoglobina','Vitamina D','Colesterol','HDL'] AS biomarker_names) names`;
+      const ROW_COLS = `(patient_id, upload_id, loinc_code, biomarker_name,
            value_numeric, unit_ucum, lab_name, collected_at,
-           confidence_score, source)
-        SELECT
-          $1::uuid,
-          $2::uuid,
-          loinc_codes[1 + (g % 5)],
-          biomarker_names[1 + (g % 5)],
-          (90 + random() * 20)::numeric(10,4)::text,
-          'ng/mL',
-          'Fleury',
+           confidence_score, source)`;
+      const ROW_SELECT = `loinc_codes[1 + (g % 5)], biomarker_names[1 + (g % 5)],
+          (90 + random() * 20)::numeric(10, 4), 'ng/mL', 'Fleury',
           (DATE '2020-01-01' + ((g % 1825) || ' days')::interval)::date,
-          '0.95',
-          'extracted'
-        FROM generate_series(1, $3) g,
-          (SELECT ARRAY['2276-4','718-7','1989-3','2093-3','2085-9'] AS loinc_codes,
-                  ARRAY['Ferritina','Hemoglobina','Vitamina D','Colesterol','HDL'] AS biomarker_names) names
-      `,
-        [PATIENT_A, UPLOAD_1, N],
+          '0.95', 'extracted'`;
+      await db.sql`TRUNCATE observations`;
+      // Noise patients (FK targets for the bulk rows).
+      await db.sql.unsafe(
+        `INSERT INTO users (id) SELECT gen_random_uuid() FROM generate_series(1, $1)`,
+        [NOISE_PATIENTS],
+      );
+      // Bulk noise rows distributed across the noise patients.
+      await db.sql.unsafe(
+        `INSERT INTO observations ${ROW_COLS}
+         SELECT u.id, gen_random_uuid(), ${ROW_SELECT}
+         FROM (SELECT id FROM users WHERE id <> $1::uuid AND id <> $2::uuid) u,
+              generate_series(1, $3) g, ${ARRAYS}`,
+        [PATIENT_A, PATIENT_B, noiseRowsPerPatient],
+      );
+      // PATIENT_A's small slice — the aggregate subject.
+      await db.sql.unsafe(
+        `INSERT INTO observations ${ROW_COLS}
+         SELECT $1::uuid, gen_random_uuid(), ${ROW_SELECT}
+         FROM generate_series(1, $2) g, ${ARRAYS}`,
+        [PATIENT_A, A_ROWS],
       );
       await db.sql`ANALYZE observations`;
 

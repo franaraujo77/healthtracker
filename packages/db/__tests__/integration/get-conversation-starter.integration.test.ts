@@ -58,7 +58,7 @@ async function seedTokenWithCache(
   db: IntegrationDb,
   args: {
     status: "queued" | "ready" | "failed";
-    payloadJson?: string;
+    payload?: Parameters<IntegrationDb["sql"]["json"]>[0];
     failureReason?: string | null;
   },
 ): Promise<{ tokenId: string; tokenHmac: string }> {
@@ -84,7 +84,7 @@ async function seedTokenWithCache(
       '7d'
     )
   `;
-  if (args.payloadJson === undefined) {
+  if (args.payload === undefined) {
     await db.sql`
       INSERT INTO conversation_starter_cache
         (id, share_token_id, patient_id, status, payload, failure_reason)
@@ -98,7 +98,10 @@ async function seedTokenWithCache(
       )
     `;
   } else {
-    // postgres' tag function casts strings via the explicit cast.
+    // Pass the OBJECT, not a pre-stringified JSON string: postgres-js
+    // JSON-serialises an object exactly once for the jsonb column. Passing
+    // `JSON.stringify(payload)` made it serialise the string AGAIN, storing
+    // a double-encoded JSON string scalar that read back as a string.
     await db.sql`
       INSERT INTO conversation_starter_cache
         (id, share_token_id, patient_id, status, payload, failure_reason)
@@ -107,7 +110,7 @@ async function seedTokenWithCache(
         ${tokenId}::uuid,
         ${PATIENT}::uuid,
         ${args.status},
-        ${args.payloadJson}::jsonb,
+        ${db.sql.json(args.payload)},
         ${args.failureReason ?? null}
       )
     `;
@@ -200,7 +203,7 @@ describe("getConversationStarter — testcontainer integration (R1-H2 / T8.3)", 
     };
     const { tokenId } = await seedTokenWithCache(db, {
       status: "ready",
-      payloadJson: JSON.stringify(payload),
+      payload,
     });
     const rows = await db.sql<
       { status: string; payload: unknown; failure_reason: string | null }[]
@@ -254,10 +257,7 @@ describe("getConversationStarter — testcontainer integration (R1-H2 / T8.3)", 
   it("markStarterViewed writes EXACTLY ONE share_token.read row with metadata.phase='post-auth'", async () => {
     const { tokenId } = await seedTokenWithCache(db, {
       status: "ready",
-      payloadJson: JSON.stringify({
-        prompts: [{ text: "x" }],
-        biomarkerCards: [],
-      }),
+      payload: { prompts: [{ text: "x" }], biomarkerCards: [] },
     });
     await writePostAuthAuditDirect(db, {
       doctorId: DOCTOR,
