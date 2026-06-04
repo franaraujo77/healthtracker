@@ -240,7 +240,7 @@ export const operatorProcedure = t.procedure
     const allowlist = new Set(
       (process.env.OPERATOR_USER_IDS ?? "")
         .split(",")
-        .map((id) => id.trim())
+        .map((id: string) => id.trim())
         .filter(Boolean),
     );
     if (!allowlist.has(session.user.id)) {
