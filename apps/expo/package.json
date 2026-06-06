@@ -62,7 +62,7 @@
     "react-native-worklets": "~0.5.1",
     "superjson": "2.2.6",
     "tamagui": "catalog:",
-    "victory-native": "^41.20.0"
+    "victory-native": "^41.25.0"
   },
   "devDependencies": {
     "@healthtracker/api": "workspace:*",
