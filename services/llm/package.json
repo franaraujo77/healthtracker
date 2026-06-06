@@ -14,7 +14,7 @@
     "test:unit": "vitest run"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.39.0",
+    "@anthropic-ai/sdk": "^0.102.0",
     "@healthtracker/types": "workspace:*",
     "@react-pdf/renderer": "^4.5.1",
     "@supabase/supabase-js": "catalog:",
