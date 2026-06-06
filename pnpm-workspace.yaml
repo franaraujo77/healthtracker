@@ -29,7 +29,7 @@ catalog:
   "@vitest/coverage-v8": ^4.1.0
   eslint: ^9.38.0
   prettier: ^3.8.3
-  tailwindcss: ^4.1.16
+  tailwindcss: ^4.3.0
   typescript: ^5.9.3
   zod: ^4.4.3
   vite: 8.0.14
