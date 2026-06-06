@@ -29,7 +29,7 @@
     "@tamagui/core": "catalog:",
     "@tanstack/query-async-storage-persister": "^5.90.8",
     "@tanstack/react-query": "catalog:",
-    "@tanstack/react-query-persist-client": "^5.100.14",
+    "@tanstack/react-query-persist-client": "^5.101.0",
     "@trpc/client": "catalog:",
     "@trpc/server": "catalog:",
     "@trpc/tanstack-react-query": "catalog:",
