@@ -18,7 +18,7 @@
     "@healthtracker/types": "workspace:*",
     "@react-pdf/renderer": "^4.5.1",
     "@supabase/supabase-js": "catalog:",
-    "fastify": "^5.2.0",
+    "fastify": "^5.12.1",
     "pg-boss": "12.18.2",
     "postgres": "catalog:",
     "react": "catalog:react19",
